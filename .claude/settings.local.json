@@ -1,0 +1,75 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(find:*)",
+      "Bash(CGO_ENABLED=0 go build -o /tmp/gitignore-test .)",
+      "Bash(env CGO_ENABLED=0 go build -o /tmp/gitignore-test .)",
+      "Read(//tmp/**)",
+      "Bash(chmod:*)",
+      "Bash(/tmp/gitignore-test:*)",
+      "Bash(./tests/test-docker.sh:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(sudo mkdir:*)",
+      "Bash(sudo chmod:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Read(//root/Projects/github/apimgr/**)",
+      "Bash(PORT=9876 timeout 3 /tmp/gitignore-final --config /tmp/tc --data /tmp/td --logs /tmp/tl --address 127.0.0.1)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "project": {
+    "name": "GitIgnore API Server",
+    "module": "github.com/apimgr/gitignore",
+    "language": "Go",
+    "version": "1.21+",
+    "description": "Comprehensive .gitignore template API with admin-protected server configuration"
+  },
+  "directories": {
+    "source": "./src",
+    "tests": "./tests",
+    "scripts": "./scripts",
+    "binaries": "./binaries",
+    "release": "./release",
+    "rootfs": "./rootfs"
+  },
+  "development": {
+    "build_tool": "docker",
+    "test_tool": "incus",
+    "workflow": "build → test → fix → repeat"
+  },
+  "architecture": {
+    "router": "Chi v5",
+    "database": "SQLite (default), MySQL, PostgreSQL",
+    "templates": "Go html/template",
+    "theme": "Dracula",
+    "embedding": "go:embed",
+    "authentication": "SHA-256 hashing, Bearer tokens, Basic Auth"
+  },
+  "features": {
+    "api_version": "v1",
+    "content_negotiation": true,
+    "swagger": true,
+    "graphql": true,
+    "cli_scripts": true,
+    "shell_completion": [
+      "bash",
+      "zsh",
+      "fish"
+    ],
+    "reverse_proxy_support": true,
+    "mobile_first": true
+  },
+  "defaults": {
+    "port_range": "64000-64999",
+    "admin_route": "/admin",
+    "api_prefix": "/api/v1",
+    "health_endpoint": "/healthz",
+    "static_path": "/static"
+  }
+}

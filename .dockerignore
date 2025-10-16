@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+binaries/
+release/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Docker/Incus volumes
+rootfs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+.env
+.env.local
+
+# Documentation (not needed in image)
+docs/
+TODO.md
+CLAUDE.md
+
+# Test files
+tests/
+*.test

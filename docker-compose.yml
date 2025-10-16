@@ -1,0 +1,110 @@
+# Production Docker Compose Configuration
+# Uses ./rootfs for persistent storage
+# External port: 172.17.0.1:64180:80 (Docker bridge network)
+
+services:
+  gitignore:
+    image: ghcr.io/apimgr/gitignore:latest
+    container_name: gitignore
+    restart: unless-stopped
+
+    environment:
+      - CONFIG_DIR=/config
+      - DATA_DIR=/data
+      - LOGS_DIR=/logs
+      - PORT=80
+      - ADDRESS=0.0.0.0
+      - DB_PATH=/data/db/gitignore.db
+      # Uncomment and set for first deployment
+      #- ADMIN_USER=administrator
+      #- ADMIN_PASSWORD=changeme
+      #- ADMIN_TOKEN=your-token-here
+
+    volumes:
+      - ./rootfs/config/gitignore:/config
+      - ./rootfs/data/gitignore:/data
+      - ./rootfs/logs/gitignore:/logs
+
+    ports:
+      - "172.17.0.1:64180:80"
+
+    networks:
+      - gitignore
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Optional: PostgreSQL database
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: gitignore-postgres
+  #   restart: unless-stopped
+  #
+  #   environment:
+  #     POSTGRES_DB: gitignore
+  #     POSTGRES_USER: gitignore
+  #     POSTGRES_PASSWORD: changeme
+  #
+  #   volumes:
+  #     - ./rootfs/db/postgres:/var/lib/postgresql/data
+  #
+  #   networks:
+  #     - gitignore
+  #
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U gitignore"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # Optional: MariaDB database
+  # mariadb:
+  #   image: mariadb:11-alpine
+  #   container_name: gitignore-mariadb
+  #   restart: unless-stopped
+  #
+  #   environment:
+  #     MYSQL_DATABASE: gitignore
+  #     MYSQL_USER: gitignore
+  #     MYSQL_PASSWORD: changeme
+  #     MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+  #
+  #   volumes:
+  #     - ./rootfs/db/mariadb:/var/lib/mysql
+  #
+  #   networks:
+  #     - gitignore
+  #
+  #   healthcheck:
+  #     test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # Optional: Redis cache
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: gitignore-redis
+  #   restart: unless-stopped
+  #
+  #   volumes:
+  #     - ./rootfs/db/redis:/data
+  #
+  #   networks:
+  #     - gitignore
+  #
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 3
+
+networks:
+  gitignore:
+    name: gitignore
+    external: false
+    driver: bridge

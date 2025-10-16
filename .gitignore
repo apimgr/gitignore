@@ -1,0 +1,65 @@
+# gitignore for GitIgnore API Server project
+# Generated on $(date)
+
+# Binaries and build artifacts
+binaries/
+release/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Docker/Incus volumes (local development)
+rootfs/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Config and data directories (local development)
+/etc/gitignore/
+/var/lib/gitignore/
+/var/log/gitignore/
+
+# Temporary files
+*.tmp
+*.log
+*.pid
+.env
+.env.local
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Development temporary files
+.build_failed*
+.no_push
+.no_git
+.installed
+*.rewrite.sh
+*.refactor.sh

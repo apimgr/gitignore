@@ -1,75 +1,69 @@
 {
+  "model": "sonnet[1m]",
   "permissions": {
     "allow": [
+      "Read(**)",
+      "Write(**)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(mkdir:*)",
       "Bash(tree:*)",
-      "Bash(go get:*)",
-      "Bash(go build:*)",
-      "Bash(find:*)",
-      "Bash(CGO_ENABLED=0 go build -o /tmp/gitignore-test .)",
-      "Bash(env CGO_ENABLED=0 go build -o /tmp/gitignore-test .)",
-      "Read(//tmp/**)",
-      "Bash(chmod:*)",
-      "Bash(/tmp/gitignore-test:*)",
-      "Bash(./tests/test-docker.sh:*)",
-      "Bash(docker:*)",
-      "Bash(docker compose:*)",
-      "Bash(sudo mkdir:*)",
-      "Bash(sudo chmod:*)",
+      "Bash(go:*)",
       "Bash(curl:*)",
-      "Bash(sqlite3:*)",
-      "Read(//root/Projects/github/apimgr/**)",
-      "Bash(PORT=9876 timeout 3 /tmp/gitignore-final --config /tmp/tc --data /tmp/td --logs /tmp/tl --address 127.0.0.1)"
+      "Bash(wget:*)",
+      "Bash(echo:*)",
+      "Bash(make:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(cat:*)",
+      "Bash(chmod:*)",
+      "Bash(chown:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(incus:*)",
+      "Bash(git:*)",
+      "Bash(pkill:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(ls:*)",
+      "Bash(pwd:*)",
+      "Bash(cd:*)",
+      "Bash(head:*)",
+      "Bash(timeout:*)",
+      "Bash(do:*)",
+      "Bash(ln:*)",
+      "Bash(test:*)",
+      "Bash(do)",
+      "Bash(sort:*)",
+      "Bash(paste:*)",
+      "Bash(*:*)"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(git commit:*)"
+    ],
     "ask": []
   },
-  "project": {
-    "name": "GitIgnore API Server",
-    "module": "github.com/apimgr/gitignore",
-    "language": "Go",
-    "version": "1.21+",
-    "description": "Comprehensive .gitignore template API with admin-protected server configuration"
+  "preferences": {
+    "auto_commit": false
   },
-  "directories": {
-    "source": "./src",
-    "tests": "./tests",
-    "scripts": "./scripts",
-    "binaries": "./binaries",
-    "release": "./release",
-    "rootfs": "./rootfs"
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write(**)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if grep -qi 'anthropic\\|claude' \"$file\" 2>/dev/null; then echo 'Error: File contains vendor names (Anthropic/Claude)' >&2; exit 1; fi"
+          }
+        ]
+      }
+    ]
   },
-  "development": {
-    "build_tool": "docker",
-    "test_tool": "incus",
-    "workflow": "build → test → fix → repeat"
-  },
-  "architecture": {
-    "router": "Chi v5",
-    "database": "SQLite (default), MySQL, PostgreSQL",
-    "templates": "Go html/template",
-    "theme": "Dracula",
-    "embedding": "go:embed",
-    "authentication": "SHA-256 hashing, Bearer tokens, Basic Auth"
-  },
-  "features": {
-    "api_version": "v1",
-    "content_negotiation": true,
-    "swagger": true,
-    "graphql": true,
-    "cli_scripts": true,
-    "shell_completion": [
-      "bash",
-      "zsh",
-      "fish"
-    ],
-    "reverse_proxy_support": true,
-    "mobile_first": true
-  },
-  "defaults": {
-    "port_range": "64000-64999",
-    "admin_route": "/admin",
-    "api_prefix": "/api/v1",
-    "health_endpoint": "/healthz",
-    "static_path": "/static"
+  "env": {
+    "MAX_THINKING_TOKENS": "1000"
   }
 }
+

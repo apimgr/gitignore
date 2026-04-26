@@ -1,106 +1,93 @@
-name: Docker
+name: Docker Build
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'Dockerfile'
-      - 'docker-compose*.yml'
-      - 'src/**'
+    branches: ['**']  # ALL branches
+    tags:
+      - 'v*'
+      - '*.*.*'
   workflow_dispatch:
 
+env:
+  PROJECT: gitignore
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
-  test:
-    name: Test Docker Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build test image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          target: development
-          push: false
-          tags: gitignore:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Test image
-        run: |
-          docker run --rm gitignore:test --version
-
-      - name: Start test container
-        run: |
-          docker run -d \
-            --name gitignore-test \
-            -p 8080:80 \
-            -e ADMIN_PASSWORD=testpass \
-            gitignore:test
-
-      - name: Wait for service
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/healthz | grep -q "healthy"; then
-              echo "Service is ready"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Service failed to start"
-          docker logs gitignore-test
-          exit 1
-
-      - name: Run API tests
-        run: |
-          # Test health endpoint
-          curl -s http://localhost:8080/healthz | grep "healthy"
-
-          # Test list endpoint
-          curl -s http://localhost:8080/api/v1/list | grep "Go"
-
-          # Test template endpoint
-          curl -s http://localhost:8080/api/v1/template/Go | grep "# Binaries"
-
-      - name: Show logs
-        if: always()
-        run: docker logs gitignore-test
-
-      - name: Stop container
-        if: always()
-        run: docker stop gitignore-test && docker rm gitignore-test
-
   build:
-    name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+      - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set build info
+        run: |
+          echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "YYMM=$(date +"%y%m")" >> $GITHUB_ENV
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "VERSION=${VERSION#v}" >> $GITHUB_ENV  # Strip 'v' prefix
+            echo "IS_TAG=true" >> $GITHUB_ENV
+          else
+            echo "VERSION=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+            echo "IS_TAG=false" >> $GITHUB_ENV
+          fi
+          echo "BUILD_DATE=$(date +"%a %b %d, %Y at %H:%M:%S %Z")" >> $GITHUB_ENV
+          echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Determine tags
+        id: tags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GIT_COMMIT }}"
+
+          if [[ "${{ env.IS_TAG }}" == "true" ]]; then
+            # Release tag - version, latest, YYMM
+            TAGS="$TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}"
+            TAGS="$TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            TAGS="$TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.YYMM }}"
+          else
+            # All pushes get devel tag
+            TAGS="$TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel"
+
+            # Beta branch also gets beta tag
+            if [[ "${{ github.ref }}" == refs/heads/beta ]]; then
+              TAGS="$TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:beta"
+            fi
+          fi
+
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          target: production
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/gitignore:latest
-            ${{ secrets.DOCKER_USERNAME }}/gitignore:main
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          file: ./docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION="${{ env.VERSION }}"
+            BUILD_DATE="${{ env.BUILD_DATE }}"
+            COMMIT_ID="${{ env.COMMIT_ID }}"
+          labels: |
+            org.opencontainers.image.title="${{ env.PROJECT }}"
+            org.opencontainers.image.version="${{ env.VERSION }}"
+            org.opencontainers.image.created="${{ env.BUILD_DATE }}"
+            org.opencontainers.image.revision="${{ env.COMMIT_ID }}"
+            org.opencontainers.image.source="${{ github.server_url }}/${{ github.repository }}"

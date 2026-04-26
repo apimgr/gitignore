@@ -7,194 +7,203 @@ import (
 	"runtime"
 )
 
-// PathManager handles OS-specific directory paths
-type PathManager struct {
-	configDir  string
-	dataDir    string
-	logsDir    string
-	runtimeDir string
+const (
+	// OrgName is the organization name for directory structure
+	OrgName = "apimgr"
+	// ProjectName is the project name
+	ProjectName = "gitignore"
+)
+
+// Directories holds the application directories
+type Directories struct {
+	Config string
+	Data   string
+	Logs   string
 }
 
-// New creates a new PathManager with OS-specific defaults
-func New() *PathManager {
-	pm := &PathManager{}
-	pm.detectDefaults()
-	return pm
+// GetDirectories returns OS-specific directories
+// Uses {org}/{name} structure: /etc/apimgr/gitignore/, ~/.config/apimgr/gitignore/
+func GetDirectories() Directories {
+	configDir, dataDir, logsDir := GetDefaultDirs(ProjectName)
+	return Directories{
+		Config: configDir,
+		Data:   dataDir,
+		Logs:   logsDir,
+	}
 }
 
-// detectDefaults detects OS-specific default directories
-func (pm *PathManager) detectDefaults() {
-	goos := runtime.GOOS
-	uid := os.Getuid()
-
-	// Check if running in Docker
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		pm.configDir = "/config"
-		pm.dataDir = "/data"
-		pm.logsDir = "/data/logs"
-		pm.runtimeDir = "/tmp"
-		return
+// GetDefaultDirs returns OS-specific default directories based on privileges
+// Uses {org}/{name} structure: /etc/apimgr/gitignore/, ~/.config/apimgr/gitignore/
+func GetDefaultDirs(projectName string) (configDir, dataDir, logsDir string) {
+	// Check if running in container
+	if IsRunningInContainer() {
+		return "/config", "/data", "/logs"
 	}
 
-	switch goos {
-	case "linux", "freebsd", "openbsd", "netbsd":
-		if uid == 0 {
-			// Root user
-			pm.configDir = "/etc/gitignore"
-			pm.dataDir = "/var/lib/gitignore"
-			pm.logsDir = "/var/log/gitignore"
-			pm.runtimeDir = "/run/gitignore"
+	// Check if running as root/admin
+	isRoot := false
+	if runtime.GOOS == "windows" {
+		isRoot = os.Getenv("USERDOMAIN") == os.Getenv("COMPUTERNAME")
+	} else {
+		isRoot = os.Geteuid() == 0
+	}
+
+	if isRoot {
+		switch runtime.GOOS {
+		case "windows":
+			programData := os.Getenv("ProgramData")
+			if programData == "" {
+				programData = "C:\\ProgramData"
+			}
+			configDir = filepath.Join(programData, OrgName, projectName)
+			dataDir = filepath.Join(programData, OrgName, projectName, "data")
+			logsDir = filepath.Join(programData, OrgName, projectName, "logs")
+		default: // Linux, BSD, macOS
+			configDir = filepath.Join("/etc", OrgName, projectName)
+			dataDir = filepath.Join("/var/lib", OrgName, projectName)
+			logsDir = filepath.Join("/var/log", OrgName, projectName)
+		}
+	} else {
+		var homeDir string
+		currentUser, err := user.Current()
+		if err == nil {
+			homeDir = currentUser.HomeDir
 		} else {
-			// Non-root user
-			homeDir := getHomeDir()
-			pm.configDir = filepath.Join(homeDir, ".config", "gitignore")
-			pm.dataDir = filepath.Join(homeDir, ".local", "share", "gitignore")
-			pm.logsDir = filepath.Join(homeDir, ".local", "state", "gitignore")
-			pm.runtimeDir = filepath.Join(homeDir, ".local", "run", "gitignore")
+			homeDir = os.Getenv("HOME")
+			if homeDir == "" {
+				homeDir = os.Getenv("USERPROFILE")
+			}
 		}
 
-	case "darwin":
-		if uid == 0 {
-			// Root/privileged user
-			pm.configDir = "/Library/Application Support/GitIgnore"
-			pm.dataDir = "/Library/Application Support/GitIgnore/data"
-			pm.logsDir = "/Library/Logs/GitIgnore"
-			pm.runtimeDir = "/var/run/gitignore"
-		} else {
-			// Non-privileged user
-			homeDir := getHomeDir()
-			pm.configDir = filepath.Join(homeDir, "Library", "Application Support", "GitIgnore")
-			pm.dataDir = filepath.Join(homeDir, "Library", "Application Support", "GitIgnore", "data")
-			pm.logsDir = filepath.Join(homeDir, "Library", "Logs", "GitIgnore")
-			pm.runtimeDir = filepath.Join(homeDir, "Library", "Application Support", "GitIgnore", "run")
+		switch runtime.GOOS {
+		case "windows":
+			appData := os.Getenv("APPDATA")
+			if appData == "" {
+				appData = filepath.Join(homeDir, "AppData", "Roaming")
+			}
+			localAppData := os.Getenv("LOCALAPPDATA")
+			if localAppData == "" {
+				localAppData = filepath.Join(homeDir, "AppData", "Local")
+			}
+			configDir = filepath.Join(appData, OrgName, projectName)
+			dataDir = filepath.Join(localAppData, OrgName, projectName)
+			logsDir = filepath.Join(localAppData, OrgName, projectName, "logs")
+		case "darwin":
+			configDir = filepath.Join(homeDir, ".config", OrgName, projectName)
+			dataDir = filepath.Join(homeDir, ".local", "share", OrgName, projectName)
+			logsDir = filepath.Join(homeDir, ".local", "share", OrgName, projectName, "logs")
+		default: // Linux, BSD
+			xdgConfig := os.Getenv("XDG_CONFIG_HOME")
+			if xdgConfig == "" {
+				xdgConfig = filepath.Join(homeDir, ".config")
+			}
+			xdgData := os.Getenv("XDG_DATA_HOME")
+			if xdgData == "" {
+				xdgData = filepath.Join(homeDir, ".local", "share")
+			}
+
+			configDir = filepath.Join(xdgConfig, OrgName, projectName)
+			dataDir = filepath.Join(xdgData, OrgName, projectName)
+			logsDir = filepath.Join(xdgData, OrgName, projectName, "logs")
 		}
-
-	case "windows":
-		programData := os.Getenv("PROGRAMDATA")
-		appData := os.Getenv("APPDATA")
-
-		if programData != "" && isAdmin() {
-			// System-wide installation
-			pm.configDir = filepath.Join(programData, "GitIgnore", "config")
-			pm.dataDir = filepath.Join(programData, "GitIgnore", "data")
-			pm.logsDir = filepath.Join(programData, "GitIgnore", "logs")
-			pm.runtimeDir = filepath.Join(programData, "GitIgnore", "run")
-		} else if appData != "" {
-			// User installation
-			pm.configDir = filepath.Join(appData, "GitIgnore", "config")
-			pm.dataDir = filepath.Join(appData, "GitIgnore", "data")
-			pm.logsDir = filepath.Join(appData, "GitIgnore", "logs")
-			pm.runtimeDir = filepath.Join(appData, "GitIgnore", "run")
-		} else {
-			// Fallback
-			homeDir := getHomeDir()
-			pm.configDir = filepath.Join(homeDir, "GitIgnore", "config")
-			pm.dataDir = filepath.Join(homeDir, "GitIgnore", "data")
-			pm.logsDir = filepath.Join(homeDir, "GitIgnore", "logs")
-			pm.runtimeDir = filepath.Join(homeDir, "GitIgnore", "run")
-		}
-
-	default:
-		// Fallback for unknown OS
-		homeDir := getHomeDir()
-		pm.configDir = filepath.Join(homeDir, ".gitignore", "config")
-		pm.dataDir = filepath.Join(homeDir, ".gitignore", "data")
-		pm.logsDir = filepath.Join(homeDir, ".gitignore", "logs")
-		pm.runtimeDir = filepath.Join(homeDir, ".gitignore", "run")
-	}
-}
-
-// getHomeDir returns the user's home directory
-func getHomeDir() string {
-	if home := os.Getenv("HOME"); home != "" {
-		return home
-	}
-	if user, err := user.Current(); err == nil {
-		return user.HomeDir
-	}
-	return "."
-}
-
-// isAdmin checks if running as administrator (Windows)
-func isAdmin() bool {
-	// Simple check - in production might want more sophisticated detection
-	return os.Getuid() == 0
-}
-
-// SetConfigDir overrides the config directory
-func (pm *PathManager) SetConfigDir(dir string) {
-	pm.configDir = dir
-}
-
-// SetDataDir overrides the data directory
-func (pm *PathManager) SetDataDir(dir string) {
-	pm.dataDir = dir
-}
-
-// SetLogsDir overrides the logs directory
-func (pm *PathManager) SetLogsDir(dir string) {
-	pm.logsDir = dir
-}
-
-// SetRuntimeDir overrides the runtime directory
-func (pm *PathManager) SetRuntimeDir(dir string) {
-	pm.runtimeDir = dir
-}
-
-// GetConfigDir returns the config directory
-func (pm *PathManager) GetConfigDir() string {
-	return pm.configDir
-}
-
-// GetDataDir returns the data directory
-func (pm *PathManager) GetDataDir() string {
-	return pm.dataDir
-}
-
-// GetLogsDir returns the logs directory
-func (pm *PathManager) GetLogsDir() string {
-	return pm.logsDir
-}
-
-// GetRuntimeDir returns the runtime directory
-func (pm *PathManager) GetRuntimeDir() string {
-	return pm.runtimeDir
-}
-
-// ConfigPath returns a path within the config directory
-func (pm *PathManager) ConfigPath(filename string) string {
-	return filepath.Join(pm.configDir, filename)
-}
-
-// DataPath returns a path within the data directory
-func (pm *PathManager) DataPath(filename string) string {
-	return filepath.Join(pm.dataDir, filename)
-}
-
-// LogsPath returns a path within the logs directory
-func (pm *PathManager) LogsPath(filename string) string {
-	return filepath.Join(pm.logsDir, filename)
-}
-
-// RuntimePath returns a path within the runtime directory
-func (pm *PathManager) RuntimePath(filename string) string {
-	return filepath.Join(pm.runtimeDir, filename)
-}
-
-// EnsureDirectories creates all necessary directories
-func (pm *PathManager) EnsureDirectories() error {
-	dirs := []string{
-		pm.configDir,
-		pm.dataDir,
-		pm.logsDir,
-		pm.runtimeDir,
 	}
 
-	for _, dir := range dirs {
+	return configDir, dataDir, logsDir
+}
+
+// EnsureDirectories creates all required directories
+func EnsureDirectories(dirs Directories) error {
+	for _, dir := range []string{dirs.Config, dirs.Data, dirs.Logs} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
 	}
-
 	return nil
+}
+
+// EnsureDir creates a directory if it doesn't exist
+func EnsureDir(path string) error {
+	return os.MkdirAll(path, 0755)
+}
+
+// IsRunningInContainer checks if running inside a container
+func IsRunningInContainer() bool {
+	// Check for Docker
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	// Check for common container init systems
+	data, err := os.ReadFile("/proc/1/comm")
+	if err != nil {
+		return false
+	}
+	comm := string(data)
+	return comm == "tini\n" || comm == "tini" || comm == "dumb-init\n"
+}
+
+// GetBackupDir returns the default backup directory
+func GetBackupDir() string {
+	return filepath.Join("/mnt/Backups", OrgName, ProjectName)
+}
+
+// PathManager provides compatibility with old interface
+type PathManager struct {
+	dirs Directories
+}
+
+// New creates a new PathManager with OS-specific defaults
+func New() *PathManager {
+	return &PathManager{
+		dirs: GetDirectories(),
+	}
+}
+
+// SetConfigDir overrides the config directory
+func (pm *PathManager) SetConfigDir(dir string) {
+	pm.dirs.Config = dir
+}
+
+// SetDataDir overrides the data directory
+func (pm *PathManager) SetDataDir(dir string) {
+	pm.dirs.Data = dir
+}
+
+// SetLogsDir overrides the logs directory
+func (pm *PathManager) SetLogsDir(dir string) {
+	pm.dirs.Logs = dir
+}
+
+// GetConfigDir returns the config directory
+func (pm *PathManager) GetConfigDir() string {
+	return pm.dirs.Config
+}
+
+// GetDataDir returns the data directory
+func (pm *PathManager) GetDataDir() string {
+	return pm.dirs.Data
+}
+
+// GetLogsDir returns the logs directory
+func (pm *PathManager) GetLogsDir() string {
+	return pm.dirs.Logs
+}
+
+// ConfigPath returns a path within the config directory
+func (pm *PathManager) ConfigPath(filename string) string {
+	return filepath.Join(pm.dirs.Config, filename)
+}
+
+// DataPath returns a path within the data directory
+func (pm *PathManager) DataPath(filename string) string {
+	return filepath.Join(pm.dirs.Data, filename)
+}
+
+// LogsPath returns a path within the logs directory
+func (pm *PathManager) LogsPath(filename string) string {
+	return filepath.Join(pm.dirs.Logs, filename)
+}
+
+// EnsureDirectories creates all necessary directories
+func (pm *PathManager) EnsureDirectories() error {
+	return EnsureDirectories(pm.dirs)
 }

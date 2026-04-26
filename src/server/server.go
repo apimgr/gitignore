@@ -10,7 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/apimgr/gitignore/src/database"
+	"github.com/apimgr/gitignore/src/admin"
+	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/paths"
 	"github.com/apimgr/gitignore/src/templates"
 	"github.com/go-chi/chi/v5"
@@ -20,22 +21,23 @@ import (
 
 // Config holds server configuration
 type Config struct {
-	Address     string
-	Port        int
-	DevMode     bool
-	Database    *database.Database
-	Templates   *templates.Manager
-	Paths       *paths.PathManager
-	Version     string
-	Commit      string
-	BuildDate   string
+	Address   string
+	Port      int
+	DevMode   bool
+	Templates *templates.Manager
+	Paths     *paths.PathManager
+	Version   string
+	Commit    string
+	BuildDate string
+	Cfg       *config.Config
 }
 
 // Server represents the HTTP server
 type Server struct {
-	config *Config
-	router *chi.Mux
-	server *http.Server
+	config       *Config
+	router       *chi.Mux
+	server       *http.Server
+	adminHandler *admin.Handler
 }
 
 // New creates a new server instance
@@ -44,6 +46,30 @@ func New(config *Config) *Server {
 		config: config,
 		router: chi.NewRouter(),
 	}
+
+	// Create admin handler
+	sessionTimeout := 3600
+	if config.Cfg != nil && config.Cfg.Server.Session.Timeout > 0 {
+		sessionTimeout = config.Cfg.Server.Session.Timeout
+	}
+	adminUsername := "admin"
+	adminPassword := ""
+	adminAPIToken := ""
+	if config.Cfg != nil {
+		adminUsername = config.Cfg.Server.Admin.Username
+		adminPassword = config.Cfg.Server.Admin.Password
+		adminAPIToken = config.Cfg.Server.Admin.APIToken
+	}
+	s.adminHandler = admin.NewHandler(
+		adminUsername,
+		adminPassword,
+		adminAPIToken,
+		sessionTimeout,
+		false, // SSL enabled
+		config.Version,
+		config.Commit,
+		config.BuildDate,
+	)
 
 	s.setupMiddleware()
 	s.setupRoutes()
@@ -74,24 +100,35 @@ func (s *Server) setupMiddleware() {
 	s.router.Use(middleware.Compress(5))
 
 	// CORS
+	corsOrigin := "*"
+	if s.config.Cfg != nil && s.config.Cfg.WebSecurity.CORS != "" {
+		corsOrigin = s.config.Cfg.WebSecurity.CORS
+	}
 	corsHandler := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: []string{corsOrigin},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
 		ExposedHeaders: []string{"Link"},
 		MaxAge:         300,
 	})
 	s.router.Use(corsHandler.Handler)
-
-	// Reverse proxy header detection
-	s.router.Use(s.reverseProxyMiddleware)
 }
 
 // setupRoutes configures all routes
 func (s *Server) setupRoutes() {
+	// Admin routes (session auth for web, bearer token for API)
+	s.adminHandler.RegisterRoutes(s.router)
+
 	// Public routes
 	s.router.Get("/", s.handleHome)
 	s.router.Get("/healthz", s.handleHealthz)
+
+	// Special files (PWA, robots, security)
+	s.router.Get("/robots.txt", s.handleRobotsTxt)
+	s.router.Get("/security.txt", s.handleSecurityTxt)
+	s.router.Get("/.well-known/security.txt", s.handleSecurityTxt)
+	s.router.Get("/manifest.json", s.handleManifest)
+	s.router.Get("/sw.js", s.handleServiceWorker)
 
 	// Search
 	s.router.Get("/search", s.handleSearchPage)
@@ -117,13 +154,19 @@ func (s *Server) setupRoutes() {
 	// CLI
 	s.router.Get("/cli", s.handleCLIPage)
 
-	// GraphiQL
+	// OpenAPI/Swagger (root level)
+	s.router.Get("/openapi", s.handleSwaggerUI)
+	s.router.Get("/openapi.json", s.handleOpenAPIJSON)
+	s.router.Get("/openapi.yaml", s.handleOpenAPIYAML)
+
+	// GraphQL (root level)
+	s.router.Get("/graphql", s.handleGraphiQLPage)
+	s.router.Post("/graphql", s.handleGraphQL)
 	s.router.Get("/graphiql", s.handleGraphiQLPage)
 
 	// Static files
 	s.router.Get("/static/*", s.handleStatic)
 	s.router.Get("/favicon.ico", s.handleFavicon)
-	s.router.Get("/robots.txt", s.handleRobotsTxt)
 
 	// API v1 routes
 	s.router.Route("/api/v1", func(r chi.Router) {
@@ -134,13 +177,20 @@ func (s *Server) setupRoutes() {
 
 		// Templates
 		r.Get("/template/{name}", s.handleAPITemplate)
+		r.Get("/template/{name}.txt", s.handleAPITemplateText)
 		r.Get("/template/{name}.json", s.handleAPITemplateJSON)
 		r.Get("/list", s.handleAPIList)
+		r.Get("/list.txt", s.handleAPIListText)
 		r.Get("/search", s.handleAPISearch)
+		r.Get("/search.txt", s.handleAPISearchText)
 		r.Get("/combine", s.handleAPICombine)
+		r.Get("/combine.txt", s.handleAPICombineText)
 		r.Get("/categories", s.handleAPICategories)
+		r.Get("/categories.txt", s.handleAPICategoriesText)
 		r.Get("/category/{name}", s.handleAPICategoryTemplates)
+		r.Get("/category/{name}.txt", s.handleAPICategoryTemplatesText)
 		r.Get("/stats", s.handleAPIStats)
+		r.Get("/stats.txt", s.handleAPIStatsText)
 
 		// Export
 		r.Get("/templates.json", s.handleAPITemplatesJSON)
@@ -161,49 +211,13 @@ func (s *Server) setupRoutes() {
 		r.Get("/cli/completion/bash", s.handleCLICompletionBash)
 		r.Get("/cli/completion/zsh", s.handleCLICompletionZsh)
 		r.Get("/cli/completion/fish", s.handleCLICompletionFish)
-
-		// Admin routes (protected)
-		r.Route("/admin", func(r chi.Router) {
-			r.Use(s.adminAuthMiddleware)
-
-			r.Get("/", s.handleAdminAPIInfo)
-			r.Get("/healthz", s.handleAdminHealthz)
-			r.Get("/settings", s.handleAdminGetSettings)
-			r.Put("/settings", s.handleAdminUpdateSettings)
-			r.Get("/database", s.handleAdminDatabaseStatus)
-			r.Post("/database/test", s.handleAdminDatabaseTest)
-			r.Get("/logs", s.handleAdminListLogs)
-			r.Get("/logs/{type}", s.handleAdminGetLog)
-			r.Get("/backup", s.handleAdminListBackups)
-			r.Post("/backup", s.handleAdminCreateBackup)
-			r.Delete("/backup/{id}", s.handleAdminDeleteBackup)
-		})
-	})
-
-	// Admin web routes (protected with Basic Auth)
-	s.router.Route("/admin", func(r chi.Router) {
-		r.Use(s.basicAuthMiddleware)
-
-		r.Get("/", s.handleAdminDashboard)
-		r.Get("/settings", s.handleAdminSettingsPage)
-		r.Post("/settings", s.handleAdminUpdateSettingsForm)
-		r.Get("/database", s.handleAdminDatabasePage)
-		r.Post("/database/test", s.handleAdminDatabaseTestForm)
-		r.Get("/logs", s.handleAdminLogsPage)
-		r.Get("/logs/{type}", s.handleAdminLogView)
-		r.Get("/backup", s.handleAdminBackupPage)
-		r.Post("/backup/create", s.handleAdminCreateBackupForm)
-		r.Post("/backup/restore", s.handleAdminRestoreBackupForm)
-		r.Get("/healthz", s.handleAdminHealthPage)
 	})
 
 	// Debug routes (dev mode only)
 	if s.config.DevMode {
 		s.router.Get("/debug/routes", s.handleDebugRoutes)
 		s.router.Get("/debug/config", s.handleDebugConfig)
-		s.router.Get("/debug/db", s.handleDebugDB)
 		s.router.Get("/debug/templates", s.handleDebugTemplates)
-		s.router.Post("/debug/reset", s.handleDebugReset)
 	}
 }
 
@@ -238,4 +252,28 @@ func (s *Server) Start() error {
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
+}
+
+// detectServerURL determines the server URL from request headers
+func (s *Server) detectServerURL(r *http.Request) string {
+	// Check for reverse proxy headers
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		host := r.Header.Get("X-Forwarded-Host")
+		if host == "" {
+			host = r.Host
+		}
+		return fmt.Sprintf("%s://%s", proto, host)
+	}
+
+	// Check for config FQDN
+	if s.config.Cfg != nil && s.config.Cfg.Server.FQDN != "" {
+		return fmt.Sprintf("https://%s", s.config.Cfg.Server.FQDN)
+	}
+
+	// Default to request host
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s", scheme, r.Host)
 }

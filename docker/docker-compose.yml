@@ -1,0 +1,25 @@
+name: gitignore
+
+services:
+  gitignore:
+    image: ghcr.io/apimgr/gitignore:latest
+    container_name: gitignore
+    restart: unless-stopped
+    environment:
+      # Hardcoded with sane defaults - NO .env files
+      - MODE=production
+      - TZ=America/New_York
+      # ENABLE_TOR=true is default, no need to specify
+    ports:
+      # Production: bound to Docker bridge only
+      - "172.17.0.1:64580:80"
+    volumes:
+      - ./rootfs/config/gitignore:/config
+      - ./rootfs/data/gitignore:/data
+    networks:
+      - gitignore
+
+networks:
+  gitignore:
+    name: gitignore
+    external: false

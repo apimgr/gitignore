@@ -45,21 +45,6 @@ func (s *Server) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleDebugDB shows database statistics
-func (s *Server) handleDebugDB(w http.ResponseWriter, r *http.Request) {
-	stats := s.config.Database.GetDB().Stats()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"data": map[string]interface{}{
-			"max_open_connections": stats.MaxOpenConnections,
-			"open_connections":     stats.OpenConnections,
-			"in_use":               stats.InUse,
-			"idle":                 stats.Idle,
-		},
-	})
-}
 
 // handleDebugTemplates shows template statistics
 func (s *Server) handleDebugTemplates(w http.ResponseWriter, r *http.Request) {

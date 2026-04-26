@@ -158,8 +158,158 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
 }
 
-// handleRobotsTxt serves robots.txt
+// handleRobotsTxt serves robots.txt from config
 func (s *Server) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "User-agent: *\nAllow: /\n")
+	fmt.Fprintln(w, "User-agent: *")
+	if s.config.Cfg != nil {
+		for _, path := range s.config.Cfg.WebRobots.Allow {
+			fmt.Fprintf(w, "Allow: %s\n", path)
+		}
+		for _, path := range s.config.Cfg.WebRobots.Deny {
+			fmt.Fprintf(w, "Disallow: %s\n", path)
+		}
+	} else {
+		fmt.Fprintln(w, "Allow: /")
+		fmt.Fprintln(w, "Allow: /api")
+		fmt.Fprintln(w, "Disallow: /debug")
+	}
+}
+
+// handleSecurityTxt serves security.txt
+func (s *Server) handleSecurityTxt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	admin := "security@apimgr.us"
+	if s.config.Cfg != nil && s.config.Cfg.WebSecurity.Admin != "" {
+		admin = s.config.Cfg.WebSecurity.Admin
+	}
+	fmt.Fprintf(w, "Contact: mailto:%s\n", admin)
+	fmt.Fprintln(w, "Expires: 2026-12-31T23:59:59.000Z")
+	fmt.Fprintln(w, "Preferred-Languages: en")
+	fmt.Fprintln(w, "Canonical: https://gitignore.apimgr.us/.well-known/security.txt")
+}
+
+// handleManifest serves PWA manifest
+func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json")
+	manifest := `{
+  "name": "GitIgnore API",
+  "short_name": "GitIgnore",
+  "description": "Comprehensive .gitignore template API",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#0066cc",
+  "icons": [
+    {
+      "src": "/static/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}`
+	fmt.Fprint(w, manifest)
+}
+
+// handleServiceWorker serves the service worker
+func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript")
+	sw := `// GitIgnore Service Worker
+const CACHE_NAME = 'gitignore-v1';
+const urlsToCache = ['/', '/static/css/main.css', '/manifest.json'];
+
+self.addEventListener('install', function(event) {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(function(cache) {
+      return cache.addAll(urlsToCache);
+    })
+  );
+});
+
+self.addEventListener('fetch', function(event) {
+  event.respondWith(
+    caches.match(event.request).then(function(response) {
+      return response || fetch(event.request);
+    })
+  );
+});
+`
+	fmt.Fprint(w, sw)
+}
+
+// handleAPITemplateText returns a template's content as plain text
+func (s *Server) handleAPITemplateText(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	// Remove .txt extension if present
+	if len(name) > 4 && name[len(name)-4:] == ".txt" {
+		name = name[:len(name)-4]
+	}
+	tmpl, err := s.config.Templates.Get(name)
+	if err != nil {
+		http.Error(w, "Template not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, tmpl.Content)
+}
+
+// handleAPIListText returns list of all templates as text
+func (s *Server) handleAPIListText(w http.ResponseWriter, r *http.Request) {
+	templates := s.config.Templates.List()
+	w.Header().Set("Content-Type", "text/plain")
+	for _, name := range templates {
+		fmt.Fprintln(w, name)
+	}
+}
+
+// handleAPISearchText searches templates (text output)
+func (s *Server) handleAPISearchText(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
+		return
+	}
+	results := s.config.Templates.Search(query)
+	w.Header().Set("Content-Type", "text/plain")
+	for _, tmpl := range results {
+		fmt.Fprintln(w, tmpl.Name)
+	}
+}
+
+// handleAPICombineText combines multiple templates (text output)
+func (s *Server) handleAPICombineText(w http.ResponseWriter, r *http.Request) {
+	s.handleAPICombine(w, r)
+}
+
+// handleAPICategoriesText returns all categories as text
+func (s *Server) handleAPICategoriesText(w http.ResponseWriter, r *http.Request) {
+	categories := s.config.Templates.GetCategories()
+	w.Header().Set("Content-Type", "text/plain")
+	for _, cat := range categories {
+		fmt.Fprintln(w, cat)
+	}
+}
+
+// handleAPICategoryTemplatesText returns templates in a category as text
+func (s *Server) handleAPICategoryTemplatesText(w http.ResponseWriter, r *http.Request) {
+	category := chi.URLParam(r, "name")
+	templates := s.config.Templates.GetByCategory(category)
+	w.Header().Set("Content-Type", "text/plain")
+	for _, tmpl := range templates {
+		fmt.Fprintln(w, tmpl.Name)
+	}
+}
+
+// handleAPIStatsText returns template statistics as text
+func (s *Server) handleAPIStatsText(w http.ResponseWriter, r *http.Request) {
+	stats := s.config.Templates.Stats()
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "Total Templates: %d\n", stats["total_templates"])
+	fmt.Fprintf(w, "Categories: %d\n", stats["categories"])
+	fmt.Fprintf(w, "Total Size: %d bytes\n", stats["total_size_bytes"])
 }

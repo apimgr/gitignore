@@ -35,7 +35,7 @@ curl -LSs https://raw.githubusercontent.com/apimgr/gitignore/main/docker-compose
 docker-compose up -d
 
 # View admin credentials
-cat ./rootfs/config/admin_credentials
+cat ./volumes/config/admin_credentials
 
 # Access the service
 open http://localhost:64080
@@ -261,9 +261,9 @@ docker-compose up -d
 docker run -d \
   --name gitignore \
   -p 127.0.0.1:64080:80 \
-  -v $(pwd)/rootfs/config:/config \
-  -v $(pwd)/rootfs/data:/data \
-  -v $(pwd)/rootfs/logs:/logs \
+  -v $(pwd)/volumes/config:/config \
+  -v $(pwd)/volumes/data:/data \
+  -v $(pwd)/volumes/logs:/logs \
   -e ADMIN_PASSWORD=changeme \
   apimgr/gitignore:latest
 ```

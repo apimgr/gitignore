@@ -20,9 +20,9 @@ services:
       - DEV=true
 
     volumes:
-      - /tmp/gitignore/rootfs/config/gitignore:/config
-      - /tmp/gitignore/rootfs/data/gitignore:/data
-      - /tmp/gitignore/rootfs/logs/gitignore:/logs
+      - /tmp/gitignore/volumes/config/gitignore:/config
+      - /tmp/gitignore/volumes/data/gitignore:/data
+      - /tmp/gitignore/volumes/logs/gitignore:/logs
 
     ports:
       - "64181:80"
@@ -49,7 +49,7 @@ services:
   #     POSTGRES_PASSWORD: testpass
   #
   #   volumes:
-  #     - /tmp/gitignore/rootfs/db/postgres:/var/lib/postgresql/data
+  #     - /tmp/gitignore/volumes/db/postgres:/var/lib/postgresql/data
   #
   #   networks:
   #     - gitignore

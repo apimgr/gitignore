@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"math/rand"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,43 +14,82 @@ import (
 
 // Config represents the complete server configuration
 type Config struct {
-	Server      ServerConfig      `yaml:"server"`
-	WebUI       WebUIConfig       `yaml:"web-ui"`
-	WebRobots   WebRobotsConfig   `yaml:"web-robots"`
-	WebSecurity WebSecurityConfig `yaml:"web-security"`
+	Server ServerConfig `yaml:"server"`
+	Web    WebConfig    `yaml:"web"`
 }
 
 // ServerConfig contains server-related settings
 type ServerConfig struct {
-	Port         string        `yaml:"port"`
-	FQDN         string        `yaml:"fqdn"`
-	Address      string        `yaml:"address"`
-	Mode         string        `yaml:"mode"`
-	UpdateBranch string        `yaml:"update_branch"`
-	Metrics      MetricsConfig `yaml:"metrics"`
-	Logging      LoggingConfig `yaml:"logging"`
-	Admin        AdminConfig   `yaml:"admin"`
-	Session      SessionConfig `yaml:"session"`
+	Port        string           `yaml:"port"`
+	FQDN        string           `yaml:"fqdn"`
+	Address     string           `yaml:"address"`
+	Mode        string           `yaml:"mode"`
+	User        string           `yaml:"user"`
+	Group       string           `yaml:"group"`
+	PIDFile     bool             `yaml:"pidfile"`
+	Branding    BrandingConfig   `yaml:"branding"`
+	SEO         SEOConfig        `yaml:"seo"`
+	Admin       AdminConfig      `yaml:"admin"`
+	SSL         SSLConfig        `yaml:"ssl"`
+	Schedule    ScheduleConfig   `yaml:"schedule"`
+	RateLimit   RateLimitConfig  `yaml:"rate_limit"`
+	Database    DatabaseConfig   `yaml:"database"`
+	Logging     LoggingConfig    `yaml:"logging"`
+	Maintenance MaintenanceConfig `yaml:"maintenance"`
+	UpdateBranch string          `yaml:"update_branch"`
 }
 
-// AdminConfig contains admin authentication settings
+// BrandingConfig contains display/branding settings
+type BrandingConfig struct {
+	Title       string `yaml:"title"`
+	Tagline     string `yaml:"tagline"`
+	Description string `yaml:"description"`
+}
+
+// SEOConfig contains SEO-related settings
+type SEOConfig struct {
+	Keywords []string `yaml:"keywords"`
+}
+
+// AdminConfig contains admin panel settings (NOT credentials — those live in the database)
 type AdminConfig struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	APIToken string `yaml:"api_token"`
+	Email string `yaml:"email"`
 }
 
-// SessionConfig contains session settings
-type SessionConfig struct {
-	Timeout int `yaml:"timeout"`
+// SSLConfig contains SSL/TLS settings
+type SSLConfig struct {
+	Enabled      bool              `yaml:"enabled"`
+	LetsEncrypt  LetsEncryptConfig `yaml:"letsencrypt"`
 }
 
-// MetricsConfig contains metrics settings
-type MetricsConfig struct {
-	Enabled       bool   `yaml:"enabled"`
-	Endpoint      string `yaml:"endpoint"`
-	IncludeSystem bool   `yaml:"include_system"`
-	IncludeApp    bool   `yaml:"include_app"`
+// LetsEncryptConfig contains Let's Encrypt settings
+type LetsEncryptConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Email     string `yaml:"email"`
+	Challenge string `yaml:"challenge"`
+}
+
+// ScheduleConfig contains scheduler settings
+type ScheduleConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// RateLimitConfig contains rate limiting settings
+type RateLimitConfig struct {
+	Enabled  bool `yaml:"enabled"`
+	Requests int  `yaml:"requests"`
+	Window   int  `yaml:"window"`
+}
+
+// DatabaseConfig contains database connection settings
+type DatabaseConfig struct {
+	Driver   string `yaml:"driver"`
+	Host     string `yaml:"host,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Name     string `yaml:"name,omitempty"`
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
+	SSLMode  string `yaml:"sslmode,omitempty"`
 }
 
 // LoggingConfig contains logging settings
@@ -57,30 +98,42 @@ type LoggingConfig struct {
 	Level        string `yaml:"level"`
 }
 
+// MaintenanceConfig contains maintenance mode settings
+type MaintenanceConfig struct {
+	SelfHealing SelfHealingConfig `yaml:"self_healing"`
+	Cleanup     CleanupConfig     `yaml:"cleanup"`
+	Notify      NotifyConfig      `yaml:"notify"`
+}
+
+// SelfHealingConfig contains self-healing settings
+type SelfHealingConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	RetryInterval int  `yaml:"retry_interval"`
+	MaxAttempts   int  `yaml:"max_attempts"`
+}
+
+// CleanupConfig contains auto-cleanup thresholds
+type CleanupConfig struct {
+	DiskThreshold    int `yaml:"disk_threshold"`
+	LogRetentionDays int `yaml:"log_retention_days"`
+	BackupKeepCount  int `yaml:"backup_keep_count"`
+}
+
+// NotifyConfig contains notification settings for maintenance events
+type NotifyConfig struct {
+	OnEnter bool `yaml:"on_enter"`
+	OnExit  bool `yaml:"on_exit"`
+}
+
+// WebConfig contains frontend/web settings
+type WebConfig struct {
+	UI   WebUIConfig `yaml:"ui"`
+	CORS string      `yaml:"cors"`
+}
+
 // WebUIConfig contains web UI settings
 type WebUIConfig struct {
-	Theme         string              `yaml:"theme"`
-	Logo          string              `yaml:"logo"`
-	Favicon       string              `yaml:"favicon"`
-	Notifications NotificationsConfig `yaml:"notifications"`
-}
-
-// NotificationsConfig contains notification settings
-type NotificationsConfig struct {
-	Enabled       bool     `yaml:"enabled"`
-	Announcements []string `yaml:"announcements"`
-}
-
-// WebRobotsConfig contains robots.txt settings
-type WebRobotsConfig struct {
-	Allow []string `yaml:"allow"`
-	Deny  []string `yaml:"deny"`
-}
-
-// WebSecurityConfig contains security settings
-type WebSecurityConfig struct {
-	Admin string `yaml:"admin"`
-	CORS  string `yaml:"cors"`
+	Theme string `yaml:"theme"`
 }
 
 var (
@@ -95,59 +148,78 @@ func DefaultConfig() *Config {
 		Server: ServerConfig{
 			Port:         "",
 			FQDN:         "",
-			Address:      "0.0.0.0",
+			Address:      "[::]",
 			Mode:         "production",
+			User:         "gitignore",
+			Group:        "gitignore",
+			PIDFile:      true,
 			UpdateBranch: "stable",
-			Metrics: MetricsConfig{
-				Enabled:       false,
-				Endpoint:      "/metrics",
-				IncludeSystem: true,
-				IncludeApp:    true,
+			Branding: BrandingConfig{
+				Title:       "gitignore",
+				Tagline:     "",
+				Description: "",
+			},
+			SEO: SEOConfig{
+				Keywords: []string{},
+			},
+			Admin: AdminConfig{
+				Email: "",
+			},
+			SSL: SSLConfig{
+				Enabled: false,
+				LetsEncrypt: LetsEncryptConfig{
+					Enabled:   false,
+					Email:     "",
+					Challenge: "http-01",
+				},
+			},
+			Schedule: ScheduleConfig{
+				Enabled: true,
+			},
+			RateLimit: RateLimitConfig{
+				Enabled:  true,
+				Requests: 120,
+				Window:   60,
+			},
+			Database: DatabaseConfig{
+				Driver: "file",
 			},
 			Logging: LoggingConfig{
 				AccessFormat: "apache",
 				Level:        "info",
 			},
-			Admin: AdminConfig{
-				Username: "admin",
-				Password: "",
-				APIToken: "",
-			},
-			Session: SessionConfig{
-				Timeout: 3600,
+			Maintenance: MaintenanceConfig{
+				SelfHealing: SelfHealingConfig{
+					Enabled:       true,
+					RetryInterval: 30,
+					MaxAttempts:   0,
+				},
+				Cleanup: CleanupConfig{
+					DiskThreshold:    90,
+					LogRetentionDays: 7,
+					BackupKeepCount:  5,
+				},
+				Notify: NotifyConfig{
+					OnEnter: true,
+					OnExit:  true,
+				},
 			},
 		},
-		WebUI: WebUIConfig{
-			Theme:   "dark",
-			Logo:    "",
-			Favicon: "",
-			Notifications: NotificationsConfig{
-				Enabled:       true,
-				Announcements: []string{},
+		Web: WebConfig{
+			UI: WebUIConfig{
+				Theme: "dark",
 			},
-		},
-		WebRobots: WebRobotsConfig{
-			Allow: []string{"/", "/api"},
-			Deny:  []string{"/debug"},
-		},
-		WebSecurity: WebSecurityConfig{
-			Admin: "",
-			CORS:  "*",
+			CORS: "*",
 		},
 	}
 }
 
 // migrateYamlToYml migrates .yaml config files to .yml extension
 func migrateYamlToYml(path string) {
-	// Only process if the path ends with .yml
 	if !strings.HasSuffix(path, ".yml") {
 		return
 	}
-
-	// Check for the old .yaml version
 	oldPath := strings.TrimSuffix(path, ".yml") + ".yaml"
-
-	// If old file exists and new file doesn't, migrate it
 	if _, err := os.Stat(oldPath); err == nil {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			if err := os.Rename(oldPath, path); err == nil {
@@ -162,13 +234,23 @@ func Load(path string) (*Config, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Migrate .yaml to .yml if needed
 	migrateYamlToYml(path)
-
 	configPath = path
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		cfg := DefaultConfig()
+		if cfg.Server.Port == "" {
+			cfg.Server.Port = fmt.Sprintf("%d", randomPort())
+		}
+		if cfg.Server.FQDN == "" {
+			cfg.Server.FQDN = detectFQDN()
+		}
+		if cfg.Server.Admin.Email == "" {
+			cfg.Server.Admin.Email = "admin@" + cfg.Server.FQDN
+		}
+		if cfg.Server.SSL.LetsEncrypt.Email == "" {
+			cfg.Server.SSL.LetsEncrypt.Email = cfg.Server.Admin.Email
+		}
 		if err := saveConfig(cfg, path); err != nil {
 			return nil, fmt.Errorf("failed to create default config: %w", err)
 		}
@@ -186,11 +268,20 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Fill in computed defaults for existing configs missing these fields
+	if cfg.Server.Port == "" {
+		cfg.Server.Port = fmt.Sprintf("%d", randomPort())
+		_ = saveConfig(cfg, path)
+	}
+	if cfg.Server.FQDN == "" {
+		cfg.Server.FQDN = detectFQDN()
+	}
+
 	current = cfg
 	return cfg, nil
 }
 
-// Get returns the current configuration
+// Get returns the current configuration (thread-safe)
 func Get() *Config {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -200,7 +291,7 @@ func Get() *Config {
 	return current
 }
 
-// Save saves the current configuration to file
+// Save persists the current in-memory config to disk
 func Save() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -210,7 +301,17 @@ func Save() error {
 	return saveConfig(current, configPath)
 }
 
-// saveConfig writes configuration to a YAML file
+// Update applies fn to the current config then saves
+func Update(fn func(*Config)) error {
+	mu.Lock()
+	defer mu.Unlock()
+	if current == nil {
+		return fmt.Errorf("no configuration loaded")
+	}
+	fn(current)
+	return saveConfig(current, configPath)
+}
+
 func saveConfig(cfg *Config, path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -221,93 +322,203 @@ func saveConfig(cfg *Config, path string) error {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
 	return nil
 }
 
-// generateConfigYAML generates YAML content with comments
 func generateConfigYAML(cfg *Config) string {
-	return fmt.Sprintf(`# GitIgnore Server Configuration
-# Documentation: https://gitignore.apimgr.us/docs
+	keywords := "[]"
+	if len(cfg.Server.SEO.Keywords) > 0 {
+		keywords = "[" + strings.Join(cfg.Server.SEO.Keywords, ", ") + "]"
+	}
+
+	dbSection := fmt.Sprintf(`    driver: %s`, cfg.Server.Database.Driver)
+	if cfg.Server.Database.Host != "" {
+		dbSection += fmt.Sprintf(`
+    host: %s
+    port: %d
+    name: %s
+    username: %s`,
+			cfg.Server.Database.Host,
+			cfg.Server.Database.Port,
+			cfg.Server.Database.Name,
+			cfg.Server.Database.Username,
+		)
+	}
+
+	return fmt.Sprintf(`# =============================================================================
+# SERVER CONFIGURATION
+# =============================================================================
 
 server:
-  port: "%s"
-  fqdn: "%s"
-  address: "%s"
+  port: "%s"       # Default: random unused port in 64000-64999 range
+  fqdn: "%s"       # Auto-detected from host; set DOMAIN env var to override
+  address: "%s"    # [::] = all interfaces IPv4+IPv6
+  mode: %s         # production or development
+  user: %s
+  group: %s
+  pidfile: %t
 
-  metrics:
+  # Branding & SEO
+  branding:
+    title: "%s"
+    tagline: "%s"
+    description: "%s"
+  seo:
+    keywords: %s
+
+  # Admin panel (credentials stored in database, not here)
+  admin:
+    email: "%s"
+
+  # SSL/TLS
+  ssl:
     enabled: %t
-    endpoint: "%s"
-    include_system: %t
-    include_app: %t
+    letsencrypt:
+      enabled: %t
+      email: "%s"
+      challenge: %s
 
+  # Scheduler
+  schedule:
+    enabled: %t
+
+  # Rate limiting
+  rate_limit:
+    enabled: %t
+    requests: %d  # requests per window
+    window: %d    # seconds
+
+  # Database
+  database:
+%s
+
+  # Logging
   logging:
-    access_format: "%s"
-    level: "%s"
+    access_format: %s
+    level: %s
 
-web-ui:
-  theme: "%s"
-  logo: "%s"
-  favicon: "%s"
-  notifications:
-    enabled: %t
-    announcements: %s
+  # Maintenance mode auto-recovery
+  maintenance:
+    self_healing:
+      enabled: %t
+      retry_interval: %d  # seconds between retry attempts
+      max_attempts: %d    # 0 = unlimited
+    cleanup:
+      disk_threshold: %d       # start cleanup when disk > N%%
+      log_retention_days: %d
+      backup_keep_count: %d
+    notify:
+      on_enter: %t
+      on_exit: %t
 
-web-robots:
-  allow: %s
-  deny: %s
+  update_branch: %s
 
-web-security:
-  admin: "%s"
+# =============================================================================
+# FRONTEND CONFIGURATION
+# =============================================================================
+
+web:
+  ui:
+    theme: %s
   cors: "%s"
 `,
 		cfg.Server.Port,
 		cfg.Server.FQDN,
 		cfg.Server.Address,
-		cfg.Server.Metrics.Enabled,
-		cfg.Server.Metrics.Endpoint,
-		cfg.Server.Metrics.IncludeSystem,
-		cfg.Server.Metrics.IncludeApp,
+		cfg.Server.Mode,
+		cfg.Server.User,
+		cfg.Server.Group,
+		cfg.Server.PIDFile,
+		cfg.Server.Branding.Title,
+		cfg.Server.Branding.Tagline,
+		cfg.Server.Branding.Description,
+		keywords,
+		cfg.Server.Admin.Email,
+		cfg.Server.SSL.Enabled,
+		cfg.Server.SSL.LetsEncrypt.Enabled,
+		cfg.Server.SSL.LetsEncrypt.Email,
+		cfg.Server.SSL.LetsEncrypt.Challenge,
+		cfg.Server.Schedule.Enabled,
+		cfg.Server.RateLimit.Enabled,
+		cfg.Server.RateLimit.Requests,
+		cfg.Server.RateLimit.Window,
+		dbSection,
 		cfg.Server.Logging.AccessFormat,
 		cfg.Server.Logging.Level,
-		cfg.WebUI.Theme,
-		cfg.WebUI.Logo,
-		cfg.WebUI.Favicon,
-		cfg.WebUI.Notifications.Enabled,
-		formatStringSlice(cfg.WebUI.Notifications.Announcements),
-		formatStringSlice(cfg.WebRobots.Allow),
-		formatStringSlice(cfg.WebRobots.Deny),
-		cfg.WebSecurity.Admin,
-		cfg.WebSecurity.CORS,
+		cfg.Server.Maintenance.SelfHealing.Enabled,
+		cfg.Server.Maintenance.SelfHealing.RetryInterval,
+		cfg.Server.Maintenance.SelfHealing.MaxAttempts,
+		cfg.Server.Maintenance.Cleanup.DiskThreshold,
+		cfg.Server.Maintenance.Cleanup.LogRetentionDays,
+		cfg.Server.Maintenance.Cleanup.BackupKeepCount,
+		cfg.Server.Maintenance.Notify.OnEnter,
+		cfg.Server.Maintenance.Notify.OnExit,
+		cfg.Server.UpdateBranch,
+		cfg.Web.UI.Theme,
+		cfg.Web.CORS,
 	)
 }
 
-func formatStringSlice(s []string) string {
-	if len(s) == 0 {
-		return "[]"
-	}
-	result := "["
-	for i, v := range s {
-		if i > 0 {
-			result += ", "
+// randomPort selects a random unused port in the 64000-64999 range
+func randomPort() int {
+	for attempts := 0; attempts < 100; attempts++ {
+		port := 64000 + rand.Intn(1000)
+		addr := fmt.Sprintf(":%d", port)
+		l, err := net.Listen("tcp", addr)
+		if err == nil {
+			l.Close()
+			return port
 		}
-		result += fmt.Sprintf("\"%s\"", v)
 	}
-	result += "]"
-	return result
+	return 64580 // fallback
 }
 
-// GetTheme returns the current theme
+// detectFQDN returns the best available hostname
+func detectFQDN() string {
+	if domain := os.Getenv("DOMAIN"); domain != "" {
+		return domain
+	}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" && !isLoopback(hostname) {
+		return hostname
+	}
+	if hostname := os.Getenv("HOSTNAME"); hostname != "" && !isLoopback(hostname) {
+		return hostname
+	}
+	return "localhost"
+}
+
+func isLoopback(host string) bool {
+	lower := strings.ToLower(host)
+	if lower == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// GetTheme returns the current UI theme
 func GetTheme() string {
-	cfg := Get()
-	return cfg.WebUI.Theme
+	return Get().Web.UI.Theme
 }
 
 // GetCORS returns the CORS setting
 func GetCORS() string {
 	cfg := Get()
-	if cfg.WebSecurity.CORS == "" {
+	if cfg.Web.CORS == "" {
 		return "*"
 	}
-	return cfg.WebSecurity.CORS
+	return cfg.Web.CORS
+}
+
+// ParseBool accepts the extended set of truthy/falsy strings from the spec
+func ParseBool(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "yes", "true", "enable", "enabled", "on":
+		return true, true
+	case "0", "no", "false", "disable", "disabled", "off":
+		return false, true
+	}
+	return false, false
 }

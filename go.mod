@@ -1,6 +1,6 @@
 module github.com/apimgr/gitignore
 
-go 1.24.6
+go 1.25.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.3
@@ -11,6 +11,6 @@ require (
 
 require (
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 )

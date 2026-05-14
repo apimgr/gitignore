@@ -2,8 +2,10 @@ package admin
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,14 +16,14 @@ import (
 
 // AuthManager handles admin authentication
 type AuthManager struct {
-	sessions      map[string]*Session
-	tokens        map[string]*APIToken
-	mu            sync.RWMutex
-	adminUser     string
-	adminPassHash string
-	apiToken      string
+	sessions       map[string]*Session
+	tokens         map[string]*APIToken
+	mu             sync.RWMutex
+	adminUser      string
+	adminPassHash  string // Argon2id PHC string
+	apiTokenHash   string // SHA-256 hex — compare by hashing the incoming token
 	sessionTimeout int
-	sslEnabled    bool
+	sslEnabled     bool
 }
 
 // Session represents an authenticated admin session
@@ -43,14 +45,16 @@ type APIToken struct {
 	LastUsed    time.Time
 }
 
-// NewAuthManager creates a new auth manager
-func NewAuthManager(adminUser, adminPass, apiToken string, sessionTimeout int, sslEnabled bool) *AuthManager {
+// NewAuthManager creates a new auth manager.
+// adminPassHash must be an Argon2id PHC string.
+// apiTokenHash must be a SHA-256 hex digest of the raw token.
+func NewAuthManager(adminUser, adminPassHash, apiTokenHash string, sessionTimeout int, sslEnabled bool) *AuthManager {
 	am := &AuthManager{
 		sessions:       make(map[string]*Session),
 		tokens:         make(map[string]*APIToken),
 		adminUser:      adminUser,
-		adminPassHash:  adminPass,
-		apiToken:       apiToken,
+		adminPassHash:  adminPassHash,
+		apiTokenHash:   apiTokenHash,
 		sessionTimeout: sessionTimeout,
 		sslEnabled:     sslEnabled,
 	}
@@ -145,20 +149,23 @@ func (am *AuthManager) RefreshSession(sessionID string) bool {
 	return true
 }
 
-// ValidateAPIToken validates a bearer token
+// ValidateAPIToken validates a bearer token.
+// The raw token is SHA-256 hashed before comparison against the stored hash.
 func (am *AuthManager) ValidateAPIToken(token string) bool {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
-	// Check static token from config
-	if am.apiToken != "" {
-		if subtle.ConstantTimeCompare([]byte(token), []byte(am.apiToken)) == 1 {
+	// Check static token hash from database
+	if am.apiTokenHash != "" {
+		incoming := hashTokenSHA256(token)
+		if subtle.ConstantTimeCompare([]byte(incoming), []byte(am.apiTokenHash)) == 1 {
 			return true
 		}
 	}
 
-	// Check dynamic tokens
-	apiToken, ok := am.tokens[token]
+	// Check dynamic tokens (also hashed)
+	incoming := hashTokenSHA256(token)
+	apiToken, ok := am.tokens[incoming]
 	if !ok {
 		return false
 	}
@@ -289,6 +296,12 @@ func HashPassword(password string) (string, error) {
 	b64Hash := base64.RawStdEncoding.EncodeToString(hash)
 
 	return "$argon2id$v=19$m=65536,t=3,p=4$" + b64Salt + "$" + b64Hash, nil
+}
+
+// hashTokenSHA256 returns the SHA-256 hex digest of a raw token
+func hashTokenSHA256(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
 }
 
 // verifyArgon2Hash verifies a password against an Argon2id hash

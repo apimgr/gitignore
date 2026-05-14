@@ -12,8 +12,12 @@ release/
 *.test
 *.out
 
-# Docker/Incus volumes
-rootfs/
+# Docker compose files (not needed in image; Dockerfile and rootfs/ are required)
+docker/docker-compose*.yml
+docker/all-in-one.yml
+
+# Runtime volume data
+volumes/
 
 # IDE
 .idea/

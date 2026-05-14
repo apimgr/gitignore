@@ -19,8 +19,8 @@ release/
 # Go workspace file
 go.work
 
-# Docker/Incus volumes (local development)
-rootfs/
+# Runtime volume data (docker compose, never committed)
+volumes/
 
 # IDE and editor files
 .idea/

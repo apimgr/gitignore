@@ -6,12 +6,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
 const (
 	appName = "gitignore"
 	orgName = "apimgr"
+
+	// launchd label per spec: {org}.{app}
+	launchdLabel = "apimgr.gitignore"
+	// launchd plist path per spec
+	launchdPlist = "/Library/LaunchDaemons/apimgr.gitignore.plist"
 )
 
 // ServiceType represents the type of service manager
@@ -30,15 +36,12 @@ const (
 func DetectServiceManager() ServiceType {
 	switch runtime.GOOS {
 	case "linux":
-		// Check for systemd
 		if _, err := os.Stat("/run/systemd/system"); err == nil {
 			return ServiceSystemd
 		}
-		// Check for runit
 		if _, err := os.Stat("/run/runit"); err == nil {
 			return ServiceRunit
 		}
-		// Fallback to systemd if /etc/systemd exists
 		if _, err := os.Stat("/etc/systemd"); err == nil {
 			return ServiceSystemd
 		}
@@ -108,20 +111,102 @@ func GetBinaryPath() string {
 	}
 }
 
-// installSystemd creates systemd service file
+// ─────────────────────────────────────────────────────────────────────────────
+// User creation (Part 4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// EnsureSystemUser creates the system user/group if they don't already exist.
+// Only supported on Linux; no-op on other platforms.
+func EnsureSystemUser() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	// Check if user already exists
+	if err := exec.Command("id", appName).Run(); err == nil {
+		return nil // already exists
+	}
+
+	id, err := findAvailableSystemID()
+	if err != nil {
+		return fmt.Errorf("no available UID/GID in system range 100-999: %w", err)
+	}
+
+	// Create group
+	if err := exec.Command("groupadd",
+		"--system",
+		"--gid", strconv.Itoa(id),
+		appName,
+	).Run(); err != nil {
+		return fmt.Errorf("failed to create group %s: %w", appName, err)
+	}
+
+	// Create user
+	configDir := fmt.Sprintf("/etc/%s/%s", orgName, appName)
+	if err := exec.Command("useradd",
+		"--system",
+		"--uid", strconv.Itoa(id),
+		"--gid", strconv.Itoa(id),
+		"--home-dir", configDir,
+		"--shell", "/sbin/nologin",
+		"--comment", appName+" service account",
+		appName,
+	).Run(); err != nil {
+		return fmt.Errorf("failed to create user %s: %w", appName, err)
+	}
+
+	fmt.Printf("✅ System user '%s' created (uid=%d gid=%d)\n", appName, id, id)
+	return nil
+}
+
+// findAvailableSystemID finds an unused UID/GID pair in 100-999 (Linux system range)
+func findAvailableSystemID() (int, error) {
+	for id := 999; id >= 100; id-- {
+		uidTaken := exec.Command("getent", "passwd", strconv.Itoa(id)).Run() == nil
+		gidTaken := exec.Command("getent", "group", strconv.Itoa(id)).Run() == nil
+		if !uidTaken && !gidTaken {
+			return id, nil
+		}
+	}
+	return 0, fmt.Errorf("no available ID in range 100-999")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// systemd
+// ─────────────────────────────────────────────────────────────────────────────
+
 func installSystemd() error {
 	binaryPath := GetBinaryPath()
 
+	// Ensure service user exists before installing
+	if err := EnsureSystemUser(); err != nil {
+		fmt.Printf("⚠️  Could not create system user (continuing): %v\n", err)
+	}
+
+	// Create required directories
+	dirs := []string{
+		fmt.Sprintf("/var/lib/%s/%s", orgName, appName),
+		fmt.Sprintf("/var/log/%s/%s", orgName, appName),
+		fmt.Sprintf("/etc/%s/%s", orgName, appName),
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+		// Set ownership if user exists
+		exec.Command("chown", appName+":"+appName, dir).Run()
+	}
+
 	serviceContent := fmt.Sprintf(`[Unit]
-Description=GitIgnore API Server
+Description=gitignore API Server
 Documentation=https://gitignore.apimgr.us
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=%s
+Group=%s
 ExecStart=%s
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
@@ -137,165 +222,98 @@ ReadWritePaths=/var/lib/%s/%s /var/log/%s/%s /etc/%s/%s
 
 [Install]
 WantedBy=multi-user.target
-`, binaryPath, orgName, appName, orgName, appName, orgName, appName)
+`, appName, appName, binaryPath,
+		orgName, appName, orgName, appName, orgName, appName)
 
 	servicePath := fmt.Sprintf("/etc/systemd/system/%s.service", appName)
 
-	// Create directories
-	dirs := []string{
-		fmt.Sprintf("/var/lib/%s/%s", orgName, appName),
-		fmt.Sprintf("/var/log/%s/%s", orgName, appName),
-		fmt.Sprintf("/etc/%s/%s", orgName, appName),
-	}
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
-	// Write service file
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
 		return fmt.Errorf("failed to write service file: %w", err)
 	}
 
-	// Copy binary if not already in place
 	if exePath, err := os.Executable(); err == nil && exePath != binaryPath {
 		if err := copyBinary(exePath, binaryPath); err != nil {
 			return fmt.Errorf("failed to copy binary: %w", err)
 		}
 	}
 
-	// Reload systemd
 	if err := exec.Command("systemctl", "daemon-reload").Run(); err != nil {
 		return fmt.Errorf("failed to reload systemd: %w", err)
 	}
-
-	// Enable service
 	if err := exec.Command("systemctl", "enable", appName).Run(); err != nil {
 		return fmt.Errorf("failed to enable service: %w", err)
 	}
 
 	fmt.Printf("✅ Service installed at: %s\n", servicePath)
 	fmt.Printf("✅ Binary installed at: %s\n", binaryPath)
-	fmt.Println()
-	fmt.Println("To start the service:")
-	fmt.Printf("  sudo systemctl start %s\n", appName)
-	fmt.Println()
-	fmt.Println("To check status:")
-	fmt.Printf("  sudo systemctl status %s\n", appName)
-
+	fmt.Printf("\nTo start the service:\n  sudo systemctl start %s\n", appName)
 	return nil
 }
 
-// uninstallSystemd removes systemd service
 func uninstallSystemd() error {
 	servicePath := fmt.Sprintf("/etc/systemd/system/%s.service", appName)
-
-	// Stop service if running
 	exec.Command("systemctl", "stop", appName).Run()
-
-	// Disable service
 	exec.Command("systemctl", "disable", appName).Run()
-
-	// Remove service file
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove service file: %w", err)
 	}
-
-	// Reload systemd
 	exec.Command("systemctl", "daemon-reload").Run()
-
 	fmt.Printf("✅ Service uninstalled: %s\n", servicePath)
 	return nil
 }
 
-// installRunit creates runit service
+// ─────────────────────────────────────────────────────────────────────────────
+// runit
+// ─────────────────────────────────────────────────────────────────────────────
+
 func installRunit() error {
 	svDir := fmt.Sprintf("/etc/sv/%s", appName)
 	binaryPath := GetBinaryPath()
 
-	// Create service directory
 	if err := os.MkdirAll(svDir, 0755); err != nil {
 		return fmt.Errorf("failed to create service directory: %w", err)
 	}
 
-	runScript := fmt.Sprintf(`#!/bin/sh
-exec %s 2>&1
-`, binaryPath)
-
-	runPath := filepath.Join(svDir, "run")
-	if err := os.WriteFile(runPath, []byte(runScript), 0755); err != nil {
+	runScript := fmt.Sprintf("#!/bin/sh\nexec %s 2>&1\n", binaryPath)
+	if err := os.WriteFile(filepath.Join(svDir, "run"), []byte(runScript), 0755); err != nil {
 		return fmt.Errorf("failed to write run script: %w", err)
 	}
 
-	// Create log directory
 	logDir := filepath.Join(svDir, "log")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
-
-	logRunScript := `#!/bin/sh
-exec svlogd -tt ./main
-`
-	logRunPath := filepath.Join(logDir, "run")
-	if err := os.WriteFile(logRunPath, []byte(logRunScript), 0755); err != nil {
+	logRun := "#!/bin/sh\nexec svlogd -tt ./main\n"
+	if err := os.WriteFile(filepath.Join(logDir, "run"), []byte(logRun), 0755); err != nil {
 		return fmt.Errorf("failed to write log run script: %w", err)
 	}
 
-	// Link to service directory
-	linkPath := fmt.Sprintf("/var/service/%s", appName)
-	os.Symlink(svDir, linkPath)
+	if exePath, err := os.Executable(); err == nil && exePath != binaryPath {
+		if err := copyBinary(exePath, binaryPath); err != nil {
+			return fmt.Errorf("failed to copy binary: %w", err)
+		}
+	}
 
+	os.Symlink(svDir, fmt.Sprintf("/var/service/%s", appName))
 	fmt.Printf("✅ Runit service installed at: %s\n", svDir)
 	return nil
 }
 
-// uninstallRunit removes runit service
 func uninstallRunit() error {
-	svDir := fmt.Sprintf("/etc/sv/%s", appName)
-	linkPath := fmt.Sprintf("/var/service/%s", appName)
-
-	// Stop service
 	exec.Command("sv", "stop", appName).Run()
-
-	// Remove link
-	os.Remove(linkPath)
-
-	// Remove service directory
-	os.RemoveAll(svDir)
-
-	fmt.Printf("✅ Runit service uninstalled\n")
+	os.Remove(fmt.Sprintf("/var/service/%s", appName))
+	os.RemoveAll(fmt.Sprintf("/etc/sv/%s", appName))
+	fmt.Println("✅ Runit service uninstalled")
 	return nil
 }
 
-// installLaunchd creates macOS launchd plist
+// ─────────────────────────────────────────────────────────────────────────────
+// launchd (macOS)  — label: apimgr.gitignore  (spec Part 4 & 5)
+// ─────────────────────────────────────────────────────────────────────────────
+
 func installLaunchd() error {
 	binaryPath := GetBinaryPath()
-	plistPath := fmt.Sprintf("/Library/LaunchDaemons/com.%s.%s.plist", orgName, appName)
 
-	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.%s.%s</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>%s</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardErrorPath</key>
-    <string>/Library/Logs/%s/%s/error.log</string>
-    <key>StandardOutPath</key>
-    <string>/Library/Logs/%s/%s/output.log</string>
-</dict>
-</plist>
-`, orgName, appName, binaryPath, orgName, appName, orgName, appName)
-
-	// Create directories
 	dirs := []string{
 		fmt.Sprintf("/Library/Application Support/%s/%s", orgName, appName),
 		fmt.Sprintf("/Library/Logs/%s/%s", orgName, appName),
@@ -306,47 +324,77 @@ func installLaunchd() error {
 		}
 	}
 
-	// Write plist file
-	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
+	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>%s</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+    </array>
+
+    <!-- Run as dedicated service user, NOT root -->
+    <key>UserName</key>
+    <string>%s</string>
+
+    <key>GroupName</key>
+    <string>%s</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>WorkingDirectory</key>
+    <string>/Library/Application Support/%s/%s</string>
+
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/%s/%s/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/%s/%s/stderr.log</string>
+</dict>
+</plist>
+`, launchdLabel, binaryPath,
+		appName, appName,
+		orgName, appName,
+		orgName, appName,
+		orgName, appName)
+
+	if err := os.WriteFile(launchdPlist, []byte(plistContent), 0644); err != nil {
 		return fmt.Errorf("failed to write plist file: %w", err)
 	}
 
-	// Copy binary
 	if exePath, err := os.Executable(); err == nil && exePath != binaryPath {
 		if err := copyBinary(exePath, binaryPath); err != nil {
 			return fmt.Errorf("failed to copy binary: %w", err)
 		}
 	}
 
-	fmt.Printf("✅ LaunchDaemon installed at: %s\n", plistPath)
-	fmt.Println()
-	fmt.Println("To load the service:")
-	fmt.Printf("  sudo launchctl load %s\n", plistPath)
-
+	fmt.Printf("✅ LaunchDaemon installed at: %s\n", launchdPlist)
+	fmt.Printf("\nTo load the service:\n  sudo launchctl load %s\n", launchdPlist)
 	return nil
 }
 
-// uninstallLaunchd removes macOS launchd plist
 func uninstallLaunchd() error {
-	plistPath := fmt.Sprintf("/Library/LaunchDaemons/com.%s.%s.plist", orgName, appName)
-
-	// Unload if running
-	exec.Command("launchctl", "unload", plistPath).Run()
-
-	// Remove plist
-	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
+	exec.Command("launchctl", "unload", launchdPlist).Run()
+	if err := os.Remove(launchdPlist); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove plist file: %w", err)
 	}
-
-	fmt.Printf("✅ LaunchDaemon uninstalled\n")
+	fmt.Println("✅ LaunchDaemon uninstalled")
 	return nil
 }
 
-// installWindows creates Windows service
+// ─────────────────────────────────────────────────────────────────────────────
+// Windows Service Manager
+// ─────────────────────────────────────────────────────────────────────────────
+
 func installWindows() error {
 	binaryPath := GetBinaryPath()
-
-	// Copy binary
 	binDir := filepath.Dir(binaryPath)
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
@@ -358,40 +406,35 @@ func installWindows() error {
 		}
 	}
 
-	// Create service using sc.exe
-	displayName := strings.Title(appName) + " API"
+	// Use Virtual Service Account (NT SERVICE\gitignore) — empty ServiceStartName
+	displayName := strings.Title(appName)
 	cmd := exec.Command("sc.exe", "create", appName,
 		"binPath=", binaryPath,
-		"DisplayName=", displayName,
-		"start=", "auto")
-
+		"DisplayName=", displayName+" API",
+		"start=", "auto",
+	)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create Windows service: %w", err)
 	}
 
 	fmt.Printf("✅ Windows service '%s' installed\n", appName)
-	fmt.Println()
-	fmt.Println("To start the service:")
-	fmt.Printf("  sc.exe start %s\n", appName)
-
+	fmt.Printf("\nTo start the service:\n  sc.exe start %s\n", appName)
 	return nil
 }
 
-// uninstallWindows removes Windows service
 func uninstallWindows() error {
-	// Stop service
 	exec.Command("sc.exe", "stop", appName).Run()
-
-	// Delete service
 	if err := exec.Command("sc.exe", "delete", appName).Run(); err != nil {
 		return fmt.Errorf("failed to delete Windows service: %w", err)
 	}
-
 	fmt.Printf("✅ Windows service '%s' uninstalled\n", appName)
 	return nil
 }
 
-// installBSDRC creates BSD rc.d script
+// ─────────────────────────────────────────────────────────────────────────────
+// BSD rc.d
+// ─────────────────────────────────────────────────────────────────────────────
+
 func installBSDRC() error {
 	binaryPath := GetBinaryPath()
 	rcPath := fmt.Sprintf("/usr/local/etc/rc.d/%s", appName)
@@ -407,19 +450,19 @@ func installBSDRC() error {
 name="%s"
 rcvar="%s_enable"
 command="%s"
-pidfile="/var/run/%s.pid"
+pidfile="/var/run/%s/%s.pid"
+command_args=""
 
 load_rc_config $name
 : ${%s_enable:="NO"}
 
 run_rc_command "$1"
-`, appName, appName, appName, binaryPath, appName, appName)
+`, appName, appName, appName, binaryPath, orgName, appName, appName)
 
 	if err := os.WriteFile(rcPath, []byte(rcContent), 0755); err != nil {
 		return fmt.Errorf("failed to write rc.d script: %w", err)
 	}
 
-	// Copy binary
 	if exePath, err := os.Executable(); err == nil && exePath != binaryPath {
 		if err := copyBinary(exePath, binaryPath); err != nil {
 			return fmt.Errorf("failed to copy binary: %w", err)
@@ -427,64 +470,33 @@ run_rc_command "$1"
 	}
 
 	fmt.Printf("✅ BSD rc.d script installed at: %s\n", rcPath)
-	fmt.Println()
-	fmt.Printf("Add '%s_enable=\"YES\"' to /etc/rc.conf\n", appName)
-	fmt.Println()
-	fmt.Println("To start the service:")
-	fmt.Printf("  service %s start\n", appName)
-
+	fmt.Printf("\nAdd '%s_enable=\"YES\"' to /etc/rc.conf\n", appName)
+	fmt.Printf("\nTo start the service:\n  service %s start\n", appName)
 	return nil
 }
 
-// uninstallBSDRC removes BSD rc.d script
 func uninstallBSDRC() error {
-	rcPath := fmt.Sprintf("/usr/local/etc/rc.d/%s", appName)
-
-	// Stop service
 	exec.Command("service", appName, "stop").Run()
-
-	// Remove script
+	rcPath := fmt.Sprintf("/usr/local/etc/rc.d/%s", appName)
 	if err := os.Remove(rcPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove rc.d script: %w", err)
 	}
-
-	fmt.Printf("✅ BSD rc.d script uninstalled\n")
+	fmt.Println("✅ BSD rc.d script uninstalled")
 	return nil
 }
 
-// copyBinary copies the binary to the destination
-func copyBinary(src, dst string) error {
-	// Create destination directory if needed
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return err
-	}
+// ─────────────────────────────────────────────────────────────────────────────
+// Control (start / stop / restart / reload)
+// ─────────────────────────────────────────────────────────────────────────────
 
-	// Read source
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-
-	// Write to destination
-	if err := os.WriteFile(dst, data, 0755); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Start starts the service
 func Start() error {
-	serviceType := DetectServiceManager()
-
-	switch serviceType {
+	switch DetectServiceManager() {
 	case ServiceSystemd:
 		return exec.Command("systemctl", "start", appName).Run()
 	case ServiceRunit:
 		return exec.Command("sv", "start", appName).Run()
 	case ServiceLaunchd:
-		plistPath := fmt.Sprintf("/Library/LaunchDaemons/com.%s.%s.plist", orgName, appName)
-		return exec.Command("launchctl", "load", plistPath).Run()
+		return exec.Command("launchctl", "load", launchdPlist).Run()
 	case ServiceWindows:
 		return exec.Command("sc.exe", "start", appName).Run()
 	case ServiceBSDRC:
@@ -494,18 +506,14 @@ func Start() error {
 	}
 }
 
-// Stop stops the service
 func Stop() error {
-	serviceType := DetectServiceManager()
-
-	switch serviceType {
+	switch DetectServiceManager() {
 	case ServiceSystemd:
 		return exec.Command("systemctl", "stop", appName).Run()
 	case ServiceRunit:
 		return exec.Command("sv", "stop", appName).Run()
 	case ServiceLaunchd:
-		plistPath := fmt.Sprintf("/Library/LaunchDaemons/com.%s.%s.plist", orgName, appName)
-		return exec.Command("launchctl", "unload", plistPath).Run()
+		return exec.Command("launchctl", "unload", launchdPlist).Run()
 	case ServiceWindows:
 		return exec.Command("sc.exe", "stop", appName).Run()
 	case ServiceBSDRC:
@@ -515,11 +523,8 @@ func Stop() error {
 	}
 }
 
-// Restart restarts the service
 func Restart() error {
-	serviceType := DetectServiceManager()
-
-	switch serviceType {
+	switch DetectServiceManager() {
 	case ServiceSystemd:
 		return exec.Command("systemctl", "restart", appName).Run()
 	case ServiceRunit:
@@ -537,17 +542,28 @@ func Restart() error {
 	}
 }
 
-// Reload sends reload signal to the service
 func Reload() error {
-	serviceType := DetectServiceManager()
-
-	switch serviceType {
+	switch DetectServiceManager() {
 	case ServiceSystemd:
 		return exec.Command("systemctl", "reload", appName).Run()
 	case ServiceRunit:
 		return exec.Command("sv", "hup", appName).Run()
 	default:
-		// For others, restart is the fallback
 		return Restart()
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+func copyBinary(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0755)
 }

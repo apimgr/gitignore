@@ -12,6 +12,7 @@ import (
 
 	"github.com/apimgr/gitignore/src/admin"
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/paths"
 	"github.com/apimgr/gitignore/src/templates"
 	"github.com/go-chi/chi/v5"
@@ -47,25 +48,23 @@ func New(config *Config) *Server {
 		router: chi.NewRouter(),
 	}
 
-	// Create admin handler
-	sessionTimeout := 3600
-	if config.Cfg != nil && config.Cfg.Server.Session.Timeout > 0 {
-		sessionTimeout = config.Cfg.Server.Session.Timeout
-	}
+	// Load admin credentials from database (never from config file)
 	adminUsername := "admin"
-	adminPassword := ""
-	adminAPIToken := ""
-	if config.Cfg != nil {
-		adminUsername = config.Cfg.Server.Admin.Username
-		adminPassword = config.Cfg.Server.Admin.Password
-		adminAPIToken = config.Cfg.Server.Admin.APIToken
+	adminPassHash := ""
+	adminTokenHash := ""
+	if creds, err := db.GetAdminCredentials(); err == nil && creds != nil {
+		adminUsername = creds.Username
+		adminPassHash = creds.PassHash
+		adminTokenHash = creds.TokenHash
 	}
+
+	sslEnabled := config.Cfg != nil && config.Cfg.Server.SSL.Enabled
 	s.adminHandler = admin.NewHandler(
 		adminUsername,
-		adminPassword,
-		adminAPIToken,
-		sessionTimeout,
-		false, // SSL enabled
+		adminPassHash,
+		adminTokenHash,
+		3600,
+		sslEnabled,
 		config.Version,
 		config.Commit,
 		config.BuildDate,

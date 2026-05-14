@@ -19,28 +19,27 @@ type Directories struct {
 	Config string
 	Data   string
 	Logs   string
+	Backup string
 }
 
 // GetDirectories returns OS-specific directories
-// Uses {org}/{name} structure: /etc/apimgr/gitignore/, ~/.config/apimgr/gitignore/
 func GetDirectories() Directories {
-	configDir, dataDir, logsDir := GetDefaultDirs(ProjectName)
+	configDir, dataDir, logsDir, backupDir := GetDefaultDirs(ProjectName)
 	return Directories{
 		Config: configDir,
 		Data:   dataDir,
 		Logs:   logsDir,
+		Backup: backupDir,
 	}
 }
 
 // GetDefaultDirs returns OS-specific default directories based on privileges
-// Uses {org}/{name} structure: /etc/apimgr/gitignore/, ~/.config/apimgr/gitignore/
-func GetDefaultDirs(projectName string) (configDir, dataDir, logsDir string) {
+func GetDefaultDirs(projectName string) (configDir, dataDir, logsDir, backupDir string) {
 	// Check if running in container
 	if IsRunningInContainer() {
-		return "/config", "/data", "/logs"
+		return "/config", "/data", "/data/logs", "/data/backups"
 	}
 
-	// Check if running as root/admin
 	isRoot := false
 	if runtime.GOOS == "windows" {
 		isRoot = os.Getenv("USERDOMAIN") == os.Getenv("COMPUTERNAME")
@@ -53,62 +52,77 @@ func GetDefaultDirs(projectName string) (configDir, dataDir, logsDir string) {
 		case "windows":
 			programData := os.Getenv("ProgramData")
 			if programData == "" {
-				programData = "C:\\ProgramData"
+				programData = `C:\ProgramData`
 			}
-			configDir = filepath.Join(programData, OrgName, projectName)
-			dataDir = filepath.Join(programData, OrgName, projectName, "data")
-			logsDir = filepath.Join(programData, OrgName, projectName, "logs")
-		default: // Linux, BSD, macOS
+			base := filepath.Join(programData, OrgName, projectName)
+			configDir = base
+			dataDir = filepath.Join(base, "data")
+			logsDir = filepath.Join(base, "logs")
+			backupDir = filepath.Join(programData, "Backups", OrgName, projectName)
+
+		case "darwin":
+			configDir = filepath.Join("/Library/Application Support", OrgName, projectName)
+			dataDir = filepath.Join("/Library/Application Support", OrgName, projectName, "data")
+			logsDir = filepath.Join("/Library/Logs", OrgName, projectName)
+			backupDir = filepath.Join("/Library/Backups", OrgName, projectName)
+
+		case "freebsd", "openbsd", "netbsd":
+			configDir = filepath.Join("/usr/local/etc", OrgName, projectName)
+			dataDir = filepath.Join("/var/db", OrgName, projectName)
+			logsDir = filepath.Join("/var/log", OrgName, projectName)
+			backupDir = filepath.Join("/var/backups", OrgName, projectName)
+
+		default: // Linux
 			configDir = filepath.Join("/etc", OrgName, projectName)
 			dataDir = filepath.Join("/var/lib", OrgName, projectName)
 			logsDir = filepath.Join("/var/log", OrgName, projectName)
+			backupDir = filepath.Join("/mnt/Backups", OrgName, projectName)
 		}
-	} else {
-		var homeDir string
-		currentUser, err := user.Current()
-		if err == nil {
-			homeDir = currentUser.HomeDir
-		} else {
-			homeDir = os.Getenv("HOME")
-			if homeDir == "" {
-				homeDir = os.Getenv("USERPROFILE")
-			}
-		}
-
-		switch runtime.GOOS {
-		case "windows":
-			appData := os.Getenv("APPDATA")
-			if appData == "" {
-				appData = filepath.Join(homeDir, "AppData", "Roaming")
-			}
-			localAppData := os.Getenv("LOCALAPPDATA")
-			if localAppData == "" {
-				localAppData = filepath.Join(homeDir, "AppData", "Local")
-			}
-			configDir = filepath.Join(appData, OrgName, projectName)
-			dataDir = filepath.Join(localAppData, OrgName, projectName)
-			logsDir = filepath.Join(localAppData, OrgName, projectName, "logs")
-		case "darwin":
-			configDir = filepath.Join(homeDir, ".config", OrgName, projectName)
-			dataDir = filepath.Join(homeDir, ".local", "share", OrgName, projectName)
-			logsDir = filepath.Join(homeDir, ".local", "share", OrgName, projectName, "logs")
-		default: // Linux, BSD
-			xdgConfig := os.Getenv("XDG_CONFIG_HOME")
-			if xdgConfig == "" {
-				xdgConfig = filepath.Join(homeDir, ".config")
-			}
-			xdgData := os.Getenv("XDG_DATA_HOME")
-			if xdgData == "" {
-				xdgData = filepath.Join(homeDir, ".local", "share")
-			}
-
-			configDir = filepath.Join(xdgConfig, OrgName, projectName)
-			dataDir = filepath.Join(xdgData, OrgName, projectName)
-			logsDir = filepath.Join(xdgData, OrgName, projectName, "logs")
-		}
+		return
 	}
 
-	return configDir, dataDir, logsDir
+	// Non-privileged user
+	homeDir := userHomeDir()
+
+	switch runtime.GOOS {
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(homeDir, "AppData", "Roaming")
+		}
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			localAppData = filepath.Join(homeDir, "AppData", "Local")
+		}
+		configDir = filepath.Join(appData, OrgName, projectName)
+		dataDir = filepath.Join(localAppData, OrgName, projectName)
+		logsDir = filepath.Join(localAppData, OrgName, projectName, "logs")
+		backupDir = filepath.Join(localAppData, "Backups", OrgName, projectName)
+
+	case "darwin":
+		appSupport := filepath.Join(homeDir, "Library", "Application Support")
+		configDir = filepath.Join(appSupport, OrgName, projectName)
+		dataDir = filepath.Join(appSupport, OrgName, projectName)
+		logsDir = filepath.Join(homeDir, "Library", "Logs", OrgName, projectName)
+		backupDir = filepath.Join(homeDir, "Library", "Backups", OrgName, projectName)
+
+	case "freebsd", "openbsd", "netbsd":
+		xdgConfig := xdgConfigHome(homeDir)
+		xdgData := xdgDataHome(homeDir)
+		configDir = filepath.Join(xdgConfig, OrgName, projectName)
+		dataDir = filepath.Join(xdgData, OrgName, projectName)
+		logsDir = filepath.Join(xdgData, OrgName, projectName, "logs")
+		backupDir = filepath.Join(homeDir, ".local", "backups", OrgName, projectName)
+
+	default: // Linux
+		xdgConfig := xdgConfigHome(homeDir)
+		xdgData := xdgDataHome(homeDir)
+		configDir = filepath.Join(xdgConfig, OrgName, projectName)
+		dataDir = filepath.Join(xdgData, OrgName, projectName)
+		logsDir = filepath.Join(xdgData, OrgName, projectName, "logs")
+		backupDir = filepath.Join(homeDir, ".local", "backups", OrgName, projectName)
+	}
+	return
 }
 
 // EnsureDirectories creates all required directories
@@ -128,11 +142,9 @@ func EnsureDir(path string) error {
 
 // IsRunningInContainer checks if running inside a container
 func IsRunningInContainer() bool {
-	// Check for Docker
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
-	// Check for common container init systems
 	data, err := os.ReadFile("/proc/1/comm")
 	if err != nil {
 		return false
@@ -143,10 +155,11 @@ func IsRunningInContainer() bool {
 
 // GetBackupDir returns the default backup directory
 func GetBackupDir() string {
-	return filepath.Join("/mnt/Backups", OrgName, ProjectName)
+	_, _, _, backupDir := GetDefaultDirs(ProjectName)
+	return backupDir
 }
 
-// PathManager provides compatibility with old interface
+// PathManager provides path operations rooted at the application directories
 type PathManager struct {
 	dirs Directories
 }
@@ -159,34 +172,25 @@ func New() *PathManager {
 }
 
 // SetConfigDir overrides the config directory
-func (pm *PathManager) SetConfigDir(dir string) {
-	pm.dirs.Config = dir
-}
+func (pm *PathManager) SetConfigDir(dir string) { pm.dirs.Config = dir }
 
 // SetDataDir overrides the data directory
-func (pm *PathManager) SetDataDir(dir string) {
-	pm.dirs.Data = dir
-}
+func (pm *PathManager) SetDataDir(dir string) { pm.dirs.Data = dir }
 
 // SetLogsDir overrides the logs directory
-func (pm *PathManager) SetLogsDir(dir string) {
-	pm.dirs.Logs = dir
-}
+func (pm *PathManager) SetLogsDir(dir string) { pm.dirs.Logs = dir }
 
 // GetConfigDir returns the config directory
-func (pm *PathManager) GetConfigDir() string {
-	return pm.dirs.Config
-}
+func (pm *PathManager) GetConfigDir() string { return pm.dirs.Config }
 
 // GetDataDir returns the data directory
-func (pm *PathManager) GetDataDir() string {
-	return pm.dirs.Data
-}
+func (pm *PathManager) GetDataDir() string { return pm.dirs.Data }
 
 // GetLogsDir returns the logs directory
-func (pm *PathManager) GetLogsDir() string {
-	return pm.dirs.Logs
-}
+func (pm *PathManager) GetLogsDir() string { return pm.dirs.Logs }
+
+// GetBackupDir returns the backup directory
+func (pm *PathManager) GetBackupDir() string { return pm.dirs.Backup }
 
 // ConfigPath returns a path within the config directory
 func (pm *PathManager) ConfigPath(filename string) string {
@@ -206,4 +210,30 @@ func (pm *PathManager) LogsPath(filename string) string {
 // EnsureDirectories creates all necessary directories
 func (pm *PathManager) EnsureDirectories() error {
 	return EnsureDirectories(pm.dirs)
+}
+
+// helpers
+
+func userHomeDir() string {
+	if u, err := user.Current(); err == nil {
+		return u.HomeDir
+	}
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	return os.Getenv("USERPROFILE")
+}
+
+func xdgConfigHome(homeDir string) string {
+	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+		return v
+	}
+	return filepath.Join(homeDir, ".config")
+}
+
+func xdgDataHome(homeDir string) string {
+	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
+		return v
+	}
+	return filepath.Join(homeDir, ".local", "share")
 }

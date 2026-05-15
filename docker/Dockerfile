@@ -18,7 +18,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags "-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${VCS_REF}' -X 'main.BuildDate=${BUILD_DATE}'" \
-    -o /app .
+    -o /app ./src
 
 # =============================================================================
 # Runtime Stage - Minimal Alpine image

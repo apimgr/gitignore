@@ -14,8 +14,10 @@ import (
 
 // Config represents the complete server configuration
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Web    WebConfig    `yaml:"web"`
+	Server      ServerConfig      `yaml:"server"`
+	Web         WebConfig         `yaml:"web"`
+	WebRobots   WebRobotsConfig   `yaml:"web_robots"`
+	WebSecurity WebSecurityConfig `yaml:"web_security"`
 }
 
 // ServerConfig contains server-related settings
@@ -136,6 +138,18 @@ type WebUIConfig struct {
 	Theme string `yaml:"theme"`
 }
 
+// WebRobotsConfig contains robots.txt allow/deny path settings
+type WebRobotsConfig struct {
+	Allow []string `yaml:"allow"`
+	Deny  []string `yaml:"deny"`
+}
+
+// WebSecurityConfig contains security-related web settings
+type WebSecurityConfig struct {
+	Admin string `yaml:"admin"`
+	CORS  string `yaml:"cors"`
+}
+
 var (
 	current    *Config
 	mu         sync.RWMutex
@@ -210,6 +224,14 @@ func DefaultConfig() *Config {
 				Theme: "dark",
 			},
 			CORS: "*",
+		},
+		WebRobots: WebRobotsConfig{
+			Allow: []string{"/", "/api"},
+			Deny:  []string{"/debug"},
+		},
+		WebSecurity: WebSecurityConfig{
+			Admin: "",
+			CORS:  "*",
 		},
 	}
 }

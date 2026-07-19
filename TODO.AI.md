@@ -61,19 +61,9 @@ Missing `-v` short flag for `--version`; missing `--debug` flag; missing
 `--color` flag (values `auto`/`yes`/`no`, default `auto`).
 Read: AI.md PART 5, ~/.claude/memory/go_conventions.md
 
-## [ ] Implement gitignore.io route/API compatibility layer
-Depends on: core template lookup route existing (PART 7-22 item above).
-Add unversioned routes mounted alongside `/api/{api_version}/*`, reusing the
-same template dataset/lookup — no separate dataset:
-- `GET /api/list` and `GET /api/list?format=lines` — text/plain, comma-separated
-  sorted template keys
-- `GET /api/list?format=json` — application/json, keyed by lowercase template
-  key: `{key, name, fileName, contents}`
-- `GET /api/{name1,name2,...}` — text/plain, 200, `# Created by .../api/{list}`
-  header + `# Edit at .../api?templates={list}` line + one `### {Name} ###`
-  block per resolved template + `# End of .../api/{list}` footer
-- `GET /api/{unknown}` — text/plain, 404, same wrapper with
-  `#!! ERROR: {name} is undefined. Use list command to see defined gitignore
-  types !!#` per unresolved name
-Exact route/status/body contract verified against the live gitignore.io
-service: Read: IDEA.md "External API Compatibility"
+## [x] Implement gitignore.io route/API compatibility layer
+Implemented in `src/server/compat_handlers.go`, registered in
+`src/server/server.go` as unversioned `/api/list` and `/api/{list}` routes
+alongside `/api/v1/*`, reusing `templates.Manager.Get`/`ListAll` — no
+separate dataset. Exact route/status/body contract per IDEA.md "External
+API Compatibility".

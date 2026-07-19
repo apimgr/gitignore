@@ -212,6 +212,11 @@ func (s *Server) setupRoutes() {
 		r.Get("/cli/completion/fish", s.handleCLICompletionFish)
 	})
 
+	// gitignore.io route/API compatibility layer (unversioned, mounted
+	// alongside /api/v1 — see IDEA.md "External API Compatibility")
+	s.router.Get("/api/list", s.handleCompatList)
+	s.router.Get("/api/{list}", s.handleCompatTemplates)
+
 	// Debug routes (dev mode only)
 	if s.config.DevMode {
 		s.router.Get("/debug/routes", s.handleDebugRoutes)

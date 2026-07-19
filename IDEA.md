@@ -28,6 +28,7 @@ client_binary: gitignore-cli
 - CLI client (`gitignore-cli`) for shell-pipeline use: `gitignore-cli Go Node > .gitignore`
 - OpenAPI/Swagger docs at `/api/{api_version}/server/swagger`
 - GraphQL at `/graphql`
+- gitignore.io route/API compatibility layer (see "External API Compatibility" below) — this project is a full drop-in replacement for gitignore.io/toptal's gitignore API
 
 **Non-goals:**
 - No user accounts, registration, or login of any kind
@@ -84,3 +85,22 @@ No external services called at runtime.
 
 - **No authentication on any endpoint**: intentional. Public read-only reference API.
 - **All responses include `Access-Control-Allow-Origin: *`**: intentional. Public data API designed for cross-origin browser use.
+- **External route compatibility (gitignore.io)**: intentional. This app is a full replacement for gitignore.io — existing scripts, editor plugins, and shell functions written against gitignore.io's API must work unmodified against this server. See "External API Compatibility" below.
+
+### External API Compatibility
+
+**Compatibility target: gitignore.io (toptal.com/developers/gitignore).** This is explicit **route/API compatibility**, not just feature compatibility — the exact external paths, query params, status codes, and response bodies are reproduced verbatim, mounted alongside (not instead of) our own `/api/{api_version}/*` namespace. Behavior verified against the live service on 2026-07-19.
+
+**Compatible routes (unversioned, no `{api_version}` prefix — mounted at the literal gitignore.io paths):**
+
+| Route | Method | Behavior |
+|-------|--------|----------|
+| `/api/list` | GET | `text/plain; charset=utf-8`, 200. Comma-separated list of all template keys, alphabetically sorted, wrapped across lines for readability. Equivalent to `format=lines` (the gitignore.io default). |
+| `/api/list?format=lines` | GET | Identical to `/api/list` with no query param. |
+| `/api/list?format=json` | GET | `application/json; charset=utf-8`, 200. Object keyed by lowercase template key: `{"<key>": {"key", "name", "fileName", "contents"}}` for every template. |
+| `/api/{name1,name2,...}` | GET | `text/plain; charset=utf-8`, 200 if at least the first name resolves. Body: `# Created by https://<host>/api/{list}` header line, `# Edit at https://<host>/api?templates={list}` line, blank line, then one `### {Name} ###\n{contents}` block per resolved template (in request order), then a blank line and `# End of https://<host>/api/{list}` footer. Template name matching is case-insensitive, reusing the same lookup as our own `/api/{api_version}/templates/{name}` route — no separate dataset. |
+| `/api/{unknown}` | GET | `text/plain; charset=utf-8`, 404. Same header/footer wrapper as above, with `#!! ERROR: {name} is undefined. Use list command to see defined gitignore types !!#` in place of the missing template's block. Unresolved names inside an otherwise-valid list get their own `#!! ERROR: ... !!#` line; resolved names in the same request still render normally. |
+
+**What IS compatible:** the four routes above, byte-for-byte body shape and status codes, `text/plain`/`application/json` content types, case-insensitive template names, comma-separated multi-template requests.
+
+**What is NOT compatible (intentionally out of scope):** gitignore.io's web UI routes (`/`, `?templates=...`), its Slack/analytics integrations, and any endpoint not listed above. Our own richer API (`/api/{api_version}/templates`, composer, GraphQL) remains the canonical, documented interface — the gitignore.io routes exist purely as a compatibility shim for existing external tooling.

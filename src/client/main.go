@@ -16,7 +16,7 @@ import (
 	"github.com/apimgr/gitignore/src/client/cmd"
 	"github.com/apimgr/gitignore/src/client/config"
 	"github.com/apimgr/gitignore/src/client/output"
-	"github.com/apimgr/gitignore/src/client/paths"
+	clipath "github.com/apimgr/gitignore/src/client/path"
 	"github.com/apimgr/gitignore/src/client/tui"
 	"github.com/apimgr/gitignore/src/common/display"
 )
@@ -65,7 +65,7 @@ func main() {
 
 	printer := output.New(output.ResolveColor(*colorFlag))
 
-	if err := paths.EnsureDirs(); err != nil {
+	if err := clipath.EnsureDirs(); err != nil {
 		printer.Error("creating config/data directories: %v", err)
 		os.Exit(output.ExitConfig)
 	}

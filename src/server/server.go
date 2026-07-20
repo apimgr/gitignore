@@ -14,9 +14,9 @@ import (
 	"github.com/apimgr/gitignore/src/admin"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
-	"github.com/apimgr/gitignore/src/paths"
+	apppath "github.com/apimgr/gitignore/src/path"
 	"github.com/apimgr/gitignore/src/ssl"
-	"github.com/apimgr/gitignore/src/templates"
+	"github.com/apimgr/gitignore/src/template"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/cors"
@@ -27,8 +27,8 @@ type Config struct {
 	Address   string
 	Port      int
 	DevMode   bool
-	Templates *templates.Manager
-	Paths     *paths.PathManager
+	Templates *template.Manager
+	Paths     *apppath.PathManager
 	Version   string
 	Commit    string
 	BuildDate string

@@ -48,12 +48,17 @@ Path-security middleware still not found in src/server — flag for a
 separate check once handleStatic/handleFavicon move past stub status.
 Read: AI.md PART 23, PART 24
 
-## [ ] Rename plural package dirs to singular (go-lint LAYOUT)
+## [x] Rename plural package dirs to singular (go-lint LAYOUT)
 `src/paths/` -> `src/path/`, `src/templates/` -> `src/template/`,
-`src/client/paths/` -> `src/client/path/`. Pre-existing convention
-violation across the whole tree, not introduced by recent batches —
-requires updating every import site project-wide; do as its own isolated
-commit with a full build/vet/test pass, not a drive-by rename.
+`src/client/paths/` -> `src/client/path/`, package declarations and every
+import site updated project-wide. The `src/path` and `src/client/path`
+imports are aliased (`apppath`/`clipath`) at their call sites rather than
+imported as bare `path` — several functions already use a local variable/
+parameter named `path` (e.g. `service.fileExists(path string)`,
+`config.Load`'s local `path :=`), and importing the package unaliased
+would silently shadow it. No stdlib `path`/`html/template` import
+collisions found in the files touched. Verified with a full Docker
+build/vet/test pass (exit 0) and a go-lint re-run.
 Read: ~/.claude/memory/go_conventions.md
 
 ## [x] Implement PART 7-22 requirements not yet verified
@@ -131,6 +136,12 @@ already-unflagged Swagger UI bundle on the same page. The "no client-side
 rendering" rule targets the app's own core content (search/list/template
 pages, all server-rendered via src/server/assets/html/*), not an embedded
 CDN developer tool. Left as-is.
+A later go-lint re-run (after the singular-directory rename below) also
+flagged the Swagger UI block itself (src/server/openapi.go lines
+115-126, swagger-ui-dist CDN JS) under the same FORBIDDEN rule. Same
+judgment applies and is reaffirmed here: Swagger UI is the same category
+of self-contained CDN dev tool as GraphiQL, with no server-rendered
+equivalent — left as-is for the same reason.
 Read: ~/.claude/memory/go_conventions.md, ~/.claude/memory/ui_ux_conventions.md
 
 ## [x] Fix Makefile CasjaysDev convention violations

@@ -20,10 +20,10 @@ import (
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/mode"
-	"github.com/apimgr/gitignore/src/paths"
+	apppath "github.com/apimgr/gitignore/src/path"
 	"github.com/apimgr/gitignore/src/server"
 	"github.com/apimgr/gitignore/src/service"
-	"github.com/apimgr/gitignore/src/templates"
+	"github.com/apimgr/gitignore/src/template"
 )
 
 // Version information (set by build flags)
@@ -53,7 +53,7 @@ func init() {
 }
 
 func main() {
-	dirs := paths.GetDirectories()
+	dirs := apppath.GetDirectories()
 
 	// Flags
 	port := flag.String("port", "", "Server port (overrides config)")
@@ -124,7 +124,7 @@ func main() {
 	}
 
 	// Ensure directories exist
-	if err := paths.EnsureDirectories(dirs); err != nil {
+	if err := apppath.EnsureDirectories(dirs); err != nil {
 		log.Printf("Warning: failed to create directories: %v", err)
 	}
 
@@ -266,7 +266,7 @@ func main() {
 
 	// ── Load templates ───────────────────────────────────────────────────────
 	log.Println("Loading .gitignore templates...")
-	templateMgr, err := templates.New()
+	templateMgr, err := template.New()
 	if err != nil {
 		log.Printf("Failed to load templates: %v", err)
 		os.Exit(exOSFile)
@@ -278,7 +278,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
 	// ── Start server ─────────────────────────────────────────────────────────
-	pathMgr := paths.New()
+	pathMgr := apppath.New()
 	srv := server.New(&server.Config{
 		Address:   serverAddress,
 		Port:      portNum,
@@ -505,7 +505,7 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 		if len(args) > 0 {
 			backupFile = args[0]
 		} else {
-			backupDir := paths.GetBackupDir()
+			backupDir := apppath.GetBackupDir()
 			if err := os.MkdirAll(backupDir, 0755); err != nil {
 				log.Printf("Failed to create backup directory: %v", err)
 				os.Exit(exCantCreat)

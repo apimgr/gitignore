@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/apimgr/gitignore/src/client/paths"
+	clipath "github.com/apimgr/gitignore/src/client/path"
 	srvconfig "github.com/apimgr/gitignore/src/config"
 )
 
@@ -52,7 +52,7 @@ func Default() *Config {
 // Load reads the named config profile, creating a default one on first run.
 // name is a profile name (bare "test" -> test.yml) or an absolute path.
 func Load(name string) (*Config, string, error) {
-	path := paths.ConfigFile(name)
+	path := clipath.ConfigFile(name)
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -76,7 +76,7 @@ func Load(name string) (*Config, string, error) {
 // Save writes cfg to path with user-only (0600) permissions, creating
 // parent directories first.
 func Save(path string, cfg *Config) error {
-	if err := paths.EnsureDirs(); err != nil {
+	if err := clipath.EnsureDirs(); err != nil {
 		return fmt.Errorf("ensure dirs: %w", err)
 	}
 

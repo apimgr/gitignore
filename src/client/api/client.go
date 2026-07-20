@@ -43,7 +43,7 @@ func New(baseURL string) *Client {
 	}
 }
 
-// Template mirrors the JSON shape of src/templates.Template as served by
+// Template mirrors the JSON shape of src/template.Template as served by
 // the API. Kept as a small client-side copy so this package has no
 // compile-time dependency on the server's internal packages.
 type Template struct {
@@ -57,7 +57,7 @@ type Template struct {
 }
 
 // envelope mirrors the {"success": true, "data": ...} JSON contract
-// implemented by src/templates/handlers.go for every JSON-negotiated
+// implemented by src/template/handlers.go for every JSON-negotiated
 // response.
 type envelope struct {
 	Success   bool            `json:"success"`

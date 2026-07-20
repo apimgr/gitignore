@@ -1,8 +1,8 @@
 // Package paths resolves CLI runtime directories. Unlike the server's
-// src/paths package (which switches between system and user directories
+// src/path package (which switches between system and user directories
 // based on privilege), CLI directories are ALWAYS user-scope — even when
 // the CLI is invoked as root — per AI.md PART 32 "Directory Structure".
-package paths
+package path
 
 import (
 	"os"

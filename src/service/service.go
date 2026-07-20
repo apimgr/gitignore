@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/apimgr/gitignore/src/paths"
+	apppath "github.com/apimgr/gitignore/src/path"
 )
 
 const (
@@ -180,8 +180,8 @@ func confirmPrompt(prompt string) bool {
 // removeAllData deletes the config, data, cache, log, and backup
 // directories plus the PID file created for this service.
 func removeAllData() {
-	configDir, dataDir, logsDir, backupDir := paths.GetDefaultDirs(appName)
-	dirs := []string{configDir, dataDir, paths.GetCacheDir(), logsDir, backupDir}
+	configDir, dataDir, logsDir, backupDir := apppath.GetDefaultDirs(appName)
+	dirs := []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, backupDir}
 
 	for _, dir := range dirs {
 		if dir == "" {
@@ -192,7 +192,7 @@ func removeAllData() {
 		}
 	}
 
-	if pidFile := paths.GetPIDFile(); pidFile != "" {
+	if pidFile := apppath.GetPIDFile(); pidFile != "" {
 		if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
 			fmt.Printf("%s Failed to remove PID file: %v\n", warnMark(), err)
 		}

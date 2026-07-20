@@ -22,6 +22,15 @@ import (
 	"github.com/rs/cors"
 )
 
+// apiVersion is the current API version segment. Code must build API paths
+// through apiBasePath() rather than hardcoding "v1" (AI.md PART 14).
+const apiVersion = "v1"
+
+// apiBasePath returns the versioned API path prefix, e.g. "/api/v1".
+func apiBasePath() string {
+	return "/api/" + apiVersion
+}
+
 // Config holds server configuration
 type Config struct {
 	Address   string
@@ -175,30 +184,42 @@ func (s *Server) setupRoutes() {
 	// CLI
 	s.router.Get("/cli", s.handleCLIPage)
 
-	// OpenAPI/Swagger (root level)
-	s.router.Get("/openapi", s.handleSwaggerUI)
-	s.router.Get("/openapi.json", s.handleOpenAPIJSON)
-
-	// GraphQL (root level)
-	s.router.Get("/graphql", s.handleGraphiQLPage)
-	s.router.Post("/graphql", s.handleGraphQL)
-	s.router.Get("/graphiql", s.handleGraphiQLPage)
+	// Server docs UI pages (root level, AI.md PART 14 "Root-Level Endpoints")
+	s.router.Get("/server/docs/swagger", s.handleSwaggerUI)
+	s.router.Get("/server/docs/graphql", s.handleGraphiQLPage)
 
 	// Static files
 	s.router.Get("/static/*", s.handleStatic)
 	s.router.Get("/favicon.ico", s.handleFavicon)
 
-	// API v1 routes
-	s.router.Route("/api/v1", func(r chi.Router) {
+	// Root-level API aliases (AI.md PART 14 "Root-Level Endpoints") — thin
+	// wrappers over the canonical versioned handlers, no logic duplication.
+	s.router.Get("/api/swagger", s.handleOpenAPIJSON)
+	s.router.Get("/api/graphql", s.handleGraphQLSchema)
+	s.router.Post("/api/graphql", s.handleGraphQL)
+	s.router.Get("/api/healthz", s.handleHealthz)
+	s.router.Get("/api/healthz.txt", s.handleHealthzText)
+	s.router.Get("/api/autodiscover", s.handleAPIAutodiscover)
+
+	// Versioned API routes
+	s.router.Route(apiBasePath(), func(r chi.Router) {
 		// API info
 		r.Get("/", s.handleAPIInfo)
-		r.Get("/healthz", s.handleHealthz)
-		r.Get("/healthz.txt", s.handleHealthzText)
 
-		// Templates
-		r.Get("/template/{name}", s.handleAPITemplate)
-		r.Get("/template/{name}.txt", s.handleAPITemplateText)
-		r.Get("/template/{name}.json", s.handleAPITemplateJSON)
+		// Operator/server namespace (AI.md PART 14 "server/*", info-only —
+		// mutating operator endpoints are a separate follow-up, see
+		// TODO.AI.md)
+		r.Get("/server/healthz", s.handleHealthz)
+		r.Get("/server/healthz.txt", s.handleHealthzText)
+		r.Get("/server/swagger", s.handleOpenAPIJSON)
+		r.Post("/server/graphql", s.handleGraphQL)
+		r.Get("/server/graphql", s.handleGraphQLSchema)
+
+		// Templates (plural resource noun, AI.md PART 14 "Route Naming
+		// Convention")
+		r.Get("/templates/{name}", s.handleAPITemplate)
+		r.Get("/templates/{name}.txt", s.handleAPITemplateText)
+		r.Get("/templates/{name}.json", s.handleAPITemplateJSON)
 		r.Get("/list", s.handleAPIList)
 		r.Get("/list.txt", s.handleAPIListText)
 		r.Get("/search", s.handleAPISearch)
@@ -207,22 +228,14 @@ func (s *Server) setupRoutes() {
 		r.Get("/combine.txt", s.handleAPICombineText)
 		r.Get("/categories", s.handleAPICategories)
 		r.Get("/categories.txt", s.handleAPICategoriesText)
-		r.Get("/category/{name}", s.handleAPICategoryTemplates)
-		r.Get("/category/{name}.txt", s.handleAPICategoryTemplatesText)
+		r.Get("/categories/{name}", s.handleAPICategoryTemplates)
+		r.Get("/categories/{name}.txt", s.handleAPICategoryTemplatesText)
 		r.Get("/stats", s.handleAPIStats)
 		r.Get("/stats.txt", s.handleAPIStatsText)
 
 		// Export
 		r.Get("/templates.json", s.handleAPITemplatesJSON)
 		r.Get("/templates.tar.gz", s.handleAPITemplatesTarGz)
-
-		// Documentation
-		r.Get("/docs", s.handleSwaggerUI)
-		r.Get("/openapi.json", s.handleOpenAPIJSON)
-
-		// GraphQL
-		r.Post("/graphql", s.handleGraphQL)
-		r.Get("/schema.graphql", s.handleGraphQLSchema)
 
 		// CLI scripts
 		r.Get("/cli/sh", s.handleCLIScriptSh)
@@ -233,7 +246,8 @@ func (s *Server) setupRoutes() {
 	})
 
 	// gitignore.io route/API compatibility layer (unversioned, mounted
-	// alongside /api/v1 — see IDEA.md "External API Compatibility")
+	// alongside the versioned API — see IDEA.md "External API
+	// Compatibility")
 	s.router.Get("/api/list", s.handleCompatList)
 	s.router.Get("/api/{list}", s.handleCompatTemplates)
 

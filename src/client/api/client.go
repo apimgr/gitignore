@@ -56,11 +56,11 @@ type Template struct {
 	Size        int      `json:"size"`
 }
 
-// envelope mirrors the {"success": true, "data": ...} JSON contract
-// implemented by src/template/handlers.go for every JSON-negotiated
+// envelope mirrors the {"ok": true, "data": ...} JSON contract implemented
+// by src/server/response.go (APIResponse) for every JSON-negotiated
 // response.
 type envelope struct {
-	Success   bool            `json:"success"`
+	OK        bool            `json:"ok"`
 	Data      json.RawMessage `json:"data"`
 	Count     int             `json:"count,omitempty"`
 	Query     string          `json:"query,omitempty"`
@@ -164,7 +164,7 @@ func (c *Client) Categories() ([]string, error) {
 
 // CategoryTemplates returns template names in the given category.
 func (c *Client) CategoryTemplates(name string) ([]string, error) {
-	env, err := c.get("/api/v1/category/{name}", map[string]string{"name": name}, nil)
+	env, err := c.get("/api/v1/categories/{name}", map[string]string{"name": name}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (c *Client) CategoryTemplates(name string) ([]string, error) {
 
 // GetTemplate fetches a single named template.
 func (c *Client) GetTemplate(name string) (*Template, error) {
-	env, err := c.get("/api/v1/template/{name}", map[string]string{"name": name}, nil)
+	env, err := c.get("/api/v1/templates/{name}", map[string]string{"name": name}, nil)
 	if err != nil {
 		return nil, err
 	}

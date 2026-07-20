@@ -84,23 +84,51 @@ full CSP/Permissions-Policy config tree, SRI pinning for CDN assets,
 scheme.
 Read: AI.md PART 7
 
-## [ ] Restructure routes to match PART 14 "Route Naming Convention" /
-"Root-Level Endpoints" exactly
-Current implementation uses a flat `/api/v1/*` namespace (e.g.
-`/api/v1/template/{name}`, `/api/v1/openapi.json`) and still serves the
-spec's explicitly-removed root paths `/openapi`, `/openapi.json`, `/graphql`
-(GET+POST). PART 14 requires: `/api/swagger` + `/api/{api_version}/server/
-swagger` (OpenAPI JSON, no `.json` suffix on the path), `/api/graphql` +
-`/api/{api_version}/server/graphql`, `/api/healthz` +
-`/api/{api_version}/server/healthz`, `/server/docs/swagger` and
-`/server/docs/graphql` UI pages at root, `/api/autodiscover`, and an
-`/api/{api_version}/server/*` namespace for operator endpoints (info public,
-mutating ones behind an operator token per PART 11). Left unfixed this
-session — full blast radius (every route, the CLI client's API base paths,
-docs/swagger page URLs, the gitignore.io compat layer's route table, and
-tests) makes this unsafe as a drive-by change; do as its own isolated
-commit with a full build/vet/test pass.
+## [x] Restructure routes to match PART 14 "Route Naming Convention" /
+"Root-Level Endpoints"
+Added `apiBasePath()`/`apiVersion` (src/server/server.go) so code never
+hardcodes `v1` for path construction (still `"v1"` today, but centralized).
+Removed the spec-forbidden root paths `/openapi`, `/openapi.json`,
+`/graphql` (GET+POST), `/graphiql` — replaced with `/server/docs/swagger`
+and `/server/docs/graphql` (UI pages) plus root-level API aliases
+`/api/swagger`, `/api/graphql` (GET returns SDL, POST executes),
+`/api/healthz`(.txt), and a new `/api/autodiscover` endpoint
+(handleAPIAutodiscover). Added the `/api/{api_version}/server/{healthz,
+swagger,graphql}` canonical namespace. Pluralized API resource nouns:
+`/template/{name}` -> `/templates/{name}`, `/category/{name}` ->
+`/categories/{name}` (frontend page routes, e.g. `/template/{name}`, are
+unchanged — those are project web-page routes, not API routes, and PART 14's
+naming rule scopes to `/api/*`). Updated src/server/openapi.go (OpenAPI JSON
+paths + Swagger UI/GraphiQL embedded fetch URLs), src/server/handlers.go
+(`handleAPIInfo` endpoint list), src/client/api/client.go (CLI's hardcoded
+paths + fixed a pre-existing `Success`/`ok` envelope field-name mismatch
+against src/server/response.go's `APIResponse{OK bool}`), and the embedded
+HTML templates (docs.html, home.html, template.html) that linked the old
+paths. Verified with a full Docker build/vet/test pass (exit 0) and a
+go-lint re-run.
+Deferred to its own follow-up (new feature surface, not a rename): the
+`server.token` operator-auth primitive (config field, auto-generation,
+multi-header extractor, constant-time comparison) and the mutating/
+info operator endpoints under `/api/{api_version}/server/*`
+(`about`/`privacy`/`terms`/`help`/`contact`/`reports`) — today's
+`/server/*` additions are all read-only info endpoints (healthz/swagger/
+graphql), so no new auth surface was introduced. Also deferred: the
+content-negotiation detection helpers (`isOurCliClient`/`isTextBrowser`/
+`isHttpTool`/`isNonInteractiveClient`) — `.txt`-suffix routes continue to
+work via the existing manually-duplicated sibling-route pattern.
 Read: AI.md PART 14 "Route Naming Convention", "Root-Level Endpoints"
+
+## [ ] Add `server.token` operator-auth primitive + `/api/{api_version}/server/*`
+info/mutating endpoints (about/privacy/terms/help/contact/reports)
+PART 14's operator namespace needs a `server.token` config field
+(auto-generated if unset), a multi-header token extractor (Authorization
+Bearer/Basic/Digest, X-API-Key family, X-Auth-Token family, `?token=`
+query param, first-found-wins) with constant-time SHA-256 comparison
+(PART 11 cross-reference), and new handlers for the info/contact endpoints.
+Today's `/api/{api_version}/server/*` additions (healthz/swagger/graphql)
+are read-only and need no auth; this item is the actual operator-token
+feature work, kept separate since it's new surface, not a route rename.
+Read: AI.md PART 14 "server/* namespace", PART 11
 
 ## [ ] Implement or explicitly stub remaining PART 7-22 deferred items
 GraphQL execution engine (handleGraphQL currently returns NOT_IMPLEMENTED),

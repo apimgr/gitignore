@@ -48,22 +48,42 @@ func (s *Server) handleHealthzText(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIInfo returns API information
 func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
+	base := apiBasePath()
 	sendAPIResponseOK(w, map[string]interface{}{
 		"name":      "GitIgnore API",
 		"version":   s.config.Version,
 		"commit":    s.config.Commit,
 		"buildDate": s.config.BuildDate,
 		"endpoints": map[string]string{
-			"health":     "/api/v1/healthz",
-			"list":       "/api/v1/list",
-			"search":     "/api/v1/search?q={query}",
-			"template":   "/api/v1/template/{name}",
-			"combine":    "/api/v1/combine?templates={name1,name2}",
-			"categories": "/api/v1/categories",
-			"stats":      "/api/v1/stats",
-			"docs":       "/api/v1/docs",
-			"openapi":    "/api/v1/openapi.json",
+			"health":       base + "/server/healthz",
+			"list":         base + "/list",
+			"search":       base + "/search?q={query}",
+			"template":     base + "/templates/{name}",
+			"combine":      base + "/combine?templates={name1,name2}",
+			"categories":   base + "/categories",
+			"stats":        base + "/stats",
+			"swagger":      base + "/server/swagger",
+			"graphql":      base + "/server/graphql",
+			"autodiscover": "/api/autodiscover",
 		},
+	})
+}
+
+// handleAPIAutodiscover returns machine-readable server metadata for
+// zero-config client discovery (AI.md PART 14 "/api/autodiscover"). CLI
+// self-update version feeds are not implemented (see TODO.AI.md), so
+// "cli_versions" is intentionally omitted rather than faked.
+func (s *Server) handleAPIAutodiscover(w http.ResponseWriter, r *http.Request) {
+	sendAPIResponseOK(w, map[string]interface{}{
+		"name":        "GitIgnore API",
+		"version":     s.config.Version,
+		"commit":      s.config.Commit,
+		"buildDate":   s.config.BuildDate,
+		"api_version": apiVersion,
+		"api_base":    apiBasePath(),
+		"swagger":     "/api/swagger",
+		"graphql":     "/api/graphql",
+		"healthz":     "/api/healthz",
 	})
 }
 
@@ -156,7 +176,7 @@ func (s *Server) handleAPITemplatesTarGz(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	setCacheHeaders(w, "html")
-	_, _ = w.Write([]byte(swaggerUIHTML))
+	fmt.Fprintf(w, swaggerUIHTML, apiBasePath())
 }
 
 // handleOpenAPIJSON returns the generated OpenAPI 3.0 specification as JSON.

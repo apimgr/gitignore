@@ -7,6 +7,7 @@ import "net/http"
 // document is correct regardless of host or scheme.
 func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	base := s.detectServerURL(r)
+	api := apiBasePath()
 
 	templateName := map[string]interface{}{
 		"name":        "name",
@@ -75,19 +76,19 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 			map[string]interface{}{"url": base},
 		},
 		"paths": map[string]interface{}{
-			"/api/v1/list":            get("List all templates", nil),
-			"/api/v1/categories":      get("List all categories", nil),
-			"/api/v1/stats":           get("Template statistics", nil),
-			"/api/v1/template/{name}": get("Get a template by name", []interface{}{templateName}),
-			"/api/v1/category/{name}": get("List templates in a category", []interface{}{templateName}),
-			"/api/v1/search": get("Search templates", []interface{}{
+			api + "/list":              get("List all templates", nil),
+			api + "/categories":        get("List all categories", nil),
+			api + "/stats":             get("Template statistics", nil),
+			api + "/templates/{name}":  get("Get a template by name", []interface{}{templateName}),
+			api + "/categories/{name}": get("List templates in a category", []interface{}{templateName}),
+			api + "/search": get("Search templates", []interface{}{
 				map[string]interface{}{
 					"name": "q", "in": "query", "required": true,
 					"description": "Search query",
 					"schema":      map[string]interface{}{"type": "string"},
 				},
 			}),
-			"/api/v1/combine": get("Combine multiple templates", []interface{}{
+			api + "/combine": get("Combine multiple templates", []interface{}{
 				map[string]interface{}{
 					"name": "templates", "in": "query", "required": true,
 					"description": "Comma-separated template names",
@@ -120,7 +121,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 <script>
 window.onload = function () {
   window.ui = SwaggerUIBundle({
-    url: '/api/v1/openapi.json',
+    url: '%s/server/swagger',
     dom_id: '#swagger-ui'
   });
 };
@@ -145,7 +146,7 @@ const graphiQLHTML = `<!DOCTYPE html>
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
 <script crossorigin src="https://cdn.jsdelivr.net/npm/graphiql@3/graphiql.min.js"></script>
 <script>
-const fetcher = GraphiQL.createFetcher({ url: '/graphql' });
+const fetcher = GraphiQL.createFetcher({ url: '/api/graphql' });
 const root = ReactDOM.createRoot(document.getElementById('graphiql'));
 root.render(React.createElement(GraphiQL, { fetcher }));
 </script>

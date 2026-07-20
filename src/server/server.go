@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -225,8 +226,31 @@ func (s *Server) setupRoutes() {
 	}
 }
 
-// Start starts the HTTP server
+// Start binds the listener, drops root privileges to the configured
+// service user/group (Unix only — see AI.md PART 23), then serves.
 func (s *Server) Start() error {
+	listener, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return fmt.Errorf("failed to bind %s: %w", s.server.Addr, err)
+	}
+
+	// Once the privileged port is bound, drop from root to the configured
+	// service user/group. No-op if not running as root, and no-op on
+	// Windows (which runs as a Virtual Service Account instead).
+	user, group := "gitignore", "gitignore"
+	if s.config.Cfg != nil {
+		if s.config.Cfg.Server.User != "" {
+			user = s.config.Cfg.Server.User
+		}
+		if s.config.Cfg.Server.Group != "" {
+			group = s.config.Cfg.Server.Group
+		}
+	}
+	if err := dropPrivileges(user, group); err != nil {
+		listener.Close()
+		return fmt.Errorf("failed to drop privileges: %w", err)
+	}
+
 	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -245,7 +269,7 @@ func (s *Server) Start() error {
 
 	// Start server
 	log.Printf("Server starting on %s", s.server.Addr)
-	if err := s.server.ListenAndServe(); err != http.ErrServerClosed {
+	if err := s.server.Serve(listener); err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 

@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -157,6 +158,74 @@ func IsRunningInContainer() bool {
 func GetBackupDir() string {
 	_, _, _, backupDir := GetDefaultDirs(ProjectName)
 	return backupDir
+}
+
+// isPrivileged reports whether the process is running with elevated
+// privileges (root on Unix, an administrator account on Windows).
+func isPrivileged() bool {
+	if runtime.GOOS == "windows" {
+		return os.Getenv("USERDOMAIN") == os.Getenv("COMPUTERNAME")
+	}
+	return os.Geteuid() == 0
+}
+
+// GetCacheDir returns the OS-specific cache directory based on privilege
+// level, matching the layout used by GetDefaultDirs.
+func GetCacheDir() string {
+	if IsRunningInContainer() {
+		return "/data/cache"
+	}
+
+	if isPrivileged() {
+		switch runtime.GOOS {
+		case "windows":
+			programData := os.Getenv("ProgramData")
+			if programData == "" {
+				programData = `C:\ProgramData`
+			}
+			return filepath.Join(programData, OrgName, ProjectName, "cache")
+		case "darwin":
+			return filepath.Join("/Library/Caches", OrgName, ProjectName)
+		default:
+			return filepath.Join("/var/cache", OrgName, ProjectName)
+		}
+	}
+
+	homeDir := userHomeDir()
+	switch runtime.GOOS {
+	case "windows":
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			localAppData = filepath.Join(homeDir, "AppData", "Local")
+		}
+		return filepath.Join(localAppData, OrgName, ProjectName, "cache")
+	case "darwin":
+		return filepath.Join(homeDir, "Library", "Caches", OrgName, ProjectName)
+	default:
+		xdgCache := os.Getenv("XDG_CACHE_HOME")
+		if xdgCache == "" {
+			xdgCache = filepath.Join(homeDir, ".cache")
+		}
+		return filepath.Join(xdgCache, OrgName, ProjectName)
+	}
+}
+
+// GetPIDFile returns the OS-specific PID file path based on privilege
+// level. Returns an empty string on Windows, which does not use PID files.
+func GetPIDFile() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+
+	if isPrivileged() {
+		return fmt.Sprintf("/var/run/%s/%s.pid", OrgName, ProjectName)
+	}
+
+	homeDir := userHomeDir()
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(homeDir, "Library", "Application Support", OrgName, ProjectName, ProjectName+".pid")
+	}
+	return filepath.Join(xdgDataHome(homeDir), OrgName, ProjectName, ProjectName+".pid")
 }
 
 // PathManager provides path operations rooted at the application directories

@@ -80,6 +80,10 @@ func main() {
 	// Maintenance commands
 	maintenanceCmd := flag.String("maintenance", "", "Maintenance commands: backup, restore, update, mode, setup")
 
+	// Force/assume-yes (used by --service --uninstall and other prompts)
+	forceFlag := flag.Bool("force", false, "Assume yes to confirmation prompts")
+	flag.BoolVar(forceFlag, "y", false, "Assume yes to confirmation prompts (shorthand)")
+
 	// Update commands
 	updateCmd := flag.String("update", "", "Update commands: check, yes, branch {stable|beta|daily}")
 
@@ -169,7 +173,7 @@ func main() {
 
 	// Handle --service flag
 	if *serviceCmd != "" {
-		handleServiceCommand(*serviceCmd, configDir)
+		handleServiceCommand(*serviceCmd, configDir, *forceFlag)
 		return
 	}
 
@@ -413,7 +417,7 @@ func checkHealth(port string) error {
 	return nil
 }
 
-func handleServiceCommand(cmd, configDir string) {
+func handleServiceCommand(cmd, configDir string, force bool) {
 	switch cmd {
 	case "start":
 		if err := service.Start(); err != nil {
@@ -438,22 +442,57 @@ func handleServiceCommand(cmd, configDir string) {
 	case "status":
 		serviceStatus()
 	case "--install":
-		if err := service.Install(); err != nil {
-			log.Printf("Failed to install service: %v", err)
-			os.Exit(exCantCreat)
-		}
+		installService()
 	case "--uninstall":
-		if err := service.Uninstall(); err != nil {
+		if err := service.Uninstall(force); err != nil {
 			log.Printf("Failed to uninstall service: %v", err)
 			os.Exit(exOSErr)
 		}
 	case "--disable":
 		serviceDisable()
 	case "--help":
-		fmt.Println("Service commands: start, stop, restart, reload, status, --install, --uninstall, --disable")
+		fmt.Println("Service commands: start, stop, restart, reload, status, --install, --uninstall, --disable, --help")
+		fmt.Println()
+		serviceStatus()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown service command: %s\n", cmd)
 		os.Exit(1)
+	}
+}
+
+// installService implements the smart privilege-escalation flow required
+// for `--service --install` (AI.md PART 23): already elevated -> install
+// directly; else try sudo/su/pkexec/doas (or runas on Windows) in order,
+// re-executing this same command line under escalation; else fall back
+// to a user-level service install; else print an informative error.
+func installService() {
+	if service.IsElevated() {
+		if err := service.Install(); err != nil {
+			log.Printf("Failed to install service: %v", err)
+			os.Exit(exCantCreat)
+		}
+		return
+	}
+
+	if method := service.DetectEscalation(); method != service.EscalateNone {
+		exePath, err := os.Executable()
+		if err == nil {
+			fmt.Printf("Elevated privileges required to install a system service (using %s)...\n", method)
+			args := append([]string{exePath}, os.Args[1:]...)
+			if err := service.ExecElevated(method, args); err != nil {
+				log.Printf("Failed to install service via %s: %v", method, err)
+				os.Exit(exOSErr)
+			}
+			return
+		}
+	}
+
+	fmt.Println("No privilege escalation method available (sudo/su/pkexec/doas not found).")
+	fmt.Println("Falling back to a user-level service install...")
+	if err := service.InstallUser(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to install user-level service: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Run this command as root, or install sudo/su/pkexec/doas, then retry.")
+		os.Exit(exCantCreat)
 	}
 }
 
@@ -487,20 +526,49 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 		maintenanceUpdate()
 
 	case "mode":
-		cfg, _ := config.Load(configPath)
-		mode := cfg.Server.Mode
-		if mode == "" {
-			mode = "production"
+		if len(args) == 0 {
+			cfg, _ := config.Load(configPath)
+			m := cfg.Server.Mode
+			if m == "" {
+				m = "production"
+			}
+			fmt.Printf("Current mode: %s\n", m)
+			return
 		}
-		fmt.Printf("Current mode: %s\n", mode)
+		resolved := resolveMode(args[0])
+		if resolved == "" {
+			fmt.Fprintf(os.Stderr, "Invalid mode: %s\nValid: production, development (aliases: prod, dev)\n", args[0])
+			os.Exit(2)
+		}
+		if err := config.Update(func(c *config.Config) { c.Server.Mode = resolved }); err != nil {
+			log.Printf("Failed to save config: %v", err)
+			os.Exit(exConfig)
+		}
+		fmt.Printf("Application mode set to: %s\n", resolved)
 
 	case "setup":
 		cfg, _ := config.Load(configPath)
+		defaults := config.DefaultConfig()
+		// Reset server configuration to defaults, preserving only the
+		// identity fields that would otherwise orphan the running
+		// deployment (listen port and FQDN); everything else — mode,
+		// user/group, SSL, update branch, etc. — goes back to spec defaults.
+		port := cfg.Server.Port
+		fqdn := cfg.Server.FQDN
+		if err := config.Update(func(c *config.Config) {
+			c.Server = defaults.Server
+			c.Server.Port = port
+			c.Server.FQDN = fqdn
+		}); err != nil {
+			log.Printf("Failed to reset configuration: %v", err)
+			os.Exit(exConfig)
+		}
 		fmt.Println("gitignore Setup")
 		fmt.Println("===============")
 		fmt.Printf("Config: %s\n", configPath)
-		fmt.Printf("Port:   %s\n", cfg.Server.Port)
-		fmt.Printf("Mode:   %s\n", cfg.Server.Mode)
+		fmt.Printf("Port:   %s\n", port)
+		fmt.Printf("Mode:   %s\n", defaults.Server.Mode)
+		fmt.Println("Server configuration reset to defaults.")
 		fmt.Println("Setup complete.")
 
 	default:
@@ -511,14 +579,30 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 }
 
 func serviceStatus() {
-	switch runtime.GOOS {
-	case "linux":
-		runCommand("systemctl", "status", projectName)
-	case "darwin":
-		runCommand("launchctl", "list", "apimgr.gitignore")
-	default:
-		fmt.Printf("Service status not supported on %s\n", runtime.GOOS)
+	installed, running, enabled, pid := service.Status()
+
+	installedStr := "not installed"
+	if installed {
+		installedStr = "installed"
 	}
+	state := "stopped"
+	if running {
+		state = "running"
+	}
+	autoStart := "disabled"
+	if enabled {
+		autoStart = "enabled"
+	}
+	pidStr := "-"
+	if running && pid > 0 {
+		pidStr = strconv.Itoa(pid)
+	}
+
+	fmt.Println("Current status:")
+	fmt.Printf("  Service:    %s\n", installedStr)
+	fmt.Printf("  State:      %s\n", state)
+	fmt.Printf("  Auto-start: %s\n", autoStart)
+	fmt.Printf("  PID:        %s\n", pidStr)
 }
 
 func serviceDisable() {

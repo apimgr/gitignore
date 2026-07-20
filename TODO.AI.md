@@ -34,34 +34,27 @@ not done (PART 32's own Required Libraries table doesn't list them; only
 the illustrative go.mod example does) — stdlib dispatch left in place.
 Read: AI.md PART 32
 
-## [ ] Fix src/service/src/server gaps found by PART 23/24 audit
-Audit complete; UID/GID range fixed directly. Remaining, in priority order:
-- P1: privilege drop after bind (setuid/setgid to `gitignore` user once
-  listener is bound, Unix build-tagged) — src/server or src/main.go
-- P1: smart privilege escalation for `--service --install` (detect
-  sudo/su/pkexec/doas, fall back to user service, else informative error)
-  — src/main.go handleServiceCommand + src/service
-- P2: service uninstall must prompt for confirmation and remove
-  config/data/cache/log/backup dirs, PID file, and the system user/group
-  — src/service/service.go uninstall* functions
-- P2: add OpenRC and SysVinit init-system support to DetectServiceManager
-  and the install/uninstall/start/stop/restart/reload switches
-- P2: macOS launchd plist must not hardcode UserName/GroupName (start as
-  root, drop privileges) or must create the dscl service account (200-399,
-  IsHidden) it currently references but never creates; FreeBSD installBSDRC
-  must create the service user via `pw useradd` before writing the rc
-  script; Windows installWindows must create a Virtual Service Account
-  instead of defaulting to LocalSystem
-- P3: serviceStatus()/`--service --help` must show the spec's status block
-  (installed/state/auto-start/PID) instead of a hard-coded line
-- P3: `--maintenance mode <production|development>` must persist via
-  config.Update, and `--maintenance setup` must actually reset server
-  configuration, instead of both just printing
-- P3: installSystemd must create the home/config dir before
-  EnsureSystemUser() runs
-- Path-security middleware: not found in src/server; flag for a
-  separate check once handleStatic/handleFavicon move past stub status
+## [x] Fix src/service/src/server gaps found by PART 23/24 audit
+All P1-P3 items implemented: privilege drop after bind (src/server/
+privilege_unix.go, privilege_windows.go); smart privilege escalation for
+`--service --install` (service.DetectEscalation/ExecElevated/InstallUser);
+uninstall confirmation + full cleanup (removeAllData/removeSystemUser);
+OpenRC + SysVinit support in DetectServiceManager and all lifecycle
+switches; macOS dscl service account creation, FreeBSD `pw useradd`,
+Windows Virtual Service Account; spec status block in serviceStatus();
+`--maintenance mode`/`setup` now persist via config.Update; installSystemd
+creates dirs before EnsureSystemUser().
+Path-security middleware still not found in src/server — flag for a
+separate check once handleStatic/handleFavicon move past stub status.
 Read: AI.md PART 23, PART 24
+
+## [ ] Rename plural package dirs to singular (go-lint LAYOUT)
+`src/paths/` -> `src/path/`, `src/templates/` -> `src/template/`,
+`src/client/paths/` -> `src/client/path/`. Pre-existing convention
+violation across the whole tree, not introduced by recent batches —
+requires updating every import site project-wide; do as its own isolated
+commit with a full build/vet/test pass, not a drive-by rename.
+Read: ~/.claude/memory/go_conventions.md
 
 ## [ ] Implement PART 7-22 requirements not yet verified
 Binary requirements, server CLI, error handling/caching, database,

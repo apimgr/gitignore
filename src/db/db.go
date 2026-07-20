@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -12,14 +13,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 	_ "modernc.org/sqlite"
 )
 
 var (
-	conn   *sql.DB
-	mu     sync.RWMutex
+	conn *sql.DB
+	mu   sync.RWMutex
 )
 
 // AdminCredentials holds admin login info loaded from DB
@@ -43,6 +45,21 @@ func Init(dataDir string) error {
 	c, err := sql.Open("sqlite", path)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Bound the connection pool. SQLite serializes writers, so a single open
+	// connection avoids "database is locked" contention while WAL still allows
+	// concurrent readers (AI.md PART 10).
+	c.SetMaxOpenConns(1)
+	c.SetMaxIdleConns(1)
+	c.SetConnMaxLifetime(0)
+
+	// Verify the connection is actually reachable before proceeding.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.PingContext(ctx); err != nil {
+		c.Close()
+		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	if _, err := c.Exec("PRAGMA journal_mode=WAL"); err != nil {

@@ -1,0 +1,12 @@
+{{define "content"}}
+<h1>GitIgnore Template Server</h1>
+<p>{{.Description}} Browse, search, and combine <code>.gitignore</code> templates, or use the API.</p>
+<form action="/search" method="get">
+<input type="text" name="q" placeholder="Search templates…" aria-label="Search">
+<button type="submit">Search</button>
+</form>
+<p><strong>{{.Data.total}}</strong> templates across <strong>{{.Data.categories}}</strong> categories.</p>
+<h2>Quick start</h2>
+<pre>curl {{.BaseURL}}/api/v1/template/go
+curl {{.BaseURL}}/api/v1/combine?templates=go,node,macos</pre>
+{{end}}

@@ -1,0 +1,17 @@
+{{define "content"}}
+<h1>API Documentation</h1>
+<p>Interactive: <a href="/openapi">Swagger UI</a> · <a href="/openapi.json">OpenAPI JSON</a></p>
+<h2>Endpoints</h2>
+<pre>GET /api/v1/list
+GET /api/v1/template/{name}
+GET /api/v1/search?q={query}
+GET /api/v1/combine?templates={a,b,c}
+GET /api/v1/categories
+GET /api/v1/category/{name}
+GET /api/v1/stats
+GET /api/v1/templates.json
+GET /api/v1/templates.tar.gz</pre>
+<h2>gitignore.io compatibility</h2>
+<pre>GET /api/list
+GET /api/{templates}</pre>
+{{end}}

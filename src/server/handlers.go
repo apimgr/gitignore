@@ -1,29 +1,42 @@
 package server
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
 // handleHome serves the home page
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	// TODO: Render HTML template
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, "<h1>GitIgnore API Server v%s</h1>", s.config.Version)
-	fmt.Fprintf(w, "<p>API: <a href='/api/v1'>/api/v1</a></p>")
-	fmt.Fprintf(w, "<p>Admin: <a href='/admin'>/admin</a></p>")
+	s.renderPage(w, r, "home", PageData{
+		Title: "Home",
+		Data: map[string]interface{}{
+			"total":      s.config.Templates.Count(),
+			"categories": len(s.config.Templates.GetCategories()),
+		},
+	})
 }
 
-// handleHealthz handles health check
+// handleHealthz handles the content-negotiated health check (AI.md PART 13).
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, ".txt") {
+		s.handleHealthzText(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
+	setCacheHeaders(w, "html")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "healthy",
-		"version": s.config.Version,
-		"commit":  s.config.Commit,
+		"status":    "healthy",
+		"version":   s.config.Version,
+		"commit":    s.config.Commit,
+		"buildDate": s.config.BuildDate,
 	})
 }
 
@@ -35,8 +48,7 @@ func (s *Server) handleHealthzText(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIInfo returns API information
 func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	sendAPIResponseOK(w, map[string]interface{}{
 		"name":      "GitIgnore API",
 		"version":   s.config.Version,
 		"commit":    s.config.Commit,
@@ -50,7 +62,7 @@ func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 			"categories": "/api/v1/categories",
 			"stats":      "/api/v1/stats",
 			"docs":       "/api/v1/docs",
-			"graphql":    "/api/v1/graphql",
+			"openapi":    "/api/v1/openapi.json",
 		},
 	})
 }
@@ -103,59 +115,88 @@ func (s *Server) handleAPIStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPITemplatesJSON(w http.ResponseWriter, r *http.Request) {
 	templates := s.config.Templates.ListAll()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"data":    templates,
-		"count":   len(templates),
+	setCacheHeaders(w, "api")
+	json.NewEncoder(w).Encode(APIResponse{
+		OK:   true,
+		Data: templates,
+		Meta: map[string]interface{}{"count": len(templates)},
 	})
 }
 
-// handleAPITemplatesTarGz returns all templates as tar.gz
+// handleAPITemplatesTarGz streams every template as a gzip-compressed tar
+// archive (AI.md PART 14).
 func (s *Server) handleAPITemplatesTarGz(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement tar.gz export
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", `attachment; filename="gitignore-templates.tar.gz"`)
+	setCacheHeaders(w, "api")
+
+	gz := gzip.NewWriter(w)
+	defer gz.Close()
+	tw := tar.NewWriter(gz)
+	defer tw.Close()
+
+	for _, tmpl := range s.config.Templates.ListAll() {
+		content := []byte(tmpl.Content)
+		hdr := &tar.Header{
+			Name:    tmpl.Name + ".gitignore",
+			Mode:    0o644,
+			Size:    int64(len(content)),
+			ModTime: time.Now(),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return
+		}
+		if _, err := tw.Write(content); err != nil {
+			return
+		}
+	}
 }
 
-// handleSwaggerUI serves Swagger UI
+// handleSwaggerUI serves a Swagger UI page bound to the OpenAPI JSON endpoint.
 func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement Swagger UI
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setCacheHeaders(w, "html")
+	_, _ = w.Write([]byte(swaggerUIHTML))
 }
 
-// handleOpenAPIJSON returns OpenAPI spec as JSON
+// handleOpenAPIJSON returns the generated OpenAPI 3.0 specification as JSON.
 func (s *Server) handleOpenAPIJSON(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement OpenAPI spec generation
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	w.Header().Set("Content-Type", "application/json")
+	setCacheHeaders(w, "api")
+	json.NewEncoder(w).Encode(s.openAPISpec(r))
 }
 
-// handleOpenAPIYAML returns OpenAPI spec as YAML
-func (s *Server) handleOpenAPIYAML(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement OpenAPI spec generation
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
-}
-
-// handleGraphQL handles GraphQL queries
+// handleGraphQL handles GraphQL queries. A full GraphQL engine is not bundled;
+// the endpoint responds with the spec-compliant NOT_IMPLEMENTED envelope so
+// clients receive a structured, machine-readable error.
 func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement GraphQL
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	sendAPIResponseError(w, "NOT_IMPLEMENTED", "GraphQL endpoint is not enabled on this server")
 }
 
-// handleGraphQLSchema returns GraphQL schema
+// handleGraphQLSchema returns the GraphQL SDL schema for the API.
 func (s *Server) handleGraphQLSchema(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement GraphQL schema
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	setCacheHeaders(w, "api")
+	_, _ = w.Write([]byte(graphQLSchema))
 }
 
-// handleStatic serves static files
+// handleStatic serves embedded static assets under /static/.
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	// TODO: Serve embedded static files
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	setCacheHeaders(w, "static")
+	http.StripPrefix("/static/", http.FileServer(staticHTTPFS)).ServeHTTP(w, r)
 }
 
-// handleFavicon serves favicon
+// handleFavicon serves the embedded favicon.
 func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
-	// TODO: Serve embedded favicon
-	http.Error(w, "Not implemented yet", http.StatusNotImplemented)
+	setCacheHeaders(w, "static")
+	f, err := staticHTTPFS.Open("favicon.ico")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "image/x-icon")
+	_, _ = io.Copy(w, f)
 }
 
 // handleRobotsTxt serves robots.txt from config
@@ -251,7 +292,7 @@ func (s *Server) handleAPITemplateText(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl, err := s.config.Templates.Get(name)
 	if err != nil {
-		http.Error(w, "Template not found", http.StatusNotFound)
+		sendAPIResponseError(w, "NOT_FOUND", "template not found")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -271,7 +312,7 @@ func (s *Server) handleAPIListText(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPISearchText(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
+		sendAPIResponseError(w, "BAD_REQUEST", "query parameter 'q' is required")
 		return
 	}
 	results := s.config.Templates.Search(query)

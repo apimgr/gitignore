@@ -15,6 +15,7 @@ import (
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/paths"
+	"github.com/apimgr/gitignore/src/ssl"
 	"github.com/apimgr/gitignore/src/templates"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -40,13 +41,21 @@ type Server struct {
 	router       *chi.Mux
 	server       *http.Server
 	adminHandler *admin.Handler
+	limiter      *rateLimiter
+	metrics      *metricsRegistry
 }
 
 // New creates a new server instance
 func New(config *Config) *Server {
 	s := &Server{
-		config: config,
-		router: chi.NewRouter(),
+		config:  config,
+		router:  chi.NewRouter(),
+		metrics: newMetricsRegistry(),
+	}
+
+	// Enable per-IP rate limiting only when the operator turns it on.
+	if config.Cfg != nil && config.Cfg.Server.RateLimit.Enabled {
+		s.limiter = newRateLimiter(config.Cfg.Server.RateLimit.Requests, config.Cfg.Server.RateLimit.Window)
 	}
 
 	// Load admin credentials from database (never from config file)
@@ -93,6 +102,15 @@ func (s *Server) setupMiddleware() {
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
 
+	// Security headers on every response (AI.md PART 11)
+	s.router.Use(s.securityHeaders)
+
+	// Per-IP rate limiting (no-op unless enabled in config)
+	s.router.Use(s.rateLimitMiddleware)
+
+	// Record HTTP request metrics (AI.md PART 20)
+	s.router.Use(s.metricsMiddleware)
+
 	// Timeout
 	s.router.Use(middleware.Timeout(30 * time.Second))
 
@@ -122,6 +140,9 @@ func (s *Server) setupRoutes() {
 	// Public routes
 	s.router.Get("/", s.handleHome)
 	s.router.Get("/healthz", s.handleHealthz)
+
+	// Prometheus metrics (internal only — firewall externally, AI.md PART 20)
+	s.router.Get("/metrics", s.handleMetrics)
 
 	// Special files (PWA, robots, security)
 	s.router.Get("/robots.txt", s.handleRobotsTxt)
@@ -157,7 +178,6 @@ func (s *Server) setupRoutes() {
 	// OpenAPI/Swagger (root level)
 	s.router.Get("/openapi", s.handleSwaggerUI)
 	s.router.Get("/openapi.json", s.handleOpenAPIJSON)
-	s.router.Get("/openapi.yaml", s.handleOpenAPIYAML)
 
 	// GraphQL (root level)
 	s.router.Get("/graphql", s.handleGraphiQLPage)
@@ -199,7 +219,6 @@ func (s *Server) setupRoutes() {
 		// Documentation
 		r.Get("/docs", s.handleSwaggerUI)
 		r.Get("/openapi.json", s.handleOpenAPIJSON)
-		r.Get("/openapi.yaml", s.handleOpenAPIYAML)
 
 		// GraphQL
 		r.Post("/graphql", s.handleGraphQL)
@@ -251,6 +270,15 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to drop privileges: %w", err)
 	}
 
+	// Wire TLS when SSL is enabled (AI.md PART 15). Certificates come from an
+	// existing certbot/manual location or Let's Encrypt via autocert.
+	if s.config.Cfg != nil && s.config.Cfg.Server.SSL.Enabled {
+		if err := s.configureTLS(); err != nil {
+			listener.Close()
+			return fmt.Errorf("failed to configure TLS: %w", err)
+		}
+	}
+
 	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -269,11 +297,46 @@ func (s *Server) Start() error {
 
 	// Start server
 	log.Printf("Server starting on %s", s.server.Addr)
-	if err := s.server.Serve(listener); err != http.ErrServerClosed {
+	if s.server.TLSConfig != nil {
+		if err := s.server.ServeTLS(listener, "", ""); err != http.ErrServerClosed {
+			return fmt.Errorf("server error: %w", err)
+		}
+	} else if err := s.server.Serve(listener); err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 
 	log.Println("Server stopped")
+	return nil
+}
+
+// configureTLS builds the server's TLS configuration from the SSL manager,
+// resolving certificates for the configured FQDN (AI.md PART 15).
+func (s *Server) configureTLS() error {
+	certPath := "ssl"
+	if s.config.Paths != nil {
+		certPath = s.config.Paths.DataPath("ssl")
+	}
+
+	mgr := ssl.NewManager(ssl.Config{
+		Enabled:  true,
+		CertPath: certPath,
+		LetsEncrypt: ssl.LetsEncryptConfig{
+			Enabled:   s.config.Cfg.Server.SSL.LetsEncrypt.Enabled,
+			Email:     s.config.Cfg.Server.SSL.LetsEncrypt.Email,
+			Challenge: s.config.Cfg.Server.SSL.LetsEncrypt.Challenge,
+		},
+	})
+
+	var domains []string
+	if s.config.Cfg.Server.FQDN != "" {
+		domains = append(domains, s.config.Cfg.Server.FQDN)
+	}
+
+	tlsConfig, err := mgr.GetTLSConfig(domains)
+	if err != nil {
+		return err
+	}
+	s.server.TLSConfig = tlsConfig
 	return nil
 }
 

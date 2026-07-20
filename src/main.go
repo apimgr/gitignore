@@ -15,8 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mattn/go-isatty"
+
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/mode"
 	"github.com/apimgr/gitignore/src/paths"
 	"github.com/apimgr/gitignore/src/server"
 	"github.com/apimgr/gitignore/src/service"
@@ -26,11 +29,23 @@ import (
 // Version information (set by build flags)
 var (
 	Version   = "dev"
-	Commit    = "unknown"
+	CommitID  = "unknown"
 	BuildDate = "unknown"
 )
 
 const projectName = "gitignore"
+
+// sysexits(3) exit codes — never invent custom schemes.
+const (
+	exUsage       = 64 // command line usage error
+	exNoInput     = 66 // cannot open input
+	exUnavailable = 69 // a service is unavailable
+	exOSErr       = 71 // system error (e.g. can't fork, service control failed)
+	exOSFile      = 72 // a (data) file the app depends on is missing/unreadable
+	exCantCreat   = 73 // can't create (user) output file
+	exIOErr       = 74 // an error occurred while doing I/O on some file
+	exConfig      = 78 // configuration error
+)
 
 func init() {
 	log.SetPrefix("gitignore: ")
@@ -44,9 +59,17 @@ func main() {
 	port := flag.String("port", "", "Server port (overrides config)")
 	address := flag.String("address", "", "Server address (overrides config)")
 	configDirFlag := flag.String("config", "", "Configuration directory")
+
 	showVersion := flag.Bool("version", false, "Show version information")
+	flag.BoolVar(showVersion, "v", false, "Show version information (shorthand)")
+
 	showStatus := flag.Bool("status", false, "Check server status (health check)")
+
 	showHelp := flag.Bool("help", false, "Show help")
+	flag.BoolVar(showHelp, "h", false, "Show help (shorthand)")
+
+	debugFlag := flag.Bool("debug", false, "Enable debug output")
+	colorFlag := flag.String("color", "auto", "Color output: auto, yes, no")
 
 	// Mode: production (default) | development | dev | prod
 	modeFlag := flag.String("mode", "", "Application mode: production|development (aliases: prod|dev)")
@@ -70,6 +93,16 @@ func main() {
 	if *showVersion {
 		fmt.Println(Version)
 		return
+	}
+
+	colorEnabled := resolveColor(*colorFlag)
+
+	if *debugFlag {
+		// --debug sets the independent debug axis only; it does NOT
+		// force development mode (mode and debug are tracked independently)
+		mode.SetDebug(true)
+		log.SetFlags(log.Lshortfile | log.LstdFlags)
+		log.Println("Debug mode enabled")
 	}
 
 	// Resolve config directory
@@ -121,7 +154,8 @@ func main() {
 			os.Exit(2)
 		}
 		if err := config.Update(func(c *config.Config) { c.Server.Mode = resolved }); err != nil {
-			log.Fatalf("Failed to save config: %v", err)
+			log.Printf("Failed to save config: %v", err)
+			os.Exit(exConfig)
 		}
 		fmt.Printf("Application mode set to: %s\n", resolved)
 		return
@@ -152,7 +186,8 @@ func main() {
 
 	// ── Initialize database ──────────────────────────────────────────────────
 	if err := db.Init(dataDir); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		log.Printf("Failed to initialize database: %v", err)
+		os.Exit(exUnavailable)
 	}
 	defer db.Close()
 
@@ -161,20 +196,27 @@ func main() {
 		adminUser := "admin"
 		adminPass, err := db.GeneratePassword(20)
 		if err != nil {
-			log.Fatalf("Failed to generate admin password: %v", err)
+			log.Printf("Failed to generate admin password: %v", err)
+			os.Exit(exOSErr)
 		}
 		rawToken, err := db.GenerateToken(32)
 		if err != nil {
-			log.Fatalf("Failed to generate API token: %v", err)
+			log.Printf("Failed to generate API token: %v", err)
+			os.Exit(exOSErr)
 		}
 		if err := db.SetAdminCredentials(adminUser, adminPass, rawToken); err != nil {
-			log.Fatalf("Failed to store admin credentials: %v", err)
+			log.Printf("Failed to store admin credentials: %v", err)
+			os.Exit(exIOErr)
 		}
 
 		// Display ONCE — not logged, printed directly to stdout
+		heading := "  Admin credentials (shown once — copy now)"
+		if colorEnabled {
+			heading = "\033[1;33m" + heading + "\033[0m"
+		}
 		fmt.Println()
 		fmt.Println("══════════════════════════════════════════════════════════")
-		fmt.Printf("  Admin credentials (shown once — copy now)\n\n")
+		fmt.Printf("%s\n\n", heading)
 		fmt.Printf("  Username : %s\n", adminUser)
 		fmt.Printf("  Password : %s\n", adminPass)
 		fmt.Printf("  API Token: %s\n", rawToken)
@@ -205,13 +247,25 @@ func main() {
 	if envMode := os.Getenv("MODE"); envMode != "" && cfg.Server.Mode == "production" {
 		cfg.Server.Mode = resolveMode(envMode)
 	}
-	devMode := cfg.Server.Mode == "development"
+
+	// Wire the independent mode/debug axes: mode from config (env/--mode
+	// already folded in above), debug from DEBUG env var, then --debug
+	// CLI flag always wins last (already applied above via SetDebug).
+	if err := mode.Set(cfg.Server.Mode); err != nil {
+		log.Printf("Warning: invalid mode %q, defaulting to production: %v", cfg.Server.Mode, err)
+	}
+	mode.InitDebug()
+	if *debugFlag {
+		mode.SetDebug(true)
+	}
+	devMode := mode.IsDevelopment()
 
 	// ── Load templates ───────────────────────────────────────────────────────
 	log.Println("Loading .gitignore templates...")
 	templateMgr, err := templates.New()
 	if err != nil {
-		log.Fatalf("Failed to load templates: %v", err)
+		log.Printf("Failed to load templates: %v", err)
+		os.Exit(exOSFile)
 	}
 	log.Printf("Loaded %d templates", templateMgr.Count())
 
@@ -228,12 +282,12 @@ func main() {
 		Templates: templateMgr,
 		Paths:     pathMgr,
 		Version:   Version,
-		Commit:    Commit,
+		Commit:    CommitID,
 		BuildDate: BuildDate,
 		Cfg:       cfg,
 	})
 
-	log.Printf("gitignore %s (commit: %s, built: %s)", Version, Commit, BuildDate)
+	log.Printf("gitignore %s (commit: %s, built: %s)", Version, CommitID, BuildDate)
 	log.Printf("Listening on %s:%d", serverAddress, portNum)
 	if devMode {
 		log.Println("Development mode enabled")
@@ -245,7 +299,8 @@ func main() {
 	for {
 		select {
 		case err := <-errChan:
-			log.Fatal(err)
+			log.Printf("Server error: %v", err)
+			os.Exit(exUnavailable)
 		case sig := <-sigChan:
 			switch sig {
 			case syscall.SIGHUP:
@@ -260,6 +315,22 @@ func main() {
 				os.Exit(0)
 			}
 		}
+	}
+}
+
+// resolveColor determines whether color output should be enabled.
+// Precedence: --color=no/yes > NO_COLOR env var > --color=auto (TTY detect).
+func resolveColor(flagValue string) bool {
+	switch strings.ToLower(strings.TrimSpace(flagValue)) {
+	case "yes":
+		return true
+	case "no":
+		return false
+	default:
+		if _, set := os.LookupEnv("NO_COLOR"); set {
+			return false
+		}
+		return isatty.IsTerminal(os.Stdout.Fd())
 	}
 }
 
@@ -284,9 +355,11 @@ Options:
   --address ADDRESS    Listen address (default: [::])
   --config DIR         Configuration directory
   --mode MODE          Application mode: production|development (aliases: prod|dev)
-  --version            Print version information
+  --debug              Enable debug output
+  --color VALUE        Color output: auto (default), yes, no
+  -v, --version        Print version information
   --status             Health check (exit 0 = healthy)
-  --help               Show this help message
+  -h, --help           Show this help message
 
 Service Commands:
   --service start      Start the service
@@ -344,29 +417,35 @@ func handleServiceCommand(cmd, configDir string) {
 	switch cmd {
 	case "start":
 		if err := service.Start(); err != nil {
-			log.Fatalf("Failed to start service: %v", err)
+			log.Printf("Failed to start service: %v", err)
+			os.Exit(exOSErr)
 		}
 	case "stop":
 		if err := service.Stop(); err != nil {
-			log.Fatalf("Failed to stop service: %v", err)
+			log.Printf("Failed to stop service: %v", err)
+			os.Exit(exOSErr)
 		}
 	case "restart":
 		if err := service.Restart(); err != nil {
-			log.Fatalf("Failed to restart service: %v", err)
+			log.Printf("Failed to restart service: %v", err)
+			os.Exit(exOSErr)
 		}
 	case "reload":
 		if err := service.Reload(); err != nil {
-			log.Fatalf("Failed to reload service: %v", err)
+			log.Printf("Failed to reload service: %v", err)
+			os.Exit(exOSErr)
 		}
 	case "status":
 		serviceStatus()
 	case "--install":
 		if err := service.Install(); err != nil {
-			log.Fatalf("Failed to install service: %v", err)
+			log.Printf("Failed to install service: %v", err)
+			os.Exit(exCantCreat)
 		}
 	case "--uninstall":
 		if err := service.Uninstall(); err != nil {
-			log.Fatalf("Failed to uninstall service: %v", err)
+			log.Printf("Failed to uninstall service: %v", err)
+			os.Exit(exOSErr)
 		}
 	case "--disable":
 		serviceDisable()
@@ -389,7 +468,8 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 		} else {
 			backupDir := paths.GetBackupDir()
 			if err := os.MkdirAll(backupDir, 0755); err != nil {
-				log.Fatalf("Failed to create backup directory: %v", err)
+				log.Printf("Failed to create backup directory: %v", err)
+				os.Exit(exCantCreat)
 			}
 			timestamp := time.Now().Format("20060102-150405")
 			backupFile = filepath.Join(backupDir, fmt.Sprintf("gitignore-backup-%s.tar.gz", timestamp))
@@ -456,7 +536,8 @@ func maintenanceBackup(configDir, dataDir, backupFile string) {
 	fmt.Printf("Creating backup: %s\n", backupFile)
 	cmd := exec.Command("tar", "-czf", backupFile, "-C", filepath.Dir(configDir), filepath.Base(configDir))
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("Backup failed: %v", err)
+		log.Printf("Backup failed: %v", err)
+		os.Exit(exIOErr)
 	}
 	fmt.Printf("Backup created: %s\n", backupFile)
 }
@@ -464,11 +545,13 @@ func maintenanceBackup(configDir, dataDir, backupFile string) {
 func maintenanceRestore(backupFile, configDir, dataDir string) {
 	fmt.Printf("Restoring from: %s\n", backupFile)
 	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
-		log.Fatalf("Backup file not found: %s", backupFile)
+		log.Printf("Backup file not found: %s", backupFile)
+		os.Exit(exNoInput)
 	}
 	cmd := exec.Command("tar", "-xzf", backupFile, "-C", "/")
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("Restore failed: %v", err)
+		log.Printf("Restore failed: %v", err)
+		os.Exit(exIOErr)
 	}
 	fmt.Println("Restore completed")
 }

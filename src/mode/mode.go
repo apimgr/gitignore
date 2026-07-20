@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/apimgr/gitignore/src/config"
 )
 
 const (
@@ -29,7 +31,12 @@ var (
 	// current holds the current application mode
 	current Mode = Production
 
-	// mu protects concurrent access to current mode
+	// debug holds the independent debug-flag state (--debug / DEBUG=true).
+	// Debug is tracked independently of mode: mode and debug are two
+	// independent axes producing four operational states (see AI.md PART 6).
+	debug bool
+
+	// mu protects concurrent access to current mode and debug
 	mu sync.RWMutex
 )
 
@@ -40,9 +47,13 @@ func Get() Mode {
 	return current
 }
 
-// Set sets the application mode
+// Set sets the application mode.
+// "debug" is an alias for development mode + debug on (an explicit
+// SetDebug/--debug flag or DEBUG env var applied afterward still wins).
 func Set(mode string) error {
-	parsed, err := ParseMode(mode)
+	normalized := strings.ToLower(strings.TrimSpace(mode))
+
+	parsed, err := ParseMode(normalized)
 	if err != nil {
 		return err
 	}
@@ -51,21 +62,28 @@ func Set(mode string) error {
 	current = parsed
 	mu.Unlock()
 
+	if normalized == "debug" {
+		SetDebug(true)
+	}
+
 	return nil
 }
 
 // ParseMode parses a mode string and returns the corresponding Mode constant.
-// Accepts: "dev", "development", "prod", "production" (case-insensitive)
+// Accepts: "dev", "development", "prod", "production" (case-insensitive).
+// "debug" is also accepted as an alias for Development (see Set).
 func ParseMode(s string) (Mode, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
 
 	switch s {
 	case "dev", "development":
 		return Development, nil
+	case "debug":
+		return Development, nil
 	case "prod", "production":
 		return Production, nil
 	default:
-		return "", fmt.Errorf("invalid mode: %q (must be one of: dev, development, prod, production)", s)
+		return "", fmt.Errorf("invalid mode: %q (must be one of: dev, development, prod, production, debug)", s)
 	}
 }
 
@@ -79,6 +97,25 @@ func IsProduction() bool {
 	return Get() == Production
 }
 
+// IsDebug returns true if the independent debug flag is enabled
+// (--debug CLI flag, DEBUG=true env var, or the "debug" mode alias).
+// Debug is tracked independently of mode: mode and debug are two
+// independent axes producing four operational states (see AI.md PART 6).
+func IsDebug() bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return debug
+}
+
+// SetDebug sets the independent debug flag. It does not change the
+// application mode. Debug affects verbosity and diagnostics ONLY — it
+// never disables authentication or security checks, in any mode.
+func SetDebug(enabled bool) {
+	mu.Lock()
+	debug = enabled
+	mu.Unlock()
+}
+
 // Init initializes the mode based on environment variables.
 // This should be called before CLI flag parsing so flags can override it.
 func Init() {
@@ -88,6 +125,27 @@ func Init() {
 			fmt.Fprintf(os.Stderr, "Warning: %v, using default: %s\n", err, Production)
 		}
 	}
+}
+
+// InitDebug initializes the independent debug flag from the DEBUG
+// environment variable. This should be called after Init (so the
+// "debug" mode alias is applied first) and before CLI flag parsing so
+// --debug can still override it. An explicitly set DEBUG env var
+// (truthy OR falsy) always wins over the "debug" mode alias —
+// MODE=debug DEBUG=false runs development mode with debug off.
+func InitDebug() {
+	v, set := os.LookupEnv("DEBUG")
+	if !set {
+		return
+	}
+
+	parsed, err := config.ParseBool(v, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: invalid DEBUG value: %q, ignoring\n", v)
+		return
+	}
+
+	SetDebug(parsed)
 }
 
 // GetErrorDetail returns error details based on the current mode.
@@ -109,9 +167,11 @@ func GetErrorDetail(err error) string {
 
 // ShouldShowDebugEndpoints returns true if debug endpoints should be enabled.
 // Debug endpoints include /debug/pprof/* and /debug/vars.
-// These are only available in Development mode.
+// These are gated by the independent debug flag (--debug/DEBUG=true) in
+// BOTH production and development mode — development mode alone does
+// NOT enable them (see AI.md PART 6).
 func ShouldShowDebugEndpoints() bool {
-	return IsDevelopment()
+	return IsDebug()
 }
 
 // GetCacheHeaders returns appropriate cache control headers for static files
@@ -167,10 +227,11 @@ func ShouldEnableAutoReload() bool {
 }
 
 // ShouldEnableProfiling returns true if profiling endpoints should be enabled.
-// Development: true (available at /debug/pprof/*)
-// Production: false (profiling disabled)
+// Gated by the independent debug flag (--debug/DEBUG=true), not by mode
+// alone — pprof endpoints stay disabled in development mode until debug
+// is explicitly enabled (see AI.md PART 6).
 func ShouldEnableProfiling() bool {
-	return IsDevelopment()
+	return IsDebug()
 }
 
 // GetPanicRecoveryMode returns the panic recovery behavior.

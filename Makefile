@@ -1,11 +1,14 @@
-.PHONY: help deps build test run clean docker docker-build docker-run docker-test release
+.PHONY: help deps build dev test run clean docker docker-build docker-run docker-stop docker-test release
 
 # Variables
 BINARY_NAME=gitignore
-VERSION?=1.0.0
-COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
-BUILD_DATE?=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS=-ldflags "-w -s -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildDate=$(BUILD_DATE)"
+PROJECTNAME := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)(\.git)?$$|\1|' || basename "$$(pwd)")
+PROJECTORG  := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)/[^/]+(\.git)?$$|\1|' || basename "$$(dirname "$$(pwd)")")
+
+VERSION    := $(shell cat release.txt 2>/dev/null || echo "0.1.0")
+COMMIT_ID  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.CommitID=$(COMMIT_ID) -X main.BuildDate=$(BUILD_DATE)"
 
 # Directories
 BIN_DIR=./binaries
@@ -13,6 +16,24 @@ RELEASE_DIR=./release
 
 # Platform-specific settings
 PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64
+
+# Docker toolchain
+GO_CACHE  ?= $(HOME)/go/pkg/mod
+GO_BUILD  ?= $(HOME)/.cache/go-build/$(PROJECTNAME)
+
+DOCKER_MEM  ?= 4g
+DOCKER_CPUS ?= 2
+
+GO_DOCKER := docker run --rm \
+	--name $(PROJECTNAME)-$$(tr -dc 'a-z0-9' </dev/urandom | head -c8) \
+	--memory=$(DOCKER_MEM) --cpus=$(DOCKER_CPUS) \
+	-v $(PWD):/app \
+	-v $(GO_CACHE):/usr/local/share/go/pkg/mod \
+	-v $(GO_BUILD):/usr/local/share/go/cache \
+	-w /app \
+	-e CGO_ENABLED=0 \
+	-e GOFLAGS=-buildvcs=false \
+	casjaysdev/go:latest
 
 help: ## Show this help
 	@echo "GitIgnore API Server - Makefile"
@@ -24,37 +45,48 @@ help: ## Show this help
 
 deps: ## Download Go dependencies
 	@echo "📦 Downloading dependencies..."
-	go mod download
-	go mod tidy
+	@mkdir -p $(GO_CACHE) $(GO_BUILD)
+	$(GO_DOCKER) go mod download
+	$(GO_DOCKER) go mod tidy
 	@echo "✅ Dependencies installed"
 
 build: ## Build for current platform
 	@echo "🔨 Building $(BINARY_NAME) for current platform..."
-	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
+	@mkdir -p $(BIN_DIR) $(GO_CACHE) $(GO_BUILD)
+	$(GO_DOCKER) go build -buildvcs=false -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) ./src
 	@echo "✅ Build complete: $(BIN_DIR)/$(BINARY_NAME)"
 
 build-all: ## Build for all platforms
 	@echo "🔨 Building for all platforms..."
-	@mkdir -p $(BIN_DIR)
+	@mkdir -p $(BIN_DIR) $(GO_CACHE) $(GO_BUILD)
 	@for platform in $(PLATFORMS); do \
 		GOOS=$${platform%/*} GOARCH=$${platform#*/} ; \
 		output=$(BIN_DIR)/$(BINARY_NAME)-$$GOOS-$$GOARCH ; \
 		if [ "$$GOOS" = "windows" ]; then output=$$output.exe; fi ; \
 		echo "Building $$GOOS/$$GOARCH..." ; \
-		CGO_ENABLED=0 GOOS=$$GOOS GOARCH=$$GOARCH go build $(LDFLAGS) -o $$output . ; \
+		$(GO_DOCKER) env GOOS=$$GOOS GOARCH=$$GOARCH go build -buildvcs=false -trimpath $(LDFLAGS) -o $$output ./src ; \
 	done
 	@echo "✅ All builds complete"
 
+dev: ## Quick development build into a temp dir
+	@mkdir -p $(GO_CACHE) $(GO_BUILD) "$${TMPDIR:-/tmp}/$(PROJECTORG)" && \
+		BUILD_DIR=$$(mktemp -d "$${TMPDIR:-/tmp}/$(PROJECTORG)/$(PROJECTNAME)-XXXXXX") && \
+		echo "Quick dev build..." && \
+		$(GO_DOCKER) go build -buildvcs=false -o $$BUILD_DIR/$(BINARY_NAME) ./src && \
+		echo "Built: $$BUILD_DIR/$(BINARY_NAME)"
+
 test: ## Run tests
 	@echo "🧪 Running tests..."
-	go test -v -race ./...
+	@mkdir -p $(GO_CACHE) $(GO_BUILD)
+	$(GO_DOCKER) go vet ./...
+	$(GO_DOCKER) go test -v -race -cover ./...
 	@echo "✅ Tests passed"
 
 test-coverage: ## Run tests with coverage
 	@echo "🧪 Running tests with coverage..."
-	go test -v -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
+	@mkdir -p $(GO_CACHE) $(GO_BUILD)
+	$(GO_DOCKER) go test -v -coverprofile=coverage.out ./...
+	$(GO_DOCKER) go tool cover -html=coverage.out -o coverage.html
 	@echo "✅ Coverage report: coverage.html"
 
 run: build ## Build and run
@@ -63,7 +95,8 @@ run: build ## Build and run
 
 run-dev: ## Run in development mode
 	@echo "🚀 Starting server in dev mode..."
-	go run . --dev --port 8080
+	@mkdir -p $(GO_CACHE) $(GO_BUILD)
+	$(GO_DOCKER) go run ./src --dev --port 8080
 
 docker: docker-build ## Build Docker image (alias for docker-build)
 
@@ -71,10 +104,11 @@ docker-build: ## Build Docker image
 	@echo "🐳 Building Docker image..."
 	docker build \
 		--build-arg VERSION=$(VERSION) \
-		--build-arg COMMIT=$(COMMIT) \
+		--build-arg COMMIT_ID=$(COMMIT_ID) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		-t $(BINARY_NAME):$(VERSION) \
 		-t $(BINARY_NAME):latest \
+		-f docker/Dockerfile \
 		.
 	@echo "✅ Docker image built: $(BINARY_NAME):$(VERSION)"
 

@@ -1,0 +1,13 @@
+# Default owner for everything in the repo
+* @casjay
+
+# CI/CD and release automation
+/.github/workflows/ @casjay
+/Makefile @casjay
+
+# Docker and release artifacts
+/docker/ @casjay
+/renovate.json @casjay
+
+# Security-sensitive server code
+/src/server/ @casjay

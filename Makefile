@@ -2,6 +2,7 @@
 
 # Variables
 BINARY_NAME=gitignore
+CLI_BINARY_NAME=gitignore-cli
 PROJECTNAME := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)(\.git)?$$|\1|' || basename "$$(pwd)")
 PROJECTORG  := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)/[^/]+(\.git)?$$|\1|' || basename "$$(dirname "$$(pwd)")")
 
@@ -54,7 +55,8 @@ build: ## Build for current platform
 	@echo "🔨 Building $(BINARY_NAME) for current platform..."
 	@mkdir -p $(BIN_DIR) $(GO_CACHE) $(GO_BUILD)
 	$(GO_DOCKER) go build -buildvcs=false -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) ./src
-	@echo "✅ Build complete: $(BIN_DIR)/$(BINARY_NAME)"
+	$(GO_DOCKER) go build -buildvcs=false -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(CLI_BINARY_NAME) ./src/client
+	@echo "✅ Build complete: $(BIN_DIR)/$(BINARY_NAME), $(BIN_DIR)/$(CLI_BINARY_NAME)"
 
 build-all: ## Build for all platforms
 	@echo "🔨 Building for all platforms..."
@@ -62,9 +64,11 @@ build-all: ## Build for all platforms
 	@for platform in $(PLATFORMS); do \
 		GOOS=$${platform%/*} GOARCH=$${platform#*/} ; \
 		output=$(BIN_DIR)/$(BINARY_NAME)-$$GOOS-$$GOARCH ; \
-		if [ "$$GOOS" = "windows" ]; then output=$$output.exe; fi ; \
+		cli_output=$(BIN_DIR)/$(CLI_BINARY_NAME)-$$GOOS-$$GOARCH ; \
+		if [ "$$GOOS" = "windows" ]; then output=$$output.exe; cli_output=$$cli_output.exe; fi ; \
 		echo "Building $$GOOS/$$GOARCH..." ; \
 		$(GO_DOCKER) env GOOS=$$GOOS GOARCH=$$GOARCH go build -buildvcs=false -trimpath $(LDFLAGS) -o $$output ./src ; \
+		$(GO_DOCKER) env GOOS=$$GOOS GOARCH=$$GOARCH go build -buildvcs=false -trimpath $(LDFLAGS) -o $$cli_output ./src/client ; \
 	done
 	@echo "✅ All builds complete"
 
@@ -73,13 +77,14 @@ dev: ## Quick development build into a temp dir
 		BUILD_DIR=$$(mktemp -d "$${TMPDIR:-/tmp}/$(PROJECTORG)/$(PROJECTNAME)-XXXXXX") && \
 		echo "Quick dev build..." && \
 		$(GO_DOCKER) go build -buildvcs=false -o $$BUILD_DIR/$(BINARY_NAME) ./src && \
-		echo "Built: $$BUILD_DIR/$(BINARY_NAME)"
+		$(GO_DOCKER) go build -buildvcs=false -o $$BUILD_DIR/$(CLI_BINARY_NAME) ./src/client && \
+		echo "Built: $$BUILD_DIR/$(BINARY_NAME), $$BUILD_DIR/$(CLI_BINARY_NAME)"
 
 test: ## Run tests
 	@echo "🧪 Running tests..."
 	@mkdir -p $(GO_CACHE) $(GO_BUILD)
 	$(GO_DOCKER) go vet ./...
-	$(GO_DOCKER) go test -v -race -cover ./...
+	$(GO_DOCKER) env CGO_ENABLED=1 go test -v -race -cover ./...
 	@echo "✅ Tests passed"
 
 test-coverage: ## Run tests with coverage
@@ -133,7 +138,7 @@ docker-stop: ## Stop Docker container
 
 docker-test: ## Test Docker build
 	@echo "🧪 Testing Docker build..."
-	./tests/test-docker.sh || echo "Test script not yet implemented"
+	./tests/docker.sh
 
 release: build-all ## Create release artifacts
 	@echo "📦 Creating release artifacts..."
@@ -141,12 +146,20 @@ release: build-all ## Create release artifacts
 	@for platform in $(PLATFORMS); do \
 		GOOS=$${platform%/*} GOARCH=$${platform#*/} ; \
 		binary=$(BIN_DIR)/$(BINARY_NAME)-$$GOOS-$$GOARCH ; \
-		if [ "$$GOOS" = "windows" ]; then binary=$$binary.exe; fi ; \
+		cli_binary=$(BIN_DIR)/$(CLI_BINARY_NAME)-$$GOOS-$$GOARCH ; \
+		if [ "$$GOOS" = "windows" ]; then binary=$$binary.exe; cli_binary=$$cli_binary.exe; fi ; \
 		if [ -f "$$binary" ]; then \
 			if [ "$$GOOS" = "windows" ]; then \
 				zip -j $(RELEASE_DIR)/$(BINARY_NAME)-$(VERSION)-$$GOOS-$$GOARCH.zip $$binary ; \
 			else \
 				tar -czf $(RELEASE_DIR)/$(BINARY_NAME)-$(VERSION)-$$GOOS-$$GOARCH.tar.gz -C $(BIN_DIR) $(shell basename $$binary) ; \
+			fi ; \
+		fi ; \
+		if [ -f "$$cli_binary" ]; then \
+			if [ "$$GOOS" = "windows" ]; then \
+				zip -j $(RELEASE_DIR)/$(CLI_BINARY_NAME)-$(VERSION)-$$GOOS-$$GOARCH.zip $$cli_binary ; \
+			else \
+				tar -czf $(RELEASE_DIR)/$(CLI_BINARY_NAME)-$(VERSION)-$$GOOS-$$GOARCH.tar.gz -C $(BIN_DIR) $(shell basename $$cli_binary) ; \
 			fi ; \
 		fi ; \
 	done

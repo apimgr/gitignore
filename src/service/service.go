@@ -32,6 +32,23 @@ const (
 	ServiceBSDRC
 )
 
+// okMark and warnMark return the emoji status marker, or a plain-text
+// fallback when NO_COLOR is set, per the NO_COLOR convention used
+// throughout this project (see src/main.go resolveColor).
+func okMark() string {
+	if _, set := os.LookupEnv("NO_COLOR"); set {
+		return "[OK]"
+	}
+	return "✅"
+}
+
+func warnMark() string {
+	if _, set := os.LookupEnv("NO_COLOR"); set {
+		return "[WARN]"
+	}
+	return "⚠️ "
+}
+
 // DetectServiceManager detects the system's service manager
 func DetectServiceManager() ServiceType {
 	switch runtime.GOOS {
@@ -129,7 +146,7 @@ func EnsureSystemUser() error {
 
 	id, err := findAvailableSystemID()
 	if err != nil {
-		return fmt.Errorf("no available UID/GID in system range 100-999: %w", err)
+		return fmt.Errorf("no available UID/GID in safe system range 200-899: %w", err)
 	}
 
 	// Create group
@@ -155,20 +172,46 @@ func EnsureSystemUser() error {
 		return fmt.Errorf("failed to create user %s: %w", appName, err)
 	}
 
-	fmt.Printf("✅ System user '%s' created (uid=%d gid=%d)\n", appName, id, id)
+	fmt.Printf("%s System user '%s' created (uid=%d gid=%d)\n", okMark(), appName, id, id)
 	return nil
 }
 
-// findAvailableSystemID finds an unused UID/GID pair in 100-999 (Linux system range)
+// reservedIDs lists UIDs/GIDs used by well-known services across distros.
+// These are NEVER used even if they appear available on the current system,
+// to avoid conflicts if those services are installed later (see PART 23).
+var reservedIDs = map[int]bool{
+	// nobody
+	65534: true,
+	// systemd-*, docker
+	999: true, 998: true, 997: true, 996: true, 995: true,
+	// systemd-*, kvm
+	994: true, 993: true, 992: true, 991: true, 990: true,
+	// sgx, pipewire, colord
+	989: true, 988: true, 987: true, 986: true, 985: true,
+	// avahi, rtkit, saned, usbmux, cups-pk-helper
+	984: true, 983: true, 982: true, 981: true, 980: true,
+	// common services (101-110) and legacy DB servers (170-179)
+	101: true, 102: true, 103: true, 104: true, 105: true,
+	106: true, 107: true, 108: true, 109: true, 110: true,
+	170: true, 171: true, 172: true, 173: true, 174: true,
+	175: true, 176: true, 177: true, 178: true, 179: true,
+}
+
+// findAvailableSystemID finds an unused UID/GID pair in the safe 200-899 range,
+// skipping reserved well-known service IDs (see PART 23). The same value is used
+// for both UID and GID, and both must be free.
 func findAvailableSystemID() (int, error) {
-	for id := 999; id >= 100; id-- {
+	for id := 899; id >= 200; id-- {
+		if reservedIDs[id] {
+			continue
+		}
 		uidTaken := exec.Command("getent", "passwd", strconv.Itoa(id)).Run() == nil
 		gidTaken := exec.Command("getent", "group", strconv.Itoa(id)).Run() == nil
 		if !uidTaken && !gidTaken {
 			return id, nil
 		}
 	}
-	return 0, fmt.Errorf("no available ID in range 100-999")
+	return 0, fmt.Errorf("no available UID/GID in safe range 200-899")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +223,7 @@ func installSystemd() error {
 
 	// Ensure service user exists before installing
 	if err := EnsureSystemUser(); err != nil {
-		fmt.Printf("⚠️  Could not create system user (continuing): %v\n", err)
+		fmt.Printf("%s Could not create system user (continuing): %v\n", warnMark(), err)
 	}
 
 	// Create required directories
@@ -244,8 +287,8 @@ WantedBy=multi-user.target
 		return fmt.Errorf("failed to enable service: %w", err)
 	}
 
-	fmt.Printf("✅ Service installed at: %s\n", servicePath)
-	fmt.Printf("✅ Binary installed at: %s\n", binaryPath)
+	fmt.Printf("%s Service installed at: %s\n", okMark(), servicePath)
+	fmt.Printf("%s Binary installed at: %s\n", okMark(), binaryPath)
 	fmt.Printf("\nTo start the service:\n  sudo systemctl start %s\n", appName)
 	return nil
 }
@@ -258,7 +301,7 @@ func uninstallSystemd() error {
 		return fmt.Errorf("failed to remove service file: %w", err)
 	}
 	exec.Command("systemctl", "daemon-reload").Run()
-	fmt.Printf("✅ Service uninstalled: %s\n", servicePath)
+	fmt.Printf("%s Service uninstalled: %s\n", okMark(), servicePath)
 	return nil
 }
 
@@ -295,7 +338,7 @@ func installRunit() error {
 	}
 
 	os.Symlink(svDir, fmt.Sprintf("/var/service/%s", appName))
-	fmt.Printf("✅ Runit service installed at: %s\n", svDir)
+	fmt.Printf("%s Runit service installed at: %s\n", okMark(), svDir)
 	return nil
 }
 
@@ -303,7 +346,7 @@ func uninstallRunit() error {
 	exec.Command("sv", "stop", appName).Run()
 	os.Remove(fmt.Sprintf("/var/service/%s", appName))
 	os.RemoveAll(fmt.Sprintf("/etc/sv/%s", appName))
-	fmt.Println("✅ Runit service uninstalled")
+	fmt.Printf("%s Runit service uninstalled\n", okMark())
 	return nil
 }
 
@@ -375,7 +418,7 @@ func installLaunchd() error {
 		}
 	}
 
-	fmt.Printf("✅ LaunchDaemon installed at: %s\n", launchdPlist)
+	fmt.Printf("%s LaunchDaemon installed at: %s\n", okMark(), launchdPlist)
 	fmt.Printf("\nTo load the service:\n  sudo launchctl load %s\n", launchdPlist)
 	return nil
 }
@@ -385,7 +428,7 @@ func uninstallLaunchd() error {
 	if err := os.Remove(launchdPlist); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove plist file: %w", err)
 	}
-	fmt.Println("✅ LaunchDaemon uninstalled")
+	fmt.Printf("%s LaunchDaemon uninstalled\n", okMark())
 	return nil
 }
 
@@ -417,7 +460,7 @@ func installWindows() error {
 		return fmt.Errorf("failed to create Windows service: %w", err)
 	}
 
-	fmt.Printf("✅ Windows service '%s' installed\n", appName)
+	fmt.Printf("%s Windows service '%s' installed\n", okMark(), appName)
 	fmt.Printf("\nTo start the service:\n  sc.exe start %s\n", appName)
 	return nil
 }
@@ -427,7 +470,7 @@ func uninstallWindows() error {
 	if err := exec.Command("sc.exe", "delete", appName).Run(); err != nil {
 		return fmt.Errorf("failed to delete Windows service: %w", err)
 	}
-	fmt.Printf("✅ Windows service '%s' uninstalled\n", appName)
+	fmt.Printf("%s Windows service '%s' uninstalled\n", okMark(), appName)
 	return nil
 }
 
@@ -469,7 +512,7 @@ run_rc_command "$1"
 		}
 	}
 
-	fmt.Printf("✅ BSD rc.d script installed at: %s\n", rcPath)
+	fmt.Printf("%s BSD rc.d script installed at: %s\n", okMark(), rcPath)
 	fmt.Printf("\nAdd '%s_enable=\"YES\"' to /etc/rc.conf\n", appName)
 	fmt.Printf("\nTo start the service:\n  service %s start\n", appName)
 	return nil
@@ -481,7 +524,7 @@ func uninstallBSDRC() error {
 	if err := os.Remove(rcPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove rc.d script: %w", err)
 	}
-	fmt.Println("✅ BSD rc.d script uninstalled")
+	fmt.Printf("%s BSD rc.d script uninstalled\n", okMark())
 	return nil
 }
 

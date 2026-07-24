@@ -127,9 +127,11 @@ make release
 │   ├── API.md                # API reference
 │   └── SERVER.md             # Admin guide
 ├── .github/workflows/        # CI/CD workflows
-├── docker-compose.yml        # Production compose
-├── docker-compose.test.yml   # Test compose
-├── Dockerfile                # Docker image
+├── docker/                   # Docker build and compose files
+│   ├── Dockerfile            # Docker image
+│   ├── docker-compose.yml    # Production compose
+│   ├── docker-compose.test.yml # Test compose
+│   └── rootfs/               # Build-time image overlay (entrypoint.sh)
 ├── Makefile                  # Build system
 └── CLAUDE.md                 # Project specification
 ```
@@ -351,11 +353,14 @@ docker-compose up -d
 ### Backup Data
 
 ```bash
-# Using backup script
-./scripts/backup.sh
+# Create an encrypted, verifiable backup archive
+gitignore --maintenance backup
 
-# Or manually
-tar -czf backup.tar.gz /etc/gitignore /var/lib/gitignore
+# Restore from a backup archive (verified in a staging dir first)
+gitignore --maintenance restore gitignore_backup_2024-01-01_120000.tar.gz
+
+# The scripts/backup.sh wrapper delegates to the binary
+./scripts/backup.sh
 ```
 
 ### View Logs

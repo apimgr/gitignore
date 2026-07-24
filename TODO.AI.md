@@ -1,5 +1,18 @@
 # TODO.AI.md
 
+## [x] Implement PART 17 Email & Notifications (SMTP + templates)
+stdlib net/smtp Sender (auto/starttls/tls/none), SMTP auto-detection +
+connection-test with auto-enable and detected-host persistence, 8 embedded
+customizable templates with {config_dir}/template/email/ override + live
+fallback, {variable} rendering + validation, SMTP_* env overrides, per-event
+config (server.notifications.email.events with spec defaults), `email test|
+status|validate` subcommand. Wired triggers: backup_complete, backup_failed,
+scheduler_error (with suppression). Templates+config exist but no caller yet
+for ssl_*/security_alert/update_*/startup/shutdown (dependent subsystems not
+built). src/email/*, src/email_wire.go, src/config notifications, scheduler
+OnError hook. Verified: Docker build+vet+test green.
+Read: AI.md PART 17
+
 ## [x] Add "Third-Party Licenses" section to LICENSE.md
 Read: AI.md PART 2
 
@@ -78,7 +91,7 @@ pool bounds + PingContext reachability check (src/db/db.go), TODO stub
 handlers replaced across src/server/handlers.go, web_handlers.go, and
 src/templates/handlers.go (unified `ok` envelope, sendAPIResponseError).
 Deferred (documented as new follow-ups below rather than implemented):
-GraphQL execution engine, Email/SMTP, GeoIP mmdb, self-update command,
+GraphQL execution engine, GeoIP mmdb, self-update command,
 full CSP/Permissions-Policy config tree, SRI pinning for CDN assets,
 /metrics bearer-token auth, and the PART 14 root/versioned route-naming
 scheme.
@@ -132,7 +145,7 @@ Read: AI.md PART 14 "server/* namespace", PART 11
 
 ## [ ] Implement or explicitly stub remaining PART 7-22 deferred items
 GraphQL execution engine (handleGraphQL currently returns NOT_IMPLEMENTED),
-Email/SMTP notifications, GeoIP mmdb lookups, self-update command, full
+self-update command, full
 CSP/Permissions-Policy config tree (currently a fixed CSP string, not
 operator-configurable), Subresource Integrity hashes for the Swagger UI/
 GraphiQL CDN assets (jsdelivr script/style tags), and Bearer-token auth

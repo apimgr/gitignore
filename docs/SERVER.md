@@ -23,11 +23,11 @@ Complete guide for installing, configuring, and managing GitIgnore API Server.
 
 ```bash
 # Download docker-compose.yml
-curl -LSs https://raw.githubusercontent.com/apimgr/gitignore/main/docker-compose.yml \
+curl -LSs https://raw.githubusercontent.com/apimgr/gitignore/main/docker/docker-compose.yml \
   -o docker-compose.yml
 
 # Create directories
-mkdir -p rootfs/{config,data,logs}
+mkdir -p volumes/{config,data}
 
 # Start service
 docker-compose up -d
@@ -499,15 +499,17 @@ curl -H "Authorization: Bearer TOKEN" \
 ### Using Backup Script
 
 ```bash
-# Create backup
+# Create backup (wraps: gitignore --maintenance backup)
 ./scripts/backup.sh
 
-# Backups saved to ./backups/
-# gitignore_backup_20240101_120000.tar.gz
-# gitignore_backup_20240101_120000.tar.gz.manifest
+# Backups are written to the resolved backup directory, e.g.
+# gitignore_backup_2024-01-01_120000.tar.gz
+# (or gitignore_backup_2024-01-01_120000.tar.gz.enc when encryption is enabled)
 
-# Restore backup
-tar -xzf gitignore_backup_20240101_120000.tar.gz -C /
+# Restore backup - verifies the embedded manifest and per-file SHA-256
+# checksums in a staging directory before installing anything. Never extract
+# a backup with `tar -C /`; the archive is not laid out for that.
+gitignore --maintenance restore gitignore_backup_2024-01-01_120000.tar.gz
 ```
 
 ### Manual Backup

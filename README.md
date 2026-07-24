@@ -29,7 +29,7 @@
 
 ```bash
 # Download docker-compose.yml
-curl -LSs https://raw.githubusercontent.com/apimgr/gitignore/main/docker-compose.yml -o docker-compose.yml
+curl -LSs https://raw.githubusercontent.com/apimgr/gitignore/main/docker/docker-compose.yml -o docker-compose.yml
 
 # Start the service
 docker-compose up -d
@@ -272,7 +272,7 @@ docker run -d \
 
 ```bash
 # Use test compose file
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f docker/docker-compose.test.yml up -d
 
 # Or run test script
 cd tests

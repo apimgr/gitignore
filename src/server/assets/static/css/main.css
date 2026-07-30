@@ -1,4 +1,8 @@
-:root {
+/* Theme custom properties. Dark is the default (AI.md PART 16); light and auto
+   override via the theme-* class the server renders on <html> from the theme
+   cookie. Auto follows prefers-color-scheme with pure CSS (no matchMedia JS). */
+html.theme-dark,
+html.theme-auto {
   --bg: #1a1a1a;
   --bg-alt: #242424;
   --fg: #e6e6e6;
@@ -7,8 +11,17 @@
   --border: #333;
   --code-bg: #0f0f0f;
 }
+html.theme-light {
+  --bg: #ffffff;
+  --bg-alt: #f4f5f7;
+  --fg: #1a1a1a;
+  --fg-muted: #5f6368;
+  --accent: #0066cc;
+  --border: #ddd;
+  --code-bg: #f0f0f0;
+}
 @media (prefers-color-scheme: light) {
-  :root {
+  html.theme-auto {
     --bg: #ffffff;
     --bg-alt: #f4f5f7;
     --fg: #1a1a1a;
@@ -21,21 +34,72 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   background: var(--bg);
   color: var(--fg);
   line-height: 1.6;
 }
-header {
+/* Skip link stays off-screen until focused (WCAG 2.1 AA keyboard nav) */
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  z-index: 1100;
+}
+.skip-link:focus { left: 0; }
+/* Visible focus indicator for keyboard users */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.header {
   background: var(--bg-alt);
   border-bottom: 1px solid var(--border);
   padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
-header a { color: var(--fg); text-decoration: none; font-weight: 600; }
-nav { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
-nav a { color: var(--fg-muted); text-decoration: none; font-size: 0.9rem; }
-nav a:hover { color: var(--accent); }
-main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+.site-brand { color: var(--fg); text-decoration: none; font-weight: 600; font-size: 1.1rem; }
+.header-actions { display: flex; align-items: center; gap: 0.5rem; }
+.theme-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  text-transform: capitalize;
+}
+.theme-form { display: inline-flex; gap: 0.25rem; }
+.nav {
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1.5rem;
+}
+.nav a { color: var(--fg-muted); text-decoration: none; font-size: 0.9rem; }
+.nav a:hover { color: var(--accent); }
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
 h1 { margin-top: 0; }
 a { color: var(--accent); }
 input, button, select {
@@ -56,10 +120,41 @@ pre {
 }
 ul.templates { columns: 3; list-style: none; padding: 0; }
 ul.templates li { break-inside: avoid; }
-footer {
+@media (max-width: 600px) {
+  ul.templates { columns: 1; }
+}
+.footer {
   border-top: 1px solid var(--border);
   color: var(--fg-muted);
   padding: 1.5rem;
   text-align: center;
   font-size: 0.85rem;
+}
+.footer-links {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+}
+.footer-meta { margin: 0; }
+.error-page { text-align: center; padding: 3rem 1rem; }
+.error-page h1 { font-size: 4rem; margin: 0; color: var(--accent); }
+.error-page .btn {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+}
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+@media print {
+  .header, .nav, .footer, .theme-button, .skip-link { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
 }

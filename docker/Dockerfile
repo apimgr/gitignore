@@ -3,6 +3,9 @@
 # =============================================================================
 FROM casjaysdev/go:latest AS builder
 
+# git: required for go mod download; bash: for build scripts
+RUN apk add --no-cache git bash
+
 ARG TARGETARCH
 ARG VERSION=dev
 ARG BUILD_DATE
@@ -20,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -buildvcs=false \
     -trimpath \
     -ldflags "-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildDate=${BUILD_DATE}'" \
-    -o /app ./src
+    -o /build/bin/gitignore ./src
 
 # =============================================================================
 # Runtime Stage - Minimal Alpine image
@@ -33,40 +36,29 @@ ARG BUILD_DATE
 ARG COMMIT_ID
 ARG LICENSE=MIT
 
-# Static Labels
-LABEL maintainer="apimgr <apimgr@casjay.pro>" \
-      org.opencontainers.image.vendor="apimgr" \
-      org.opencontainers.image.authors="apimgr" \
-      org.opencontainers.image.title="gitignore" \
-      org.opencontainers.image.base.name="gitignore" \
-      org.opencontainers.image.description="Containerized version of gitignore" \
-      org.opencontainers.image.url="https://github.com/apimgr/gitignore" \
-      org.opencontainers.image.source="https://github.com/apimgr/gitignore" \
-      org.opencontainers.image.documentation="https://github.com/apimgr/gitignore" \
-      org.opencontainers.image.vcs-type="Git" \
-      com.github.containers.toolbox="false"
+# No LABEL blocks — all image metadata is applied as OCI annotations at build
+# time by CI (docker/metadata-action annotations output). Annotations attach to
+# the manifest index and are visible on multiarch pulls; LABEL applies only to
+# per-platform layers. See dockerfile_conventions.md → OCI Annotations.
 
-# Dynamic Labels (from ARGs)
-LABEL org.opencontainers.image.licenses="${LICENSE}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.schema-version="${VERSION}" \
-      org.opencontainers.image.revision="${COMMIT_ID}"
-
-# Install required packages including Tor
+# Install required packages
+# NOTE: Tor binary installed but NOT configured here - the server binary owns
+# all Tor setup (see PART 31).
 RUN apk add --no-cache \
+    git \
     curl \
     bash \
     tini \
     tor
 
-# Create directories with proper structure
-RUN mkdir -p /config /data/db /data/logs /data/tor /data/geoip /data/backup
+# NO directory creation - the binary creates and owns all directories based on
+# CONFIG_DIR / DATA_DIR / DATABASE_DIR. Docker volume mounts auto-create mount
+# points. Baking directories here would fight user overrides.
 
 # Copy binary from builder stage (multi-stage build)
-COPY --from=builder /app /usr/local/bin/gitignore
+COPY --from=builder /build/bin/gitignore /usr/local/bin/gitignore
 
-# Copy entrypoint script from ./docker/rootfs/
+# Copy BUILD-TIME overlay (entrypoint.sh) from docker/rootfs/ into image
 COPY docker/rootfs/ /
 
 # Copy Dockerfile to image (for reference and backup)
@@ -76,9 +68,10 @@ COPY docker/Dockerfile /root/Dockerfile
 RUN chmod 755 /usr/local/bin/*
 
 # Set environment
-ENV MODE=development \
-    TZ=America/New_York \
-    ENABLE_TOR=true
+# MODE is never baked into the image — the binary defaults to production and
+# compose files set MODE explicitly. Only TZ is set here; the binary derives
+# all paths from CONFIG_DIR / DATA_DIR (set by entrypoint.sh).
+ENV TZ=America/New_York
 
 # Expose internal port (always 80)
 EXPOSE 80

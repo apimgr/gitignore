@@ -1,32 +1,35 @@
-.PHONY: help deps build dev test run clean docker docker-build docker-run docker-stop docker-test release
+.PHONY: help deps build dev test i18n-validate run clean docker docker-build docker-run docker-stop docker-test release
 
 # Variables
 BINARY_NAME=gitignore
 CLI_BINARY_NAME=gitignore-cli
-PROJECTNAME := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)(\.git)?$$|\1|' || basename "$$(pwd)")
-PROJECTORG  := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)/[^/]+(\.git)?$$|\1|' || basename "$$(dirname "$$(pwd)")")
+PROJECT_NAME := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)(\.git)?$$|\1|' || basename "$$(pwd)")
+PROJECT_ORG  := $(shell git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)/[^/]+(\.git)?$$|\1|' || basename "$$(dirname "$$(pwd)")")
 
-VERSION    := $(shell cat release.txt 2>/dev/null || echo "0.1.0")
+VERSION    := $(shell cat release.txt 2>/dev/null || echo "$${VERSION:-devel}")
 COMMIT_ID  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.CommitID=$(COMMIT_ID) -X main.BuildDate=$(BUILD_DATE)"
+
+# Official site URL (OPTIONAL - never guess): site.txt > OFFICIAL_SITE env > empty
+OFFICIAL_SITE := $(shell [ -f site.txt ] && cat site.txt || echo "$${OFFICIAL_SITE:-}")
+LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.CommitID=$(COMMIT_ID) -X main.BuildDate=$(BUILD_DATE) -X 'main.OfficialSite=$(OFFICIAL_SITE)'"
 
 # Directories
 BIN_DIR=./binaries
 RELEASE_DIR=./release
 
 # Platform-specific settings
-PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64
+PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 freebsd/arm64
 
 # Docker toolchain
 GO_CACHE  ?= $(HOME)/go/pkg/mod
-GO_BUILD  ?= $(HOME)/.cache/go-build/$(PROJECTNAME)
+GO_BUILD  ?= $(HOME)/.cache/go-build/$(PROJECT_NAME)
 
 DOCKER_MEM  ?= 4g
 DOCKER_CPUS ?= 2
 
 GO_DOCKER := docker run --rm \
-	--name $(PROJECTNAME)-$$(tr -dc 'a-z0-9' </dev/urandom | head -c8) \
+	--name $(PROJECT_NAME)-$$(tr -dc 'a-z0-9' </dev/urandom | head -c8) \
 	--memory=$(DOCKER_MEM) --cpus=$(DOCKER_CPUS) \
 	-v $(PWD):/app \
 	-v $(GO_CACHE):/usr/local/share/go/pkg/mod \
@@ -73,19 +76,24 @@ build-all: ## Build for all platforms
 	@echo "✅ All builds complete"
 
 dev: ## Quick development build into a temp dir
-	@mkdir -p $(GO_CACHE) $(GO_BUILD) "$${TMPDIR:-/tmp}/$(PROJECTORG)" && \
-		BUILD_DIR=$$(mktemp -d "$${TMPDIR:-/tmp}/$(PROJECTORG)/$(PROJECTNAME)-XXXXXX") && \
+	@mkdir -p $(GO_CACHE) $(GO_BUILD) "$${TMPDIR:-/tmp}/$(PROJECT_ORG)" && \
+		BUILD_DIR=$$(mktemp -d "$${TMPDIR:-/tmp}/$(PROJECT_ORG)/$(PROJECT_NAME)-XXXXXX") && \
 		echo "Quick dev build..." && \
 		$(GO_DOCKER) go build -buildvcs=false -o $$BUILD_DIR/$(BINARY_NAME) ./src && \
 		$(GO_DOCKER) go build -buildvcs=false -o $$BUILD_DIR/$(CLI_BINARY_NAME) ./src/client && \
 		echo "Built: $$BUILD_DIR/$(BINARY_NAME), $$BUILD_DIR/$(CLI_BINARY_NAME)"
 
-test: ## Run tests
+test: i18n-validate ## Run tests
 	@echo "🧪 Running tests..."
 	@mkdir -p $(GO_CACHE) $(GO_BUILD)
 	$(GO_DOCKER) go vet ./...
 	$(GO_DOCKER) go test -v -cover ./...
 	@echo "✅ Tests passed"
+
+i18n-validate: ## Validate translation files (AI.md PART 30)
+	@echo "🌐 Validating translation files..."
+	@mkdir -p $(GO_CACHE) $(GO_BUILD)
+	$(GO_DOCKER) go run ./cmd/i18n-validate src/common/i18n/locales/
 
 test-coverage: ## Run tests with coverage
 	@echo "🧪 Running tests with coverage..."

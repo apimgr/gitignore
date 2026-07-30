@@ -8,13 +8,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/apimgr/gitignore/src/admin"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/geoip"
+	"github.com/apimgr/gitignore/src/mode"
 	apppath "github.com/apimgr/gitignore/src/path"
+	"github.com/apimgr/gitignore/src/server/metrics"
 	"github.com/apimgr/gitignore/src/ssl"
 	"github.com/apimgr/gitignore/src/template"
 	"github.com/go-chi/chi/v5"
@@ -42,30 +48,65 @@ type Config struct {
 	Commit    string
 	BuildDate string
 	Cfg       *config.Config
+	GeoIP     *geoip.Manager
 }
 
 // Server represents the HTTP server
 type Server struct {
-	config       *Config
-	router       *chi.Mux
-	server       *http.Server
-	adminHandler *admin.Handler
-	limiter      *rateLimiter
-	metrics      *metricsRegistry
+	config        *Config
+	router        *chi.Mux
+	server        *http.Server
+	adminHandler  *admin.Handler
+	limiter       *rateLimiter
+	metrics       *metrics.Metrics
+	trustedProxies []*net.IPNet
+	geoip         *geoip.Manager
+	startTime     time.Time
+	stats         *statsCollector
 }
 
 // New creates a new server instance
 func New(config *Config) *Server {
 	s := &Server{
-		config:  config,
-		router:  chi.NewRouter(),
-		metrics: newMetricsRegistry(),
+		config:    config,
+		router:    chi.NewRouter(),
+		geoip:     config.GeoIP,
+		startTime: time.Now(),
+		stats:     newStatsCollector(),
+	}
+
+	// Prometheus metrics subsystem (AI.md PART 20). Built on
+	// prometheus/client_golang; disabled when the operator turns it off.
+	if config.Cfg == nil || config.Cfg.Server.Metrics.Enabled {
+		mOpts := metrics.Options{
+			Version:        config.Version,
+			Commit:         config.Commit,
+			BuildDate:      config.BuildDate,
+			IncludeRuntime: true,
+		}
+		if config.Templates != nil {
+			templates := config.Templates
+			mOpts.TemplatesFn = func() int { return templates.Count() }
+		}
+		if config.Cfg != nil {
+			mOpts.IncludeRuntime = config.Cfg.Server.Metrics.IncludeRuntime
+			mOpts.DurationBuckets = config.Cfg.Server.Metrics.DurationBuckets
+			mOpts.SizeBuckets = config.Cfg.Server.Metrics.SizeBuckets
+		}
+		s.metrics = metrics.New(mOpts)
 	}
 
 	// Enable per-IP rate limiting only when the operator turns it on.
 	if config.Cfg != nil && config.Cfg.Server.RateLimit.Enabled {
 		s.limiter = newRateLimiter(config.Cfg.Server.RateLimit.Requests, config.Cfg.Server.RateLimit.Window)
 	}
+
+	// Parse the trusted-proxy allowlist once at startup (AI.md PART 12).
+	var additional []string
+	if config.Cfg != nil {
+		additional = config.Cfg.Server.TrustedProxies.Additional
+	}
+	s.trustedProxies = buildTrustedProxies(config.Address, additional)
 
 	// Load admin credentials from database (never from config file)
 	adminUsername := "admin"
@@ -89,25 +130,57 @@ func New(config *Config) *Server {
 		config.BuildDate,
 	)
 
+	// Apply the configured language-cookie name and lifetime (AI.md PART 30).
+	if config.Cfg != nil {
+		i18n.Configure(config.Cfg.Server.I18n.CookieName, parseCookieMaxAge(config.Cfg.Server.I18n.CookieMaxAge))
+	}
+
 	s.setupMiddleware()
 	s.setupRoutes()
 
+	// Mount the router under the configured URL path prefix (AI.md PART 8
+	// "--baseurl"). The default "/" leaves routing untouched; a non-root prefix
+	// strips the prefix before dispatch and redirects the bare prefix to its
+	// trailing-slash form.
+	var handler http.Handler = s.router
+	if config.Cfg != nil {
+		if prefix := config.Cfg.Server.BaseURL; prefix != "" && prefix != "/" {
+			handler = baseURLHandler(prefix, s.router)
+		}
+	}
+
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", config.Address, config.Port),
-		Handler:      s.router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Handler:      handler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	return s
 }
 
+// baseURLHandler serves next under a non-root URL path prefix: the bare prefix
+// is redirected to its trailing-slash form and all other requests have the
+// prefix stripped before dispatch (AI.md PART 8 "--baseurl").
+func baseURLHandler(prefix string, next http.Handler) http.Handler {
+	stripped := http.StripPrefix(prefix, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == prefix {
+			http.Redirect(w, r, prefix+"/", http.StatusMovedPermanently)
+			return
+		}
+		stripped.ServeHTTP(w, r)
+	})
+}
+
 // setupMiddleware configures middleware
 func (s *Server) setupMiddleware() {
-	// Basic middleware
+	// Basic middleware. chi's middleware.RealIP is deliberately NOT used: it
+	// rewrites r.RemoteAddr from X-Forwarded-For/X-Real-IP unconditionally,
+	// which lets any direct client spoof its IP. Client IP is resolved through
+	// the trusted-proxy gate in s.clientIP (AI.md PART 12).
 	s.router.Use(middleware.RequestID)
-	s.router.Use(middleware.RealIP)
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
 
@@ -117,8 +190,19 @@ func (s *Server) setupMiddleware() {
 	// Per-IP rate limiting (no-op unless enabled in config)
 	s.router.Use(s.rateLimitMiddleware)
 
+	// Country-based access policy (AI.md PART 19). Runs AFTER rate limiting and
+	// never replaces authentication — a risk signal only, fail-open on any
+	// lookup gap. No-op when GeoIP is disabled or no country database is loaded.
+	s.router.Use(s.geoipMiddleware)
+
 	// Record HTTP request metrics (AI.md PART 20)
 	s.router.Use(s.metricsMiddleware)
+
+	// Resolve and persist the request language (AI.md PART 30). No-op for
+	// behavior when i18n is disabled — it still resolves to English.
+	if s.config.Cfg == nil || s.config.Cfg.Server.I18n.Enabled {
+		s.router.Use(i18n.Middleware)
+	}
 
 	// Timeout
 	s.router.Use(middleware.Timeout(30 * time.Second))
@@ -146,12 +230,30 @@ func (s *Server) setupRoutes() {
 	// Admin routes (session auth for web, bearer token for API)
 	s.adminHandler.RegisterRoutes(s.router)
 
+	// Themed error handlers for unmatched routes and methods (AI.md PART 16)
+	s.router.NotFound(s.handleNotFound)
+	s.router.MethodNotAllowed(s.handleMethodNotAllowed)
+
 	// Public routes
 	s.router.Get("/", s.handleHome)
-	s.router.Get("/healthz", s.handleHealthz)
 
-	// Prometheus metrics (internal only — firewall externally, AI.md PART 20)
-	s.router.Get("/metrics", s.handleMetrics)
+	// Optional root alias for /server/healthz — only when the operator enables
+	// it (AI.md PART 13 "Optional /healthz"). It mounts the same handler, so it
+	// follows the exact same content negotiation as /server/healthz.
+	if s.config.Cfg != nil && s.config.Cfg.Server.Healthz.Root.Enabled {
+		s.router.Get("/healthz", s.handleHealthz)
+	}
+
+	// Prometheus metrics (internal only — firewall externally, AI.md PART 20).
+	// Registered only when metrics are enabled; the endpoint path and optional
+	// bearer token come from server.metrics config.
+	if s.metrics != nil {
+		endpoint := "/metrics"
+		if s.config.Cfg != nil && s.config.Cfg.Server.Metrics.Endpoint != "" {
+			endpoint = s.config.Cfg.Server.Metrics.Endpoint
+		}
+		s.router.Handle(endpoint, s.metricsHandler())
+	}
 
 	// Special files (PWA, robots, security)
 	s.router.Get("/robots.txt", s.handleRobotsTxt)
@@ -159,6 +261,9 @@ func (s *Server) setupRoutes() {
 	s.router.Get("/.well-known/security.txt", s.handleSecurityTxt)
 	s.router.Get("/manifest.json", s.handleManifest)
 	s.router.Get("/sw.js", s.handleServiceWorker)
+
+	// Frontend locale catalogs (AI.md PART 30 "/locales/{lang}.json")
+	s.router.Get("/locales/{lang}.json", s.handleLocaleJSON)
 
 	// Search
 	s.router.Get("/search", s.handleSearchPage)
@@ -184,6 +289,22 @@ func (s *Server) setupRoutes() {
 	// CLI
 	s.router.Get("/cli", s.handleCLIPage)
 
+	// Standard public pages under /server/* (IDEA.md "Business logic",
+	// AI.md PART 16 "Standard pages"). No admin UI exists here.
+	s.router.Get("/server", s.handleServerPage)
+
+	// Canonical frontend health endpoint (AI.md PART 13). Content-negotiated
+	// via PART 14 rules by the shared handler.
+	s.router.Get("/server/healthz", s.handleHealthz)
+	s.router.Get("/server/about", s.handleAboutPage)
+	s.router.Get("/server/privacy", s.handlePrivacyPage)
+	s.router.Get("/server/contact", s.handleContactPage)
+	s.router.Get("/server/help", s.handleHelpPage)
+	s.router.Get("/server/terms", s.handleTermsPage)
+
+	// No-JS theme switch endpoint for the <noscript> form (AI.md PART 16)
+	s.router.Post("/server/theme", s.handleThemeSet)
+
 	// Server docs UI pages (root level, AI.md PART 14 "Root-Level Endpoints")
 	s.router.Get("/server/docs/swagger", s.handleSwaggerUI)
 	s.router.Get("/server/docs/graphql", s.handleGraphiQLPage)
@@ -198,7 +319,7 @@ func (s *Server) setupRoutes() {
 	s.router.Get("/api/graphql", s.handleGraphQLSchema)
 	s.router.Post("/api/graphql", s.handleGraphQL)
 	s.router.Get("/api/healthz", s.handleHealthz)
-	s.router.Get("/api/healthz.txt", s.handleHealthzText)
+	s.router.Get("/api/healthz.txt", s.handleHealthz)
 	s.router.Get("/api/autodiscover", s.handleAPIAutodiscover)
 
 	// Versioned API routes
@@ -210,10 +331,13 @@ func (s *Server) setupRoutes() {
 		// mutating operator endpoints are a separate follow-up, see
 		// TODO.AI.md)
 		r.Get("/server/healthz", s.handleHealthz)
-		r.Get("/server/healthz.txt", s.handleHealthzText)
+		r.Get("/server/healthz.txt", s.handleHealthz)
 		r.Get("/server/swagger", s.handleOpenAPIJSON)
 		r.Post("/server/graphql", s.handleGraphQL)
 		r.Get("/server/graphql", s.handleGraphQLSchema)
+
+		// Read-only scheduler status (AI.md PART 18 "Scheduler Status")
+		r.Get("/server/scheduler", s.handleAPISchedulerStatus)
 
 		// Templates (plural resource noun, AI.md PART 14 "Route Naming
 		// Convention")
@@ -251,11 +375,11 @@ func (s *Server) setupRoutes() {
 	s.router.Get("/api/list", s.handleCompatList)
 	s.router.Get("/api/{list}", s.handleCompatTemplates)
 
-	// Debug routes (dev mode only)
-	if s.config.DevMode {
-		s.router.Get("/debug/routes", s.handleDebugRoutes)
-		s.router.Get("/debug/config", s.handleDebugConfig)
-		s.router.Get("/debug/templates", s.handleDebugTemplates)
+	// Debug routes (custom endpoints, net/http/pprof profiles and the expvar
+	// /debug/vars handler) are gated on the independent debug flag (--debug /
+	// DEBUG=true), never on application mode (AI.md PART 6). See debug_pprof.go.
+	if mode.ShouldShowDebugEndpoints() {
+		s.registerDebugRoutes(s.router)
 	}
 }
 
@@ -335,9 +459,10 @@ func (s *Server) configureTLS() error {
 		Enabled:  true,
 		CertPath: certPath,
 		LetsEncrypt: ssl.LetsEncryptConfig{
-			Enabled:   s.config.Cfg.Server.SSL.LetsEncrypt.Enabled,
-			Email:     s.config.Cfg.Server.SSL.LetsEncrypt.Email,
-			Challenge: s.config.Cfg.Server.SSL.LetsEncrypt.Challenge,
+			Enabled:     s.config.Cfg.Server.SSL.LetsEncrypt.Enabled,
+			Email:       s.config.Cfg.Server.SSL.LetsEncrypt.Email,
+			Challenge:   s.config.Cfg.Server.SSL.LetsEncrypt.Challenge,
+			DNSProvider: s.config.Cfg.Server.SSL.LetsEncrypt.DNSProvider,
 		},
 	})
 
@@ -359,15 +484,69 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// handleLocaleJSON serves the raw embedded translation catalog for a language
+// so the frontend can fetch strings at runtime (AI.md PART 30). Unsupported
+// languages fall back to the default locale rather than 404, so the client
+// always receives a usable catalog.
+func (s *Server) handleLocaleJSON(w http.ResponseWriter, r *http.Request) {
+	lang := chi.URLParam(r, "lang")
+	data, ok := i18n.LocaleJSON(lang)
+	if !ok {
+		data, _ = i18n.LocaleJSON(i18n.DefaultLang)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(data)
+}
+
+// parseCookieMaxAge converts a config duration such as "365d", "24h", or
+// "3600s" into whole seconds for the language cookie. Unrecognized or empty
+// values fall back to one year, matching the AI.md PART 30 default.
+func parseCookieMaxAge(s string) int {
+	const oneYear = 365 * 24 * 60 * 60
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return oneYear
+	}
+	unit := s[len(s)-1]
+	if unit >= '0' && unit <= '9' {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return n
+		}
+		return oneYear
+	}
+	n, err := strconv.Atoi(s[:len(s)-1])
+	if err != nil || n <= 0 {
+		return oneYear
+	}
+	switch unit {
+	case 'd':
+		return n * 24 * 60 * 60
+	case 'h':
+		return n * 60 * 60
+	case 'm':
+		return n * 60
+	case 's':
+		return n
+	default:
+		return oneYear
+	}
+}
+
 // detectServerURL determines the server URL from request headers
 func (s *Server) detectServerURL(r *http.Request) string {
-	// Check for reverse proxy headers
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		host := r.Header.Get("X-Forwarded-Host")
-		if host == "" {
-			host = r.Host
+	// Reverse-proxy headers are only honored when the immediate peer is a
+	// trusted proxy (AI.md PART 12 "X-Forwarded-* trust gate"). Headers from a
+	// non-trusted peer are dropped so an attacker reaching the binary directly
+	// cannot forge the proto/host used for URL construction.
+	if s.isTrustedPeer(r.RemoteAddr) {
+		if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+			host := r.Header.Get("X-Forwarded-Host")
+			if host == "" {
+				host = r.Host
+			}
+			return fmt.Sprintf("%s://%s", proto, host)
 		}
-		return fmt.Sprintf("%s://%s", proto, host)
 	}
 
 	// Check for config FQDN

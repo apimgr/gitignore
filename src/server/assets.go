@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 //go:embed assets/static
@@ -37,7 +39,10 @@ func init() {
 		os.Exit(exOSFile)
 	}
 
-	pages := []string{"home", "search", "template", "combine", "categories", "list", "stats", "docs", "cli"}
+	pages := []string{
+		"home", "search", "template", "combine", "categories", "list", "stats", "docs", "cli",
+		"server", "about", "privacy", "contact", "help", "terms", "error",
+	}
 	for _, name := range pages {
 		body, err := htmlFS.ReadFile("assets/html/" + name + ".html")
 		if err != nil {
@@ -63,12 +68,37 @@ type PageData struct {
 	Description string
 	Version     string
 	BaseURL     string
+	Lang        string
+	Dir         string
+	Theme       string
 	Data        map[string]interface{}
 }
 
-// renderPage composes and writes an HTML page, applying the no-store cache
-// policy required for HTML responses (AI.md PART 9).
+// validThemes is the set of theme values accepted from the theme cookie and
+// rendered as the theme-* class on <html> (AI.md PART 16 "Theme preference
+// source"). The default when the cookie is missing or invalid is "dark".
+var validThemes = map[string]bool{"dark": true, "light": true, "auto": true}
+
+// themeFromRequest reads the server-side theme preference from the "theme"
+// cookie, falling back to the dark default so the theme class renders with no
+// client-side detection and no FOUC (AI.md PART 16).
+func themeFromRequest(r *http.Request) string {
+	if c, err := r.Cookie("theme"); err == nil && validThemes[c.Value] {
+		return c.Value
+	}
+	return "dark"
+}
+
+// renderPage composes and writes an HTML page with a 200 status, applying the
+// no-store cache policy required for HTML responses (AI.md PART 9).
 func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, page string, data PageData) {
+	s.renderPageStatus(w, r, page, http.StatusOK, data)
+}
+
+// renderPageStatus is renderPage with an explicit HTTP status. The status is
+// written after the response headers so themed error pages keep their
+// Content-Type and cache headers (AI.md PART 16 "Error Pages").
+func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page string, status int, data PageData) {
 	t, ok := pageTemplates[page]
 	if !ok {
 		sendAPIResponseError(w, "SERVER_ERROR", "unknown page template")
@@ -83,6 +113,15 @@ func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, page string,
 	if data.Description == "" {
 		data.Description = "Comprehensive .gitignore template API."
 	}
+	if data.Lang == "" {
+		data.Lang = i18n.LangFromContext(r.Context())
+	}
+	if data.Dir == "" {
+		data.Dir = i18n.Direction(data.Lang)
+	}
+	if data.Theme == "" {
+		data.Theme = themeFromRequest(r)
+	}
 	if data.Data == nil {
 		data.Data = map[string]interface{}{}
 	}
@@ -94,5 +133,8 @@ func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, page string,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	setCacheHeaders(w, "html")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
 	_, _ = buf.WriteTo(w)
 }

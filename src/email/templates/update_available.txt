@@ -1,0 +1,19 @@
+Subject: Update Available - {app_name}
+---
+UPDATE AVAILABLE
+
+From: {app_name} ({fqdn})
+Time: {timestamp}
+
+A new release is available for {app_name}.
+
+Running version: {current_version}
+New version:     {new_version}
+
+Install it on the server with:
+
+  gitignore --update yes
+
+--
+{app_name}
+{app_url}

@@ -1,0 +1,524 @@
+{
+  "meta": {
+    "language": "ja",
+    "name": "Japanese",
+    "native_name": "日本語",
+    "direction": "ltr",
+    "version": "1.0.0"
+  },
+
+  "common": {
+    "select_language": "言語を選択",
+    "save": "保存",
+    "save_all": "すべて保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "edit": "編集",
+    "create": "作成",
+    "update": "更新",
+    "close": "閉じる",
+    "back": "戻る",
+    "next": "次へ",
+    "previous": "前へ",
+    "submit": "送信",
+    "confirm": "確認",
+    "search": "検索",
+    "search_placeholder": "検索...",
+    "filter": "フィルター",
+    "refresh": "更新",
+    "download": "ダウンロード",
+    "upload": "アップロード",
+    "copy": "コピー",
+    "copy_to_clipboard": "クリップボードにコピー",
+    "copied": "コピーしました",
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "success": "成功",
+    "warning": "警告",
+    "info": "情報",
+    "yes": "はい",
+    "no": "いいえ",
+    "on": "オン",
+    "off": "オフ",
+    "enabled": "有効",
+    "disabled": "無効",
+    "required": "必須",
+    "optional": "任意",
+    "none": "なし",
+    "all": "すべて",
+    "actions": "操作",
+    "details": "詳細",
+    "settings": "設定",
+    "preferences": "環境設定",
+    "view": "表示",
+    "expand": "展開",
+    "collapse": "折りたたむ",
+    "show": "表示",
+    "hide": "非表示",
+    "more": "もっと見る",
+    "less": "閉じる",
+    "done": "完了",
+    "unsaved_changes": "保存されていない変更",
+    "requires_restart": "再起動が必要です",
+    "page_x_of_y": "{total} ページ中 {current} ページ",
+    "showing_x_of_y": "{total} 件中 {count} 件を表示",
+    "last_updated": "最終更新: {datetime}",
+    "made_with": "制作:"
+  },
+
+  "theme": {
+    "light": "ライト",
+    "dark": "ダーク",
+    "auto": "自動"
+  },
+
+  "nav": {
+    "home": "ホーム",
+    "about": "概要",
+    "contact": "お問い合わせ",
+    "help": "ヘルプ",
+    "privacy": "プライバシー",
+    "terms": "利用規約",
+    "docs": "ドキュメント",
+    "api_docs": "API ドキュメント",
+    "status": "ステータス",
+    "skip_to_content": "メインコンテンツへスキップ",
+    "skip_to_navigation": "ナビゲーションへスキップ",
+    "main_navigation": "メインナビゲーション"
+  },
+
+  "health": {
+    "title": "システムステータス",
+    "all_operational": "すべてのシステムが正常に稼働しています",
+    "degraded": "低下",
+    "unhealthy": "異常",
+    "healthy": "正常",
+    "version": "バージョン",
+    "go_version": "Go バージョン",
+    "build": "ビルド",
+    "uptime": "稼働時間",
+    "mode": "モード",
+    "status": "ステータス",
+    "features": "機能",
+    "component_status": "コンポーネントステータス",
+    "server_statistics": "サーバー統計",
+    "total_requests": "総リクエスト数",
+    "requests_24h": "リクエスト数 (24時間)",
+    "active_connections": "アクティブな接続",
+    "last_checked": "最終確認:",
+    "auto_refresh": "{seconds} 秒後に自動更新",
+    "ok": "OK",
+    "connected": "接続済み",
+    "disconnected": "切断",
+    "production": "本番環境",
+    "development": "開発環境"
+  },
+
+  "status_values": {
+    "online": "オンライン",
+    "offline": "オフライン",
+    "maintenance": "メンテナンス",
+    "starting": "起動中",
+    "stopping": "停止中",
+    "error": "エラー",
+    "good": "良好",
+    "warn": "警告"
+  },
+
+  "contact": {
+    "title": "お問い合わせ",
+    "name": "名前",
+    "email": "メールアドレス",
+    "subject": "件名",
+    "message": "メッセージ",
+    "send": "メッセージを送信",
+    "success": "メッセージをありがとうございます。まもなく返信いたします。"
+  },
+
+  "help": {
+    "title": "ヘルプ",
+    "getting_started": "はじめに",
+    "features": "機能",
+    "api_documentation": "API ドキュメント",
+    "swagger_description": "Swagger UI - インタラクティブな REST API エクスプローラー",
+    "graphql_description": "インタラクティブな GraphQL エクスプローラー",
+    "tor_access": "Tor アクセス",
+    "onion_address": "Onion アドレス",
+    "how_to_connect": "接続方法",
+    "download_tor": "Tor Browser をダウンロード",
+    "open_tor": "Tor Browser を開き、接続が完了するまで待ちます",
+    "paste_onion": "上記の onion アドレスをコピーし、Tor Browser のアドレスバーに貼り付けます",
+    "tor_privacy": "Tor を使用すると追加のプライバシーが得られます...",
+    "faq": "よくある質問",
+    "troubleshooting": "トラブルシューティング"
+  },
+
+  "privacy": {
+    "title": "プライバシーポリシー",
+    "last_updated": "最終更新:",
+    "summary": "概要",
+    "data_stored": "お客様のデータは当社のサーバーに保存されます",
+    "never_sell": "お客様のデータを販売することはありません",
+    "may_sell": "お客様のデータが販売される場合があります",
+    "you_control": "お客様がデータを管理します",
+    "cookie_policy": "Cookie ポリシー",
+    "essential_cookies": "必須 Cookie",
+    "preference_cookies": "設定 Cookie",
+    "analytics_cookies": "分析 Cookie",
+    "no_analytics": "当サイトでは分析トラッキングを使用していません。",
+    "manage_cookies": "Cookie 設定を管理",
+    "data_we_collect": "収集するデータ",
+    "how_we_use": "データの使用方法",
+    "data_security": "データセキュリティ",
+    "data_storage": "データの保存と第三者",
+    "all_data_stored": "お客様のすべてのデータは当社のサーバーに保存されます。",
+    "when_shared": "データが共有される場合",
+    "data_retention": "データの保持",
+    "your_rights": "お客様の権利",
+    "right_access": "アクセス",
+    "right_export": "エクスポート",
+    "right_deletion": "削除",
+    "right_correction": "訂正",
+    "right_cookie_control": "Cookie の管理",
+    "third_party_services": "第三者サービス",
+    "service": "サービス",
+    "purpose": "目的",
+    "data_sent": "送信されるデータ",
+    "no_third_party": "現在、お客様のデータを受け取る第三者サービスは使用していません。",
+    "view_policy": "ポリシーを表示",
+    "contact_us": "お問い合わせ",
+    "privacy_inquiries": "プライバシーに関するお問い合わせは、当社までご連絡ください。",
+    "ccpa_title": "カリフォルニア州プライバシー権利 (CCPA)",
+    "ccpa_do_not_sell": "個人情報を販売しない",
+    "ccpa_opted_out": "データの販売をオプトアウトしました。",
+    "ccpa_opt_back_in": "再度オプトインする"
+  },
+
+  "terms": {
+    "title": "利用規約",
+    "acceptance": "同意",
+    "account_terms": "アカウント規約",
+    "acceptable_use": "許容される使用",
+    "content": "コンテンツ",
+    "termination": "解約",
+    "liability": "責任",
+    "changes": "変更",
+    "governing_law": "準拠法"
+  },
+
+  "cookie_consent": {
+    "message": "EU GDPR 法に従い、このメッセージが表示されています。",
+    "accept": "同意する",
+    "decline": "拒否する",
+    "manage_preferences": "設定を管理",
+    "blocked_content": "Cookie 設定により外部コンテンツがブロックされています。",
+    "essential_description": "サイトの機能に必要です。無効にできません。",
+    "preference_description": "テーマ (ライト/ダーク)、言語、インターフェース設定などの設定を記憶します。無効にすると、アクセスのたびにデフォルトにリセットされます。",
+    "analytics_description": "サイトの利用状況を把握するのに役立ちます。"
+  },
+
+  "about": {
+    "title": "概要",
+    "features": "機能",
+    "version": "バージョン",
+    "links": "リンク"
+  },
+
+  "announcements": {
+    "warning": "警告",
+    "info": "情報",
+    "error": "エラー",
+    "success": "成功",
+    "scheduled_maintenance": "予定されたメンテナンス"
+  },
+
+  "pwa": {
+    "install": "アプリをインストール",
+    "installed": "アプリがインストールされました",
+    "offline_message": "インターネット接続がありません。キャッシュされたコンテンツを表示しています。"
+  },
+
+  "errors": {
+    "required": "この項目は必須です",
+    "invalid_email": "無効なメールアドレスです",
+    "too_short": "{min} 文字以上で入力してください",
+    "too_long": "{max} 文字を超えることはできません",
+    "passwords_dont_match": "パスワードが一致しません",
+    "invalid_format": "無効な形式です",
+    "already_exists": "すでに存在します",
+    "not_found": "見つかりません",
+    "bad_request": "無効なリクエスト形式です",
+    "validation_failed": "検証に失敗しました: {details}",
+    "rate_limited": "リクエストが多すぎます。後でもう一度お試しください",
+    "forbidden": "アクセスが拒否されました",
+    "unauthorized": "認証されていません",
+    "blocked_by_blocklist": "アクセスが拒否されました",
+    "blocked_by_country": "お住まいの地域ではご利用いただけません",
+    "account_locked": "アカウントがロックされています",
+    "method_not_allowed": "許可されていないメソッドです",
+    "conflict": "リソースはすでに存在します",
+    "server_error": "内部サーバーエラー",
+    "maintenance_mode": "サービスを利用できません"
+  },
+
+  "plurals": {
+    "items": {
+      "zero": "アイテムなし",
+      "one": "{count} 件のアイテム",
+      "other": "{count} 件のアイテム"
+    },
+    "results": {
+      "zero": "結果なし",
+      "one": "{count} 件の結果",
+      "other": "{count} 件の結果"
+    },
+    "users": {
+      "zero": "ユーザーなし",
+      "one": "{count} 人のユーザー",
+      "other": "{count} 人のユーザー"
+    },
+    "days": {
+      "one": "{count} 日",
+      "other": "{count} 日"
+    },
+    "hours": {
+      "one": "{count} 時間",
+      "other": "{count} 時間"
+    },
+    "minutes": {
+      "one": "{count} 分",
+      "other": "{count} 分"
+    }
+  },
+
+  "notifications": {
+    "title": "通知",
+    "mark_all_read": "すべて既読にする",
+    "clear_all": "すべてクリア",
+    "ssl_expiring": "SSL 証明書は {count} 日後に期限切れになります",
+    "ssl_renewal_failed": "SSL 証明書の更新に失敗しました",
+    "backup_completed": "バックアップが完了しました",
+    "backup_failed": "バックアップに失敗しました",
+    "update_available": "アップデートが利用可能です",
+    "disk_space_low": "ディスク容量が不足しています",
+    "task_failed": "タスクが失敗しました",
+    "task_triggered": "タスクが手動で実行されました",
+    "ssl_renewed": "SSL 証明書が更新されました",
+    "blocklist_updated": "ブロックリストが更新されました: {name} ({count} 件のルール)",
+    "blocklist_update_failed": "ブロックリストの更新に失敗しました: {name}",
+    "geoip_updated": "GeoIP データベースが更新されました",
+    "geoip_update_failed": "GeoIP の更新に失敗しました",
+    "ip_blocked": "IP がブロックされました: {ip} ({reason})",
+    "ip_allowlisted": "IP が許可リストに追加されました: {cidr}",
+    "country_blocked": "国によりリクエストがブロックされました: {ip} ({country})",
+    "preferences": {
+      "webui": "WebUI",
+      "email": "メール",
+      "security_cannot_disable": "セキュリティ (無効にできません)",
+      "server": "サーバー",
+      "backup": "バックアップ",
+      "scheduler": "スケジューラー",
+      "other_admins": "その他の管理者"
+    }
+  },
+
+  "email": {
+    "subjects": {
+      "security_alert": "セキュリティアラート - {app_name}",
+      "backup_completed": "バックアップ完了 - {app_name}",
+      "backup_failed": "バックアップ失敗 - {app_name}",
+      "ssl_expiring": "SSL 証明書の期限切れ間近 - {app_name}",
+      "ssl_renewed": "SSL 証明書更新 - {app_name}",
+      "ssl_renewal_failed": "SSL 更新失敗 - {app_name}",
+      "task_failed": "スケジュールされたタスクの失敗 - {app_name}",
+      "test_email": "テストメール - {app_name}"
+    },
+    "body": {
+      "security_alert_heading": "セキュリティアラート",
+      "recommended_actions": "推奨される対応",
+      "contact_information": "連絡先情報",
+      "from": "送信元: {app_name} ({fqdn})"
+    }
+  },
+
+  "swagger": {
+    "title": "API ドキュメント - {app_name}",
+    "description": "インタラクティブな REST API エクスプローラー",
+    "try_it_out": "試してみる",
+    "authorize": "認証",
+    "no_description": "説明はありません",
+    "request_body": "リクエストボディ",
+    "responses": "レスポンス",
+    "parameters": "パラメーター",
+    "example_value": "サンプル値",
+    "model": "モデル",
+    "headers": "ヘッダー",
+    "media_type": "メディアタイプ",
+    "endpoint_descriptions": {
+      "health_check": "サーバーの状態を確認",
+      "get_version": "バージョン情報を取得",
+      "get_config": "現在の設定を取得",
+      "update_config": "設定を更新",
+      "list_items": "アイテムを一覧表示",
+      "get_item": "ID でアイテムを取得",
+      "create_item": "新しいアイテムを作成",
+      "update_item": "既存のアイテムを更新",
+      "delete_item": "アイテムを削除"
+    },
+    "parameter_descriptions": {
+      "id": "一意のリソース識別子",
+      "page": "ページネーションのページ番号",
+      "per_page": "1 ページあたりのアイテム数",
+      "sort": "並べ替えフィールド",
+      "order": "並べ替え方向 (asc/desc)",
+      "search": "検索キーワード",
+      "filter": "フィルター式"
+    },
+    "error_descriptions": {
+      "400": "Bad Request - リクエストを処理できませんでした",
+      "401": "Unauthorized - 認証が必要です",
+      "403": "Forbidden - 権限が不足しています",
+      "404": "Not Found - リソースが存在しません",
+      "409": "Conflict - リソースはすでに存在します",
+      "429": "Too Many Requests - レート制限を超えました",
+      "500": "Server Error - 内部エラー"
+    }
+  },
+
+  "graphql": {
+    "title": "GraphQL エクスプローラー - {app_name}",
+    "description": "インタラクティブな GraphQL エクスプローラー",
+    "query": "クエリ",
+    "mutation": "ミューテーション",
+    "subscription": "サブスクリプション",
+    "variables": "変数",
+    "docs": "ドキュメント",
+    "schema": "スキーマ",
+    "type_descriptions": {
+      "query": "データを取得するための利用可能なクエリ",
+      "mutation": "データを変更するための利用可能なミューテーション",
+      "subscription": "リアルタイムデータ用のサブスクリプション"
+    }
+  },
+
+  "users": {
+    "registration": {
+      "title": "登録",
+      "username": "ユーザー名",
+      "email": "メールアドレス",
+      "password": "パスワード",
+      "confirm_password": "パスワードの確認",
+      "register_button": "登録",
+      "already_have_account": "すでにアカウントをお持ちですか？ ログイン"
+    },
+    "profile": {
+      "title": "プロフィール",
+      "name": "名前",
+      "avatar": "アバター",
+      "bio": "自己紹介",
+      "security": "セキュリティ",
+      "sessions": "セッション",
+      "login_history": "ログイン履歴",
+      "api_usage": "API 使用状況"
+    },
+    "tokens": {
+      "title": "API トークン",
+      "create_new": "新しいトークンを作成",
+      "name": "名前",
+      "scopes": "スコープ",
+      "scope_read": "読み取り",
+      "scope_write": "書き込み",
+      "expiry": "有効期限",
+      "revoke": "取り消し",
+      "last_used": "最終使用: {duration} 前"
+    },
+    "moderation": {
+      "title": "ユーザーモデレーション",
+      "delete_user": "ユーザーを削除",
+      "impersonate": "なりすまし",
+      "disable_user": "ユーザーを無効化",
+      "enable_user": "ユーザーを有効化",
+      "revoke_sessions": "セッションを取り消し",
+      "profile_tab": "プロフィール",
+      "security_tab": "セキュリティ",
+      "activity_tab": "アクティビティ",
+      "actions_tab": "操作"
+    },
+    "roles": {
+      "title": "ロール管理",
+      "public": "公開",
+      "private": "非公開",
+      "disabled": "無効"
+    }
+  },
+
+  "cli": {
+    "description": "{project_name} {project_version} - {project_description}",
+    "usage": "使用方法:",
+    "information": "情報:",
+    "shell_integration": "シェル統合:",
+    "server_configuration": "サーバー設定:",
+    "service_management": "サービス管理:",
+    "show_help": "ヘルプを表示",
+    "show_version": "バージョンを表示",
+    "show_status": "サーバーの状態と稼働状況を表示",
+    "print_completions": "シェル補完を出力",
+    "print_init": "シェル初期化コマンドを出力",
+    "app_mode": "アプリケーションモード",
+    "config_dir": "設定ディレクトリ",
+    "data_dir": "データディレクトリ",
+    "run_help": "任意のコマンドの詳細なヘルプは '{project_name} <command> --help' を実行してください。",
+    "running_pid": "{project_name} は実行中です (PID {pid})",
+    "daemon_started": "デーモンが PID {pid} で起動しました",
+    "already_running": "すでに実行中です (pid {pid})",
+    "running_in_mode": "実行モード: {app_mode}",
+    "http_address": "HTTP: {proto}://{fqdn}:{port}",
+    "listening_on": "{proto}://{address}:{port} で待機中",
+    "server_started_on": "サーバーは {startup_datetime} に起動しました",
+    "server_started_ok": "サーバーが正常に起動しました",
+    "received_signal": "シグナル {signal} を受信しました。グレースフルシャットダウンを開始します...",
+    "received_sigusr1": "SIGUSR1 を受信しました。ログを再オープンします...",
+    "received_sigusr2": "SIGUSR2 を受信しました。状態をダンプします...",
+    "graceful_shutdown": "グレースフルシャットダウンが完了しました",
+    "shutdown_error": "HTTP サーバーのシャットダウンエラー: {error}",
+    "windows_daemon_warning": "警告: --daemon は Windows ではサポートされていません",
+    "windows_service_hint": "Windows サービスには --service --install && --service start を使用してください",
+    "error_create_dir": "ディレクトリ {path} の作成に失敗しました: {error}",
+    "error_not_writable": "ディレクトリ {path} は書き込み可能ではありません: {error}",
+    "error_reserved_path": "'{path}' は予約されたパスです",
+    "error_route_conflict": "'{path}' は既存のルートと競合しています: {route}",
+    "error_corrupt_pid": "PID ファイルが破損しています",
+    "error_unsupported_shell": "サポートされていないシェル: {shell}",
+    "requires_privileges": "{action} には昇格された権限が必要です。",
+    "escalate_prompt": "昇格しますか？ [Y/n]: ",
+    "running_in_mode_label": "モード"
+  },
+
+  "version": {
+    "name_version": "{project_name} {project_version}",
+    "built": "ビルド日時: {build_date}",
+    "go": "Go: {go_version}",
+    "os_arch": "OS/Arch: {goos}/{goarch}"
+  },
+
+  "confirm": {
+    "delete_title": "削除の確認",
+    "delete_message": "このアイテムを削除してもよろしいですか？",
+    "action_irreversible": "この操作は元に戻せません。"
+  },
+
+  "form": {
+    "required_field": "(必須)",
+    "optional_field": "(任意)",
+    "hint_email": "お客様のメールアドレスを共有することはありません。",
+    "errors_count": "フォームに {count} 件のエラーがあります"
+  },
+
+  "a11y": {
+    "skip_to_content": "メインコンテンツへスキップ",
+    "skip_to_navigation": "ナビゲーションへスキップ",
+    "loading": "読み込み中...",
+    "item_saved": "アイテムが正常に保存されました",
+    "search_results": "{count} 件の検索結果が見つかりました"
+  }
+}

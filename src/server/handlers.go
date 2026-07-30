@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,28 +21,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 			"categories": len(s.config.Templates.GetCategories()),
 		},
 	})
-}
-
-// handleHealthz handles the content-negotiated health check (AI.md PART 13).
-func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	if strings.HasSuffix(r.URL.Path, ".txt") {
-		s.handleHealthzText(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	setCacheHeaders(w, "html")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "healthy",
-		"version":   s.config.Version,
-		"commit":    s.config.Commit,
-		"buildDate": s.config.BuildDate,
-	})
-}
-
-// handleHealthzText handles health check (plain text)
-func (s *Server) handleHealthzText(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "healthy\n")
 }
 
 // handleAPIInfo returns API information
@@ -258,19 +235,16 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
   "short_name": "GitIgnore",
   "description": "Comprehensive .gitignore template API",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1a1a1a",
-  "theme_color": "#0066cc",
+  "theme_color": "#1a1a1a",
   "icons": [
     {
-      "src": "/static/images/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/static/images/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "/static/images/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }`
@@ -281,8 +255,16 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
 	sw := `// GitIgnore Service Worker
-const CACHE_NAME = 'gitignore-v1';
-const urlsToCache = ['/', '/static/css/main.css', '/manifest.json'];
+const CACHE_NAME = 'gitignore-v2';
+const OFFLINE_URL = '/static/offline.html';
+const urlsToCache = [
+  '/',
+  '/static/css/main.css',
+  '/static/js/app.js',
+  '/static/images/icon.svg',
+  '/manifest.json',
+  OFFLINE_URL
+];
 
 self.addEventListener('install', function(event) {
   event.waitUntil(
@@ -290,12 +272,31 @@ self.addEventListener('install', function(event) {
       return cache.addAll(urlsToCache);
     })
   );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function(event) {
+  event.waitUntil(
+    caches.keys().then(function(keys) {
+      return Promise.all(keys.filter(function(k) {
+        return k !== CACHE_NAME;
+      }).map(function(k) {
+        return caches.delete(k);
+      }));
+    })
+  );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', function(event) {
+  if (event.request.method !== 'GET') {
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then(function(response) {
-      return response || fetch(event.request);
+      return response || fetch(event.request).catch(function() {
+        return caches.match(OFFLINE_URL);
+      });
     })
   );
 });
@@ -312,7 +313,7 @@ func (s *Server) handleAPITemplateText(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl, err := s.config.Templates.Get(name)
 	if err != nil {
-		sendAPIResponseError(w, "NOT_FOUND", "template not found")
+		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND", "template not found")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")

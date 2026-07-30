@@ -24,6 +24,23 @@ var (
 	mu   sync.RWMutex
 )
 
+const (
+	// readTimeout bounds simple SELECT queries (AI.md PART 10 Query Timeouts).
+	readTimeout = 5 * time.Second
+	// writeTimeout bounds INSERT/UPDATE/DELETE queries (AI.md PART 10).
+	writeTimeout = 10 * time.Second
+)
+
+// readCtx returns a context with the standard read-query deadline.
+func readCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), readTimeout)
+}
+
+// writeCtx returns a context with the standard write-query deadline.
+func writeCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), writeTimeout)
+}
+
 // AdminCredentials holds admin login info loaded from DB
 type AdminCredentials struct {
 	Username  string
@@ -36,7 +53,13 @@ func Init(dataDir string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// DATABASE_DIR is an init-only override (AI.md PART 5 "Init-Only Variables",
+	// PART 26): when set it takes precedence over the default {data_dir}/db
+	// location. Read once at startup.
 	dbDir := filepath.Join(dataDir, "db")
+	if v := strings.TrimSpace(os.Getenv("DATABASE_DIR")); v != "" {
+		dbDir = v
+	}
 	if err := os.MkdirAll(dbDir, 0750); err != nil {
 		return fmt.Errorf("failed to create db directory: %w", err)
 	}
@@ -62,16 +85,24 @@ func Init(dataDir string) error {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	if _, err := c.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if _, err := c.ExecContext(ctx, "PRAGMA journal_mode=WAL"); err != nil {
 		c.Close()
 		return fmt.Errorf("failed to set WAL mode: %w", err)
 	}
-	if _, err := c.Exec("PRAGMA foreign_keys=ON"); err != nil {
+	if _, err := c.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
 		c.Close()
 		return fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
-	if err := createSchema(c); err != nil {
+	// Reconcile schema drift from earlier releases before the CREATE TABLE IF
+	// NOT EXISTS statements run — a table that already exists is never altered
+	// by IF NOT EXISTS, so incompatible legacy tables are dropped first.
+	if err := migrateSchema(ctx, c); err != nil {
+		c.Close()
+		return fmt.Errorf("failed to migrate schema: %w", err)
+	}
+
+	if err := createSchema(ctx, c); err != nil {
 		c.Close()
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
@@ -90,8 +121,55 @@ func Close() error {
 	return nil
 }
 
-func createSchema(c *sql.DB) error {
-	_, err := c.Exec(`
+// migrateSchema drops tables whose on-disk shape predates the current schema
+// so the subsequent CREATE TABLE IF NOT EXISTS can recreate them correctly.
+func migrateSchema(ctx context.Context, c *sql.DB) error {
+	// The original server_scheduler_state used (task, last_run, next_run,
+	// status). PART 18 replaced it with a task_id-keyed table carrying run/fail
+	// counts and status detail. The table was never populated (the scheduler
+	// was dead code), so dropping it loses no data.
+	hasTaskID, err := columnExists(ctx, c, "server_scheduler_state", "task_id")
+	if err != nil {
+		return err
+	}
+	tableExists, err := columnExists(ctx, c, "server_scheduler_state", "task")
+	if err != nil {
+		return err
+	}
+	if tableExists && !hasTaskID {
+		if _, err := c.ExecContext(ctx, "DROP TABLE server_scheduler_state"); err != nil {
+			return fmt.Errorf("failed to drop legacy scheduler table: %w", err)
+		}
+	}
+	return nil
+}
+
+// columnExists reports whether the named column is present on the table. A
+// missing table yields false with no error.
+func columnExists(ctx context.Context, c *sql.DB, table, column string) (bool, error) {
+	rows, err := c.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid, notnull, pk       int
+			name, ctype            string
+			dfltValue              sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, rows.Err()
+		}
+	}
+	return false, rows.Err()
+}
+
+func createSchema(ctx context.Context, c *sql.DB) error {
+	_, err := c.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS server_admin_credentials (
     id          INTEGER PRIMARY KEY,
     username    TEXT NOT NULL,
@@ -125,10 +203,16 @@ CREATE TABLE IF NOT EXISTS server_cluster_state (
 );
 
 CREATE TABLE IF NOT EXISTS server_scheduler_state (
-    task        TEXT PRIMARY KEY,
+    task_id     TEXT PRIMARY KEY,
+    task_name   TEXT NOT NULL DEFAULT '',
+    schedule    TEXT NOT NULL DEFAULT '',
     last_run    DATETIME,
+    last_status TEXT NOT NULL DEFAULT '',
+    last_error  TEXT NOT NULL DEFAULT '',
     next_run    DATETIME,
-    status      TEXT
+    run_count   INTEGER NOT NULL DEFAULT 0,
+    fail_count  INTEGER NOT NULL DEFAULT 0,
+    enabled     INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS server_nodes (
@@ -185,8 +269,11 @@ func HasAdminCredentials() (bool, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 
+	ctx, cancel := readCtx()
+	defer cancel()
+
 	var count int
-	err := conn.QueryRow("SELECT COUNT(*) FROM server_admin_credentials").Scan(&count)
+	err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM server_admin_credentials").Scan(&count)
 	return count > 0, err
 }
 
@@ -195,8 +282,11 @@ func GetAdminCredentials() (*AdminCredentials, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 
+	ctx, cancel := readCtx()
+	defer cancel()
+
 	creds := &AdminCredentials{}
-	err := conn.QueryRow(
+	err := conn.QueryRowContext(ctx,
 		"SELECT username, pass_hash, token_hash FROM server_admin_credentials ORDER BY id LIMIT 1",
 	).Scan(&creds.Username, &creds.PassHash, &creds.TokenHash)
 	if err == sql.ErrNoRows {
@@ -217,7 +307,10 @@ func SetAdminCredentials(username, password, token string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	_, err = conn.Exec(`
+	ctx, cancel := writeCtx()
+	defer cancel()
+
+	_, err = conn.ExecContext(ctx, `
 INSERT INTO server_admin_credentials (username, pass_hash, token_hash)
 VALUES (?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
@@ -239,7 +332,10 @@ func UpdateAdminPassword(password string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	_, err = conn.Exec(
+	ctx, cancel := writeCtx()
+	defer cancel()
+
+	_, err = conn.ExecContext(ctx,
 		"UPDATE server_admin_credentials SET pass_hash = ?, updated_at = CURRENT_TIMESTAMP",
 		passHash,
 	)
@@ -253,7 +349,10 @@ func UpdateAdminToken(token string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	_, err := conn.Exec(
+	ctx, cancel := writeCtx()
+	defer cancel()
+
+	_, err := conn.ExecContext(ctx,
 		"UPDATE server_admin_credentials SET token_hash = ?, updated_at = CURRENT_TIMESTAMP",
 		tokenHash,
 	)
@@ -265,8 +364,11 @@ func VerifyAdminPassword(username, password string) bool {
 	mu.RLock()
 	defer mu.RUnlock()
 
+	ctx, cancel := readCtx()
+	defer cancel()
+
 	var storedUser, passHash string
-	err := conn.QueryRow(
+	err := conn.QueryRowContext(ctx,
 		"SELECT username, pass_hash FROM server_admin_credentials ORDER BY id LIMIT 1",
 	).Scan(&storedUser, &passHash)
 	if err != nil {
@@ -286,12 +388,25 @@ func VerifyAdminToken(rawToken string) bool {
 	mu.RLock()
 	defer mu.RUnlock()
 
+	if rawToken == "" {
+		return false
+	}
+
+	ctx, cancel := readCtx()
+	defer cancel()
+
+	var storedHash string
+	err := conn.QueryRowContext(ctx,
+		"SELECT token_hash FROM server_admin_credentials ORDER BY id LIMIT 1",
+	).Scan(&storedHash)
+	if err != nil {
+		return false
+	}
+
+	// Constant-time comparison of the SHA-256 token digests defeats timing
+	// attacks that DB equality (WHERE token_hash = ?) would leak (AI.md PART 11).
 	incoming := HashToken(rawToken)
-	var count int
-	conn.QueryRow(
-		"SELECT COUNT(*) FROM server_admin_credentials WHERE token_hash = ?", incoming,
-	).Scan(&count)
-	return count > 0
+	return subtle.ConstantTimeCompare([]byte(incoming), []byte(storedHash)) == 1
 }
 
 // GenerateToken generates a cryptographically secure URL-safe token of the given byte length

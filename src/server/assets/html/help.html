@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>Help</h1>
+<p>GitIgnore serves <code>.gitignore</code> templates over the web, a REST API, and a CLI.</p>
+<h2>In the browser</h2>
+<ul>
+<li><a href="/search">Search</a> — find a template by name or keyword.</li>
+<li><a href="/list">All Templates</a> — browse every available template.</li>
+<li><a href="/categories">Categories</a> — browse by language, editor, framework, or OS.</li>
+<li><a href="/combine">Combine</a> — merge several templates into one file.</li>
+</ul>
+<h2>From the command line</h2>
+<pre>curl {{.BaseURL}}/api/v1/templates/go
+curl "{{.BaseURL}}/api/v1/combine?templates=go,node,macos" &gt; .gitignore</pre>
+<p>The <code>gitignore-cli</code> client wraps these calls for shell pipelines:</p>
+<pre>gitignore-cli Go Node &gt; .gitignore</pre>
+<h2>API documentation</h2>
+<p>Full API reference is available at <a href="/docs">API Docs</a>, with interactive Swagger at <a href="/server/docs/swagger">/server/docs/swagger</a> and GraphQL at <a href="/server/docs/graphql">/server/docs/graphql</a>.</p>
+{{end}}

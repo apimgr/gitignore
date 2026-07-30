@@ -24,8 +24,7 @@ func (s *Server) handleTemplatePage(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	tmpl, err := s.config.Templates.Get(name)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		s.renderPage(w, r, "template", PageData{
+		s.renderPageStatus(w, r, "template", http.StatusNotFound, PageData{
 			Title: "Not found",
 			Data:  map[string]interface{}{"name": name, "content": "template not found"},
 		})
@@ -94,6 +93,82 @@ func (s *Server) handleDocsPage(w http.ResponseWriter, r *http.Request) {
 // handleCLIPage serves the CLI customization page.
 func (s *Server) handleCLIPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, r, "cli", PageData{Title: "CLI"})
+}
+
+// handleServerPage serves the /server index page.
+func (s *Server) handleServerPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, r, "server", PageData{Title: "Server"})
+}
+
+// handleAboutPage serves the About standard page (AI.md PART 16).
+func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, r, "about", PageData{Title: "About"})
+}
+
+// handlePrivacyPage serves the Privacy standard page.
+func (s *Server) handlePrivacyPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, r, "privacy", PageData{Title: "Privacy"})
+}
+
+// handleContactPage serves the Contact standard page.
+func (s *Server) handleContactPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, r, "contact", PageData{Title: "Contact"})
+}
+
+// handleHelpPage serves the Help standard page.
+func (s *Server) handleHelpPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, r, "help", PageData{Title: "Help"})
+}
+
+// handleTermsPage serves the Terms standard page.
+func (s *Server) handleTermsPage(w http.ResponseWriter, r *http.Request) {
+	s.renderPage(w, r, "terms", PageData{Title: "Terms"})
+}
+
+// handleThemeSet is the no-JS theme switch: it persists the chosen theme in the
+// "theme" cookie and redirects back, so a visitor without JavaScript can still
+// change theme via the <noscript> form (AI.md PART 16).
+func (s *Server) handleThemeSet(w http.ResponseWriter, r *http.Request) {
+	theme := r.FormValue("theme")
+	if !validThemes[theme] {
+		theme = "dark"
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "theme",
+		Value:    theme,
+		Path:     "/",
+		MaxAge:   365 * 24 * 60 * 60,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
+	})
+	dest := r.FormValue("return")
+	if dest == "" || !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
+		dest = "/"
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// renderErrorPage renders a themed error page (AI.md PART 16 "Error Pages").
+// It never leaks stack traces; the message is a short, user-facing string.
+func (s *Server) renderErrorPage(w http.ResponseWriter, r *http.Request, code int, message string) {
+	s.renderPageStatus(w, r, "error", code, PageData{
+		Title: http.StatusText(code),
+		Data: map[string]interface{}{
+			"code":    code,
+			"status":  http.StatusText(code),
+			"message": message,
+		},
+	})
+}
+
+// handleNotFound renders the themed 404 page for unmatched routes.
+func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
+	s.renderErrorPage(w, r, http.StatusNotFound, "The page you requested could not be found.")
+}
+
+// handleMethodNotAllowed renders the themed 405 page.
+func (s *Server) handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	s.renderErrorPage(w, r, http.StatusMethodNotAllowed, "That method is not allowed on this resource.")
 }
 
 // handleGraphiQLPage serves the GraphiQL playground.

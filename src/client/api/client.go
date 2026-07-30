@@ -33,6 +33,10 @@ func UserAgent() string {
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+	// Lang is the resolved output language sent as Accept-Language so the
+	// server can localize error messages (AI.md PART 30). Empty means the
+	// server applies its own default.
+	Lang string
 }
 
 // New creates a Client for baseURL (trailing slash trimmed).
@@ -92,6 +96,9 @@ func (c *Client) get(path string, pathParams, queryParams map[string]string) (*e
 	}
 	req.Header.Set("User-Agent", UserAgent())
 	req.Header.Set("Accept", "application/json")
+	if c.Lang != "" {
+		req.Header.Set("Accept-Language", c.Lang)
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

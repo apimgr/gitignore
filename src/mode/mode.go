@@ -87,21 +87,21 @@ func ParseMode(s string) (Mode, error) {
 	}
 }
 
-// IsDevelopment returns true if the current mode is Development
-func IsDevelopment() bool {
+// IsAppModeDev returns true if the current mode is Development
+func IsAppModeDev() bool {
 	return Get() == Development
 }
 
-// IsProduction returns true if the current mode is Production
-func IsProduction() bool {
+// IsAppModeProd returns true if the current mode is Production
+func IsAppModeProd() bool {
 	return Get() == Production
 }
 
-// IsDebug returns true if the independent debug flag is enabled
+// IsDebugEnabled returns true if the independent debug flag is enabled
 // (--debug CLI flag, DEBUG=true env var, or the "debug" mode alias).
 // Debug is tracked independently of mode: mode and debug are two
 // independent axes producing four operational states (see AI.md PART 6).
-func IsDebug() bool {
+func IsDebugEnabled() bool {
 	mu.RLock()
 	defer mu.RUnlock()
 	return debug
@@ -156,7 +156,7 @@ func GetErrorDetail(err error) string {
 		return ""
 	}
 
-	if IsDevelopment() {
+	if IsAppModeDev() {
 		// In development, return full error details
 		return fmt.Sprintf("%+v", err)
 	}
@@ -171,59 +171,28 @@ func GetErrorDetail(err error) string {
 // BOTH production and development mode — development mode alone does
 // NOT enable them (see AI.md PART 6).
 func ShouldShowDebugEndpoints() bool {
-	return IsDebug()
-}
-
-// GetCacheHeaders returns appropriate cache control headers for static files
-// based on the current mode.
-// Development: no-cache (always revalidate)
-// Production: appropriate caching for performance
-func GetCacheHeaders() map[string]string {
-	if IsDevelopment() {
-		// In development, disable caching to see changes immediately
-		return map[string]string{
-			"Cache-Control": "no-cache, no-store, must-revalidate",
-			"Pragma":        "no-cache",
-			"Expires":       "0",
-		}
-	}
-
-	// In production, enable caching for performance
-	// Cache for 1 hour with revalidation
-	return map[string]string{
-		"Cache-Control": "public, max-age=3600, must-revalidate",
-	}
-}
-
-// GetLogLevel returns the recommended log level for the current mode.
-// Development: "debug"
-// Production: "info"
-func GetLogLevel() string {
-	if IsDevelopment() {
-		return "debug"
-	}
-	return "info"
+	return IsDebugEnabled()
 }
 
 // ShouldCacheTemplates returns true if templates should be cached.
 // Development: false (reload templates on each request)
 // Production: true (cache compiled templates)
 func ShouldCacheTemplates() bool {
-	return IsProduction()
+	return IsAppModeProd()
 }
 
 // ShouldCacheStaticFiles returns true if static files should be cached.
 // Development: false (reload static files on each request)
 // Production: true (cache static files in memory)
 func ShouldCacheStaticFiles() bool {
-	return IsProduction()
+	return IsAppModeProd()
 }
 
 // ShouldEnableAutoReload returns true if auto-reload should be enabled.
 // Development: true (watch for file changes and reload)
 // Production: false (no auto-reload)
 func ShouldEnableAutoReload() bool {
-	return IsDevelopment()
+	return IsAppModeDev()
 }
 
 // ShouldEnableProfiling returns true if profiling endpoints should be enabled.
@@ -231,14 +200,14 @@ func ShouldEnableAutoReload() bool {
 // alone — pprof endpoints stay disabled in development mode until debug
 // is explicitly enabled (see AI.md PART 6).
 func ShouldEnableProfiling() bool {
-	return IsDebug()
+	return IsDebugEnabled()
 }
 
 // GetPanicRecoveryMode returns the panic recovery behavior.
 // Development: "verbose" (full stack trace in response)
 // Production: "graceful" (log error, return 500, continue)
 func GetPanicRecoveryMode() string {
-	if IsDevelopment() {
+	if IsAppModeDev() {
 		return "verbose"
 	}
 	return "graceful"

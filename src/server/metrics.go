@@ -1,145 +1,122 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
-	"runtime"
-	"sort"
+	"regexp"
 	"strconv"
-	"sync"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// metricsRegistry holds hand-rolled Prometheus counters. No external metrics
-// library is bundled; the registry emits the Prometheus text exposition format
-// directly (AI.md PART 20). All metric names carry the mandated
-// "gitignore_" project prefix.
-type metricsRegistry struct {
-	mu           sync.Mutex
-	startTime    time.Time
-	httpRequests map[httpKey]uint64
+// uuidRegex and numericIDRegex normalize dynamic path segments so metric label
+// cardinality stays bounded (AI.md PART 20 "Cardinality warning").
+var (
+	uuidRegex      = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	numericIDRegex = regexp.MustCompile(`/\d+(?:/|$)`)
+)
+
+// normalizePath collapses UUIDs and numeric IDs to ":id" for label cardinality.
+func normalizePath(path string) string {
+	path = uuidRegex.ReplaceAllString(path, ":id")
+	path = numericIDRegex.ReplaceAllString(path, "/:id/")
+	return path
 }
 
-// httpKey identifies a unique HTTP request-counter series.
-type httpKey struct {
-	method string
-	path   string
-	status int
-}
-
-// newMetricsRegistry creates an empty registry stamped with the process start.
-func newMetricsRegistry() *metricsRegistry {
-	return &metricsRegistry{
-		startTime:    time.Now(),
-		httpRequests: make(map[httpKey]uint64),
-	}
-}
-
-// recordHTTP increments the request counter for a method/path/status series.
-func (m *metricsRegistry) recordHTTP(method, path string, status int) {
-	m.mu.Lock()
-	m.httpRequests[httpKey{method: method, path: path, status: status}]++
-	m.mu.Unlock()
-}
-
-// statusRecorder captures the response status for metrics accounting.
-type statusRecorder struct {
+// metricsResponseWriter captures the status code and response byte count for
+// HTTP metrics accounting.
+type metricsResponseWriter struct {
 	http.ResponseWriter
 	status int
+	size   int
 }
 
 // WriteHeader records the status code before delegating.
-func (sr *statusRecorder) WriteHeader(code int) {
-	sr.status = code
-	sr.ResponseWriter.WriteHeader(code)
+func (rw *metricsResponseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Write ensures a 200 default status is recorded when WriteHeader is skipped.
-func (sr *statusRecorder) Write(b []byte) (int, error) {
-	if sr.status == 0 {
-		sr.status = http.StatusOK
+// Write records the number of bytes written, defaulting the status to 200 when
+// WriteHeader was never called explicitly.
+func (rw *metricsResponseWriter) Write(b []byte) (int, error) {
+	if rw.status == 0 {
+		rw.status = http.StatusOK
 	}
-	return sr.ResponseWriter.Write(b)
+	n, err := rw.ResponseWriter.Write(b)
+	rw.size += n
+	return n, err
 }
 
-// metricsMiddleware records one HTTP request counter per response. The route
-// pattern is used rather than the raw path to keep label cardinality bounded.
+// metricsMiddleware records request count, duration, size, and in-flight gauge
+// for every HTTP request (AI.md PART 20). It uses the chi route pattern as the
+// path label to keep cardinality bounded.
 func (s *Server) metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Track public-safe aggregate request stats for /server/healthz
+		// (AI.md PART 13 "stats") regardless of whether Prometheus metrics
+		// are enabled.
+		if s.stats != nil {
+			done := s.stats.begin(time.Now())
+			defer done()
+		}
+
 		if s.metrics == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(rec, r)
-		if rec.status == 0 {
-			rec.status = http.StatusOK
+
+		start := time.Now()
+		s.metrics.HTTPActiveRequests.Inc()
+		defer s.metrics.HTTPActiveRequests.Dec()
+
+		rw := &metricsResponseWriter{ResponseWriter: w, status: 0}
+		next.ServeHTTP(rw, r)
+		if rw.status == 0 {
+			rw.status = http.StatusOK
 		}
-		path := r.URL.Path
+
+		// Prefer the chi route pattern; fall back to a normalized raw path.
+		path := normalizePath(r.URL.Path)
 		if rctx := chi.RouteContext(r.Context()); rctx != nil {
 			if pattern := rctx.RoutePattern(); pattern != "" {
 				path = pattern
 			}
 		}
-		s.metrics.recordHTTP(r.Method, path, rec.status)
+
+		status := strconv.Itoa(rw.status)
+		s.metrics.HTTPRequestsTotal.WithLabelValues(r.Method, path, status).Inc()
+		s.metrics.HTTPRequestDuration.WithLabelValues(r.Method, path).Observe(time.Since(start).Seconds())
+		if r.ContentLength > 0 {
+			s.metrics.HTTPRequestSize.WithLabelValues(r.Method, path).Observe(float64(r.ContentLength))
+		}
+		s.metrics.HTTPResponseSize.WithLabelValues(r.Method, path).Observe(float64(rw.size))
 	})
 }
 
-// handleMetrics writes the Prometheus text exposition. INTERNAL ONLY — the
-// operator is responsible for firewalling this endpoint (AI.md PART 20).
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	setCacheHeaders(w, "authenticated")
+// metricsHandler returns the Prometheus exposition handler for the instance
+// registry, optionally gated behind a bearer token (AI.md PART 20). The
+// endpoint is INTERNAL ONLY — operators must firewall it externally regardless
+// of the token.
+func (s *Server) metricsHandler() http.Handler {
+	handler := promhttp.HandlerFor(s.metrics.Registry(), promhttp.HandlerOpts{})
 
-	fmt.Fprintf(w, "# HELP gitignore_app_info Application build information.\n")
-	fmt.Fprintf(w, "# TYPE gitignore_app_info gauge\n")
-	fmt.Fprintf(w, "gitignore_app_info{version=%q,commit=%q,build_date=%q,go_version=%q} 1\n",
-		s.config.Version, s.config.Commit, s.config.BuildDate, runtime.Version())
-
-	fmt.Fprintf(w, "# HELP gitignore_uptime_seconds Seconds since the process started.\n")
-	fmt.Fprintf(w, "# TYPE gitignore_uptime_seconds gauge\n")
-	fmt.Fprintf(w, "gitignore_uptime_seconds %d\n", int64(time.Since(s.metrics.startTime).Seconds()))
-
-	fmt.Fprintf(w, "# HELP gitignore_templates_total Number of loaded gitignore templates.\n")
-	fmt.Fprintf(w, "# TYPE gitignore_templates_total gauge\n")
-	fmt.Fprintf(w, "gitignore_templates_total %d\n", s.config.Templates.Count())
-
-	s.metrics.mu.Lock()
-	keys := make([]httpKey, 0, len(s.metrics.httpRequests))
-	for k := range s.metrics.httpRequests {
-		keys = append(keys, k)
+	token := ""
+	if s.config.Cfg != nil {
+		token = s.config.Cfg.Server.Metrics.Token
 	}
-	counts := make(map[httpKey]uint64, len(s.metrics.httpRequests))
-	for k, v := range s.metrics.httpRequests {
-		counts[k] = v
-	}
-	s.metrics.mu.Unlock()
 
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].path != keys[j].path {
-			return keys[i].path < keys[j].path
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setCacheHeaders(w, "authenticated")
+		if token != "" {
+			if r.Header.Get("Authorization") != "Bearer "+token {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, i18n.T(r, "errors.unauthorized"), http.StatusUnauthorized)
+				return
+			}
 		}
-		if keys[i].method != keys[j].method {
-			return keys[i].method < keys[j].method
-		}
-		return keys[i].status < keys[j].status
+		handler.ServeHTTP(w, r)
 	})
-
-	fmt.Fprintf(w, "# HELP gitignore_http_requests_total Total HTTP requests.\n")
-	fmt.Fprintf(w, "# TYPE gitignore_http_requests_total counter\n")
-	for _, k := range keys {
-		fmt.Fprintf(w, "gitignore_http_requests_total{method=%q,path=%q,status=%q} %d\n",
-			k.method, k.path, strconv.Itoa(k.status), counts[k])
-	}
-
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	fmt.Fprintf(w, "# HELP gitignore_goroutines Current number of goroutines.\n")
-	fmt.Fprintf(w, "# TYPE gitignore_goroutines gauge\n")
-	fmt.Fprintf(w, "gitignore_goroutines %d\n", runtime.NumGoroutine())
-	fmt.Fprintf(w, "# HELP gitignore_memory_alloc_bytes Bytes of allocated heap objects.\n")
-	fmt.Fprintf(w, "# TYPE gitignore_memory_alloc_bytes gauge\n")
-	fmt.Fprintf(w, "gitignore_memory_alloc_bytes %d\n", ms.Alloc)
 }

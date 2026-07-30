@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>Server</h1>
+<p>Information and public documentation for this GitIgnore instance.</p>
+<ul>
+<li><strong>Version:</strong> v{{.Version}}</li>
+<li><strong>Base URL:</strong> <code>{{.BaseURL}}</code></li>
+<li><strong>API:</strong> <a href="/api/v1">/api/v1</a></li>
+<li><strong>Health:</strong> <a href="/healthz">/healthz</a></li>
+</ul>
+<h2>Documentation</h2>
+<ul>
+<li><a href="/server/about">About</a></li>
+<li><a href="/server/help">Help</a></li>
+<li><a href="/server/privacy">Privacy</a></li>
+<li><a href="/server/terms">Terms</a></li>
+<li><a href="/server/contact">Contact</a></li>
+</ul>
+<h2>Developer tools</h2>
+<ul>
+<li><a href="/server/docs/swagger">Swagger UI</a></li>
+<li><a href="/server/docs/graphql">GraphQL playground</a></li>
+</ul>
+<p>Server administration is performed via the configuration file only — there is no web management interface.</p>
+{{end}}

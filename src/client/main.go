@@ -19,6 +19,7 @@ import (
 	clipath "github.com/apimgr/gitignore/src/client/path"
 	"github.com/apimgr/gitignore/src/client/tui"
 	"github.com/apimgr/gitignore/src/common/display"
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 // Version information (set by build flags via -ldflags -X).
@@ -144,6 +145,9 @@ func main() {
 	}
 
 	client := api.New(serverURL)
+	// Resolve the output language (--lang → config → LC_ALL/LANG → en) and
+	// advertise it so the server localizes error messages (AI.md PART 30).
+	client.Lang = i18n.ResolveCLILang(*langFlag, cfg.Lang)
 
 	if *showVersion {
 		cmd.PrintVersion(Version, CommitID, BuildDate, client)

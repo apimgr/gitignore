@@ -106,50 +106,45 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 }
 
 // swaggerUIHTML is a self-contained Swagger UI page bound to the OpenAPI JSON
-// endpoint. Assets are pulled from the jsDelivr CDN at render time.
+// endpoint. Assets are self-hosted under /static/vendor/swagger so the strict
+// CSP (script-src 'self', no CDN, no inline scripts) is satisfied (AI.md PART
+// 11). The spec URL is passed via the data-spec-url attribute and read by the
+// external swagger-init.js.
 const swaggerUIHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>API Reference — GitIgnore</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+<link rel="stylesheet" href="/static/vendor/swagger/swagger-ui.css">
 </head>
 <body>
-<div id="swagger-ui"></div>
-<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-<script>
-window.onload = function () {
-  window.ui = SwaggerUIBundle({
-    url: '%s/server/swagger',
-    dom_id: '#swagger-ui'
-  });
-};
-</script>
+<div id="swagger-ui" data-spec-url="%s/server/swagger"></div>
+<script src="/static/vendor/swagger/swagger-ui-bundle.js"></script>
+<script src="/static/vendor/swagger/swagger-init.js"></script>
 </body>
 </html>`
 
 // graphiQLHTML is a self-contained GraphiQL playground page bound to the
-// /graphql endpoint.
+// /graphql endpoint. Assets are self-hosted under /static/vendor/graphiql so
+// the strict CSP (script-src 'self', no CDN, no inline scripts) is satisfied
+// (AI.md PART 11). The endpoint URL is passed via the data-graphql-url
+// attribute and read by the external graphiql-init.js.
 const graphiQLHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GraphiQL — GitIgnore</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/graphiql@3/graphiql.min.css">
+<link rel="stylesheet" href="/static/vendor/graphiql/graphiql.min.css">
 <style>html,body,#graphiql{height:100%;margin:0}</style>
 </head>
 <body>
-<div id="graphiql">Loading…</div>
-<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://cdn.jsdelivr.net/npm/graphiql@3/graphiql.min.js"></script>
-<script>
-const fetcher = GraphiQL.createFetcher({ url: '/api/graphql' });
-const root = ReactDOM.createRoot(document.getElementById('graphiql'));
-root.render(React.createElement(GraphiQL, { fetcher }));
-</script>
+<div id="graphiql" data-graphql-url="/api/graphql">Loading…</div>
+<script src="/static/vendor/graphiql/react.production.min.js"></script>
+<script src="/static/vendor/graphiql/react-dom.production.min.js"></script>
+<script src="/static/vendor/graphiql/graphiql.min.js"></script>
+<script src="/static/vendor/graphiql/graphiql-init.js"></script>
 </body>
 </html>`
 

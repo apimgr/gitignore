@@ -1,18 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -21,9 +20,11 @@ import (
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/mode"
 	apppath "github.com/apimgr/gitignore/src/path"
+	"github.com/apimgr/gitignore/src/scheduler"
 	"github.com/apimgr/gitignore/src/server"
 	"github.com/apimgr/gitignore/src/service"
 	"github.com/apimgr/gitignore/src/template"
+	"github.com/apimgr/gitignore/src/tor"
 )
 
 // Version information (set by build flags)
@@ -31,6 +32,9 @@ var (
 	Version   = "dev"
 	CommitID  = "unknown"
 	BuildDate = "unknown"
+	// OfficialSite is the official hosted instance URL, embedded from site.txt
+	// or the OFFICIAL_SITE build arg (AI.md PART 25). Empty for self-hosted.
+	OfficialSite = ""
 )
 
 const projectName = "gitignore"
@@ -54,6 +58,11 @@ func init() {
 
 func main() {
 	dirs := apppath.GetDirectories()
+
+	// binaryName is the actual invoked binary name, shown in --help/--version
+	// output (AI.md PART 8). Internal identifiers (service unit, config paths,
+	// User-Agent) keep the hardcoded projectName instead.
+	binaryName := filepath.Base(os.Args[0])
 
 	// Flags
 	port := flag.String("port", "", "Server port (overrides config)")
@@ -87,16 +96,43 @@ func main() {
 	// Update commands
 	updateCmd := flag.String("update", "", "Update commands: check, yes, branch {stable|beta|daily}")
 
+	// Directory and runtime path flags (AI.md PART 8 "Directory Flags"). Each
+	// directory flag creates its target if missing; empty means "use the env
+	// override or the OS default".
+	dataDirFlag := flag.String("data", "", "Data directory")
+	cacheDirFlag := flag.String("cache", "", "Cache directory")
+	logDirFlag := flag.String("log", "", "Log directory")
+	backupDirFlag := flag.String("backup", "", "Backup directory")
+	pidFileFlag := flag.String("pid", "", "PID file path")
+	baseURLFlag := flag.String("baseurl", "", "URL path prefix (default: /)")
+	daemonFlag := flag.Bool("daemon", false, "Run as daemon (detach from terminal)")
+	langFlag := flag.String("lang", "", "Language for output (default: auto, from LANG env)")
+	shellCmd := flag.String("shell", "", "Shell integration: completions, init, help [SHELL]")
+
 	flag.Parse()
 
 	if *showHelp {
-		printHelp()
+		printHelp(binaryName)
 		return
 	}
 
 	if *showVersion {
-		fmt.Println(Version)
+		fmt.Printf("%s %s\nBuilt: %s\nGo: %s\nOS/Arch: %s/%s\n",
+			binaryName, Version, BuildDate, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return
+	}
+
+	// --shell prints completions/init and exits immediately (AI.md PART 8). The
+	// subcommand is the flag value; an optional SHELL follows as a positional.
+	if *shellCmd != "" {
+		os.Exit(handleShell(append([]string{*shellCmd}, flag.Args()...)))
+	}
+
+	// --lang sets the output locale (AI.md PART 8). Server terminal output is not
+	// yet routed through i18n, so this only exports LANG for locale-aware
+	// downstream code and the client; documented as a partial in AUDIT.AI.md.
+	if *langFlag != "" {
+		os.Setenv("LANG", *langFlag)
 	}
 
 	colorEnabled := resolveColor(*colorFlag)
@@ -109,7 +145,7 @@ func main() {
 		log.Println("Debug mode enabled")
 	}
 
-	// Resolve config directory
+	// Resolve config directory (flag > CONFIG_DIR env > OS default).
 	configDir := dirs.Config
 	if *configDirFlag != "" {
 		configDir = *configDirFlag
@@ -117,15 +153,46 @@ func main() {
 		configDir = envConfig
 	}
 
-	// Override data/log dirs from environment (init-only)
+	// Resolve data directory (flag > DATA_DIR env > OS default). The --data flag
+	// exports DATA_DIR so init-only readers (db, backup) observe the override.
 	dataDir := dirs.Data
-	if v := os.Getenv("DATA_DIR"); v != "" {
+	if *dataDirFlag != "" {
+		dataDir = *dataDirFlag
+		os.Setenv("DATA_DIR", dataDir)
+	} else if v := os.Getenv("DATA_DIR"); v != "" {
 		dataDir = v
 	}
 
-	// Ensure directories exist
-	if err := apppath.EnsureDirectories(dirs); err != nil {
-		log.Printf("Warning: failed to create directories: %v", err)
+	// Resolve log directory (flag > LOG_DIR env > OS default).
+	logsDir := dirs.Logs
+	if *logDirFlag != "" {
+		logsDir = *logDirFlag
+		os.Setenv("LOG_DIR", logsDir)
+	} else if v := os.Getenv("LOG_DIR"); v != "" {
+		logsDir = v
+	}
+
+	// --cache and --backup export their init-only env vars so GetCacheDir and
+	// GetBackupDir resolve the override wherever they are called.
+	if *cacheDirFlag != "" {
+		os.Setenv("CACHE_DIR", *cacheDirFlag)
+	}
+	if *backupDirFlag != "" {
+		os.Setenv("BACKUP_DIR", *backupDirFlag)
+	}
+
+	// Resolve PID file path (flag > OS default; empty on Windows/containers).
+	pidFile := apppath.GetPIDFile()
+	if *pidFileFlag != "" {
+		pidFile = *pidFileFlag
+	}
+
+	// Ensure all runtime directories exist with privilege-appropriate perms
+	// (AI.md PART 8 "Directory Validation Rules"): 0755 root / 0700 user.
+	for _, d := range []string{configDir, dataDir, logsDir, apppath.GetCacheDir(), apppath.GetBackupDir()} {
+		if err := ensureRuntimeDir(d); err != nil {
+			log.Printf("Warning: failed to create directory %s: %v", d, err)
+		}
 	}
 
 	// Load configuration (auto-creates with random 64xxx port on first run)
@@ -134,6 +201,13 @@ func main() {
 	if err != nil {
 		log.Printf("Warning: failed to load config: %v, using defaults", err)
 		cfg = config.DefaultConfig()
+	}
+
+	// --baseurl overrides the configured URL path prefix (AI.md PART 8).
+	if *baseURLFlag != "" {
+		cfg.Server.BaseURL = normalizeBaseURL(*baseURLFlag)
+	} else {
+		cfg.Server.BaseURL = normalizeBaseURL(cfg.Server.BaseURL)
 	}
 
 	// Health check (uses port from config)
@@ -147,6 +221,10 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("OK")
+		if addr := tor.ReadHostname(dataDir); addr != "" {
+			fmt.Println("Tor Hidden Service: Connected")
+			fmt.Printf("  Address: %s\n", addr)
+		}
 		os.Exit(0)
 	}
 
@@ -167,7 +245,7 @@ func main() {
 
 	// Handle --update flag
 	if *updateCmd != "" {
-		handleUpdateCommand(*updateCmd, cfg)
+		handleUpdateCommand(*updateCmd, flag.Args(), cfg)
 		return
 	}
 
@@ -179,13 +257,45 @@ func main() {
 
 	// Handle --maintenance flag
 	if *maintenanceCmd != "" {
-		handleMaintenanceCommand(*maintenanceCmd, configDir, dataDir, dirs.Logs, configPath)
+		handleMaintenanceCommand(*maintenanceCmd, configDir, dataDir, logsDir, configPath)
+		return
+	}
+
+	// Scheduler subcommand (AI.md PART 18 "CLI Commands").
+	if cmdArgs := flag.Args(); len(cmdArgs) > 0 && cmdArgs[0] == "scheduler" {
+		handleSchedulerCommand(cmdArgs[1:], cfg, configDir, dataDir, logsDir, colorEnabled)
+		return
+	}
+
+	// Tor subcommand (AI.md PART 31 "CLI").
+	if cmdArgs := flag.Args(); len(cmdArgs) > 0 && cmdArgs[0] == "tor" {
+		handleTorCommand(cmdArgs[1:], cfg, dataDir)
+		return
+	}
+
+	// Email subcommand (AI.md PART 17 "CLI").
+	if cmdArgs := flag.Args(); len(cmdArgs) > 0 && cmdArgs[0] == "email" {
+		handleEmailCommand(cmdArgs[1:], cfg, configDir)
 		return
 	}
 
 	if len(flag.Args()) != 0 {
 		flag.Usage()
 		return
+	}
+
+	// ── Daemonize ────────────────────────────────────────────────────────────
+	// Detach before acquiring any resources so only the child runs the server
+	// (AI.md PART 8 "--daemon"). The parent reports the child PID and exits 0.
+	if *daemonFlag || cfg.Server.Daemonize {
+		isParent, derr := daemonize()
+		if derr != nil {
+			log.Printf("Failed to daemonize: %v", derr)
+			os.Exit(exOSErr)
+		}
+		if isParent {
+			os.Exit(0)
+		}
 	}
 
 	// ── Initialize database ──────────────────────────────────────────────────
@@ -262,7 +372,7 @@ func main() {
 	if *debugFlag {
 		mode.SetDebug(true)
 	}
-	devMode := mode.IsDevelopment()
+	devMode := mode.IsAppModeDev()
 
 	// ── Load templates ───────────────────────────────────────────────────────
 	log.Println("Loading .gitignore templates...")
@@ -274,8 +384,26 @@ func main() {
 	log.Printf("Loaded %d templates", templateMgr.Count())
 
 	// ── Signal handling ──────────────────────────────────────────────────────
+	// Platform-dependent subscription (AI.md PART 8): SIGTERM/SIGINT/SIGQUIT and
+	// SIGRTMIN+3 shut down gracefully, SIGUSR1 reopens logs, SIGUSR2 dumps
+	// status, and SIGHUP is explicitly ignored (config auto-reloads via the file
+	// watcher). See signal_unix.go / signal_windows.go.
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	notifyShutdownSignals(sigChan)
+
+	// ── Initialize GeoIP (AI.md PART 19) ─────────────────────────────────────
+	// Opens any databases already on disk; missing databases fail open. The
+	// manager is shared by the server (country blocking / lookups) and the
+	// scheduler (weekly refresh).
+	geoipMgr := newGeoIP(cfg, dataDir)
+
+	// ── Write PID file ───────────────────────────────────────────────────────
+	// Stale-aware; skipped entirely inside containers (AI.md PART 8 "PID File
+	// Handling"). A live prior instance is fatal.
+	if err := writePIDFile(pidFile); err != nil {
+		log.Printf("%v", err)
+		os.Exit(exOSErr)
+	}
 
 	// ── Start server ─────────────────────────────────────────────────────────
 	pathMgr := apppath.New()
@@ -289,6 +417,7 @@ func main() {
 		Commit:    CommitID,
 		BuildDate: BuildDate,
 		Cfg:       cfg,
+		GeoIP:     geoipMgr,
 	})
 
 	log.Printf("gitignore %s (commit: %s, built: %s)", Version, CommitID, BuildDate)
@@ -300,22 +429,63 @@ func main() {
 	errChan := make(chan error, 1)
 	go func() { errChan <- srv.Start() }()
 
+	// ── Initialize operator email notifications (AI.md PART 17) ───────────────
+	// Detects or tests SMTP and sets the process-wide notifier. Best-effort: no
+	// working SMTP simply leaves email disabled.
+	initEmail(cfg, configDir, dataDir)
+
+	// ── Start the always-running task scheduler (AI.md PART 18) ───────────────
+	var sched *scheduler.Scheduler
+	if s, err := buildScheduler(cfg, configDir, dataDir, logsDir, geoipMgr); err != nil {
+		log.Printf("Failed to build scheduler: %v", err)
+	} else {
+		sched = s
+		if err := sched.Start(context.Background()); err != nil {
+			log.Printf("Failed to start scheduler: %v", err)
+		}
+	}
+
+	// First-run GeoIP download (AI.md PART 19): best-effort, non-blocking.
+	bootstrapGeoIP(context.Background(), geoipMgr)
+
+	// ── Start the Tor hidden service (AI.md PART 31) ──────────────────────────
+	// Best-effort and non-blocking: the server never fails to start because of
+	// Tor. The manager is nil when no tor binary is installed.
+	torCtx, torCancel := context.WithCancel(context.Background())
+	torMgr := startTor(torCtx, cfg, configDir, dataDir, portNum)
+
 	for {
 		select {
 		case err := <-errChan:
 			log.Printf("Server error: %v", err)
+			removePIDFile(pidFile)
 			os.Exit(exUnavailable)
 		case sig := <-sigChan:
-			switch sig {
-			case syscall.SIGHUP:
-				log.Println("Received SIGHUP, reloading configuration...")
-				if _, err := config.Load(configPath); err != nil {
-					log.Printf("Failed to reload config: %v", err)
-				} else {
-					log.Println("Configuration reloaded")
-				}
+			switch classifySignal(sig) {
+			case sigActionReopenLogs:
+				log.Println("Received SIGUSR1, reopening logs...")
+				reopenLogs()
+			case sigActionStatusDump:
+				log.Println("Received SIGUSR2, dumping status...")
+				dumpStatus()
 			default:
 				log.Printf("Received signal %v, shutting down...", sig)
+				// Stop Tor FIRST (server owns the Tor lifecycle, AI.md PART 31).
+				torCancel()
+				if torMgr != nil {
+					if err := torMgr.Close(); err != nil {
+						log.Printf("Error stopping Tor: %v", err)
+					}
+				}
+				if sched != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+					sched.Stop(ctx)
+					cancel()
+				}
+				if geoipMgr != nil {
+					_ = geoipMgr.Close()
+				}
+				removePIDFile(pidFile)
 				os.Exit(0)
 			}
 		}
@@ -338,6 +508,38 @@ func resolveColor(flagValue string) bool {
 	}
 }
 
+// ensureRuntimeDir creates a runtime directory with privilege-appropriate
+// permissions (AI.md PART 8 "Directory Validation Rules"): 0755 for root, 0700
+// for an unprivileged user. Empty paths (e.g. a Windows PID dir) are a no-op.
+func ensureRuntimeDir(path string) error {
+	if path == "" {
+		return nil
+	}
+	perm := os.FileMode(0700)
+	if os.Geteuid() == 0 {
+		perm = 0755
+	}
+	return os.MkdirAll(path, perm)
+}
+
+// normalizeBaseURL canonicalises a URL path prefix (AI.md PART 8 "--baseurl"):
+// a leading slash is enforced, a trailing slash is trimmed, and an empty value
+// becomes the root "/".
+func normalizeBaseURL(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || p == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
 // resolveMode normalises mode shortcuts per spec
 func resolveMode(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
@@ -349,21 +551,36 @@ func resolveMode(s string) string {
 	return ""
 }
 
-func printHelp() {
-	fmt.Printf(`gitignore %s
+func printHelp(binaryName string) {
+	fmt.Printf(`%[1]s %[2]s
 
-Usage: gitignore [options]
+Usage: %[1]s [options]
 
-Options:
-  --port PORT          Server port (default: random 64000-64999)
-  --address ADDRESS    Listen address (default: [::])
-  --config DIR         Configuration directory
-  --mode MODE          Application mode: production|development (aliases: prod|dev)
-  --debug              Enable debug output
-  --color VALUE        Color output: auto (default), yes, no
-  -v, --version        Print version information
-  --status             Health check (exit 0 = healthy)
-  -h, --help           Show this help message
+Information:
+  -h, --help                     Show help
+  -v, --version                  Show version
+  --status                       Show server status and health (exit 0 = healthy)
+
+Shell Integration:
+  --shell completions [SHELL]    Print shell completions
+  --shell init [SHELL]           Print shell init command
+  --shell help                   Show shell help
+
+Server Configuration:
+  --mode {production|development} Application mode (default: production)
+  --config DIR                   Config directory
+  --data DIR                     Data directory
+  --cache DIR                    Cache directory
+  --log DIR                      Log directory
+  --backup DIR                   Backup directory
+  --pid FILE                     PID file path
+  --address ADDR                 Listen address (default: [::])
+  --port PORT                    Listen port (default: random 64xxx, 80 in container)
+  --baseurl PATH                 URL path prefix (default: /)
+  --daemon                       Run as daemon (detach from terminal)
+  --debug                        Enable debug mode
+  --color {auto|yes|no}          Color output (default: auto)
+  --lang CODE                    Language for output (default: auto)
 
 Service Commands:
   --service start      Start the service
@@ -384,23 +601,46 @@ Update Commands:
   --update yes                 Install latest update
   --update branch BRANCH       Set update branch (stable|beta|daily)
 
+Scheduler Commands:
+  scheduler list               List all scheduled tasks and status
+  scheduler show <id>          Show task details
+  scheduler run <id>           Run a task immediately
+  scheduler enable <id>        Enable a task
+  scheduler disable <id>       Disable a task
+  scheduler history <id>       Show a task's last recorded run
+
+Email Commands:
+  email test [recipient]       Send a test email to verify SMTP
+  email status                 Show SMTP configuration and reachability
+  email validate               Validate all email templates
+
 Environment Variables (runtime):
   PORT       Server port
   LISTEN     Listen address
   MODE       Application mode
   DOMAIN     FQDN override
+  SMTP_HOST      SMTP server host (overrides config)
+  SMTP_PORT      SMTP server port (default 587)
+  SMTP_USERNAME  SMTP auth username
+  SMTP_PASSWORD  SMTP auth password
+  SMTP_TLS       TLS mode: auto, starttls, tls, none
+  SMTP_FROM_NAME  Envelope From display name
+  SMTP_FROM_EMAIL Envelope From address
 
 Environment Variables (init-only, first run):
-  CONFIG_DIR   Configuration directory
-  DATA_DIR     Data directory
-  LOG_DIR      Log directory
+  CONFIG_DIR    Configuration directory
+  DATA_DIR      Data directory
+  DATABASE_DIR  Database directory (default: {data}/db)
+  CACHE_DIR     Cache directory
+  LOG_DIR       Log directory
+  BACKUP_DIR    Backup directory
 
 Configuration:
   Root:    /etc/apimgr/gitignore/server.yml
   User:    ~/.config/apimgr/gitignore/server.yml
   Docker:  /config/server.yml
 
-`, Version)
+`, binaryName, Version)
 }
 
 func checkHealth(port string) error {
@@ -501,6 +741,7 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 
 	switch cmd {
 	case "backup":
+		cfg, _ := config.Load(configPath)
 		backupFile := ""
 		if len(args) > 0 {
 			backupFile = args[0]
@@ -510,20 +751,27 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 				log.Printf("Failed to create backup directory: %v", err)
 				os.Exit(exCantCreat)
 			}
-			timestamp := time.Now().Format("20060102-150405")
-			backupFile = filepath.Join(backupDir, fmt.Sprintf("gitignore-backup-%s.tar.gz", timestamp))
+			timestamp := time.Now().Format("2006-01-02_150405")
+			backupFile = filepath.Join(backupDir, fmt.Sprintf("gitignore_backup_%s.tar.gz", timestamp))
 		}
-		maintenanceBackup(configDir, dataDir, backupFile)
+		if err := runBackup(cfg, configDir, dataDir, backupFile); err != nil {
+			log.Printf("Backup failed: %v", err)
+			os.Exit(exIOErr)
+		}
 
 	case "restore":
 		if len(args) == 0 {
 			fmt.Fprintln(os.Stderr, "Usage: gitignore --maintenance restore <backup-file>")
 			os.Exit(2)
 		}
-		maintenanceRestore(args[0], configDir, dataDir)
+		if err := runRestore(args[0], configDir, dataDir); err != nil {
+			log.Printf("Restore failed: %v", err)
+			os.Exit(exIOErr)
+		}
 
 	case "update":
-		maintenanceUpdate()
+		cfg, _ := config.Load(configPath)
+		maintenanceUpdate(cfg, args)
 
 	case "mode":
 		if len(args) == 0 {
@@ -616,59 +864,45 @@ func serviceDisable() {
 	}
 }
 
-func maintenanceBackup(configDir, dataDir, backupFile string) {
-	fmt.Printf("Creating backup: %s\n", backupFile)
-	cmd := exec.Command("tar", "-czf", backupFile, "-C", filepath.Dir(configDir), filepath.Base(configDir))
-	if err := cmd.Run(); err != nil {
-		log.Printf("Backup failed: %v", err)
-		os.Exit(exIOErr)
+// maintenanceUpdate implements `--maintenance update [cmd]`, an alias for
+// `--update [cmd]` with the same default (yes) when no subcommand is given
+// (AI.md PART 22).
+func maintenanceUpdate(cfg *config.Config, args []string) {
+	sub := "yes"
+	var subArgs []string
+	if len(args) > 0 {
+		sub = args[0]
+		subArgs = args[1:]
 	}
-	fmt.Printf("Backup created: %s\n", backupFile)
+	handleUpdateCommand(sub, subArgs, cfg)
 }
 
-func maintenanceRestore(backupFile, configDir, dataDir string) {
-	fmt.Printf("Restoring from: %s\n", backupFile)
-	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
-		log.Printf("Backup file not found: %s", backupFile)
-		os.Exit(exNoInput)
-	}
-	cmd := exec.Command("tar", "-xzf", backupFile, "-C", "/")
-	if err := cmd.Run(); err != nil {
-		log.Printf("Restore failed: %v", err)
-		os.Exit(exIOErr)
-	}
-	fmt.Println("Restore completed")
-}
-
-func maintenanceUpdate() {
-	fmt.Printf("Current version: %s\n", Version)
-	fmt.Println("Visit https://github.com/apimgr/gitignore/releases for the latest version")
-}
-
-func handleUpdateCommand(cmd string, cfg *config.Config) {
-	args := flag.Args()
-	switch cmd {
+// handleUpdateCommand dispatches the --update subcommands (AI.md PART 22): the
+// default and `yes` perform an in-place update; `check` reports availability
+// without installing; `branch` sets the release channel in config.
+func handleUpdateCommand(sub string, subArgs []string, cfg *config.Config) {
+	switch sub {
+	case "", "yes":
+		runUpdateInstall(cfg)
 	case "check":
-		fmt.Printf("Current version: %s\n", Version)
-		fmt.Printf("Update branch: %s\n", cfg.Server.UpdateBranch)
-	case "yes":
-		fmt.Println("Visit https://github.com/apimgr/gitignore/releases for the latest version")
+		runUpdateCheck(cfg)
 	case "branch":
-		if len(args) == 0 {
-			fmt.Printf("Current branch: %s\n", cfg.Server.UpdateBranch)
+		if len(subArgs) == 0 {
+			fmt.Printf("Current branch: %s\n", cfg.Server.Update.Branch)
 			return
 		}
-		if args[0] != "stable" && args[0] != "beta" && args[0] != "daily" {
-			fmt.Fprintf(os.Stderr, "Invalid branch: %s\nValid: stable, beta, daily\n", args[0])
-			os.Exit(2)
+		if subArgs[0] != "stable" && subArgs[0] != "beta" && subArgs[0] != "daily" {
+			fmt.Fprintf(os.Stderr, "Invalid branch: %s\nValid: stable, beta, daily\n", subArgs[0])
+			os.Exit(exUsage)
 		}
-		if err := config.Update(func(c *config.Config) { c.Server.UpdateBranch = args[0] }); err != nil {
+		if err := config.Update(func(c *config.Config) { c.Server.Update.Branch = subArgs[0] }); err != nil {
 			log.Printf("Failed to save config: %v", err)
+			os.Exit(exConfig)
 		}
-		fmt.Printf("Branch set to: %s\n", args[0])
+		fmt.Printf("Branch set to: %s\n", subArgs[0])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown update command: %s\n", cmd)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Unknown update command: %s\n", sub)
+		os.Exit(exUsage)
 	}
 }
 

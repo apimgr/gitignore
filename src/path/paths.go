@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -112,16 +113,16 @@ func GetDefaultDirs(projectName string) (configDir, dataDir, logsDir, backupDir 
 		xdgData := xdgDataHome(homeDir)
 		configDir = filepath.Join(xdgConfig, OrgName, projectName)
 		dataDir = filepath.Join(xdgData, OrgName, projectName)
-		logsDir = filepath.Join(xdgData, OrgName, projectName, "logs")
-		backupDir = filepath.Join(homeDir, ".local", "backups", OrgName, projectName)
+		logsDir = filepath.Join(homeDir, ".local", "log", OrgName, projectName)
+		backupDir = filepath.Join(xdgData, "Backups", OrgName, projectName)
 
 	default: // Linux
 		xdgConfig := xdgConfigHome(homeDir)
 		xdgData := xdgDataHome(homeDir)
 		configDir = filepath.Join(xdgConfig, OrgName, projectName)
 		dataDir = filepath.Join(xdgData, OrgName, projectName)
-		logsDir = filepath.Join(xdgData, OrgName, projectName, "logs")
-		backupDir = filepath.Join(homeDir, ".local", "backups", OrgName, projectName)
+		logsDir = filepath.Join(homeDir, ".local", "log", OrgName, projectName)
+		backupDir = filepath.Join(xdgData, "Backups", OrgName, projectName)
 	}
 	return
 }
@@ -154,8 +155,13 @@ func IsRunningInContainer() bool {
 	return comm == "tini\n" || comm == "tini" || comm == "dumb-init\n"
 }
 
-// GetBackupDir returns the default backup directory
+// GetBackupDir returns the default backup directory. The BACKUP_DIR init-only
+// environment variable (AI.md PART 5) overrides the OS-specific default when
+// set; the --backup CLI flag is applied by exporting BACKUP_DIR at startup.
 func GetBackupDir() string {
+	if v := strings.TrimSpace(os.Getenv("BACKUP_DIR")); v != "" {
+		return v
+	}
 	_, _, _, backupDir := GetDefaultDirs(ProjectName)
 	return backupDir
 }
@@ -172,6 +178,11 @@ func isPrivileged() bool {
 // GetCacheDir returns the OS-specific cache directory based on privilege
 // level, matching the layout used by GetDefaultDirs.
 func GetCacheDir() string {
+	// CACHE_DIR init-only override (AI.md PART 5); the --cache CLI flag is
+	// applied by exporting CACHE_DIR at startup.
+	if v := strings.TrimSpace(os.Getenv("CACHE_DIR")); v != "" {
+		return v
+	}
 	if IsRunningInContainer() {
 		return "/data/cache"
 	}

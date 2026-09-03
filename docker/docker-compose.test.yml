@@ -1,0 +1,45 @@
+# Test Docker Compose - AI/AUTOMATED TESTING ONLY
+# Ephemeral storage under /tmp; container internal port is always 80.
+# Values are hardcoded with sane defaults - NO .env files.
+
+name: gitignore-test
+
+services:
+  gitignore:
+    image: gitignore:dev
+    container_name: gitignore-test
+    restart: "no"
+
+    environment:
+      - MODE=development
+      - TZ=America/New_York
+      - ADDRESS=0.0.0.0
+      - PORT=80
+      - DEBUG=true
+      - CONFIG_DIR=/config/gitignore
+      - DATA_DIR=/data/gitignore
+      - ADMIN_USER=administrator
+      - ADMIN_PASSWORD=testpass123
+
+    volumes:
+      - '/tmp/gitignore/volumes/config:/config:z'
+      - '/tmp/gitignore/volumes/data:/data:z'
+
+    ports:
+      - "64181:80"
+
+    networks:
+      - gitignore
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gitignore", "--status"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+networks:
+  gitignore:
+    name: gitignore-test
+    external: false
+    driver: bridge

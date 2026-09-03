@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Determine scan range
+        id: scanrange
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "base=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.after }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scan for verified secrets
+        uses: trufflesecurity/trufflehog@37b77001d0174ebec2fcca2bd83ff83a6d45a3ab  # v3.95.3
+        with:
+          base: ${{ steps.scanrange.outputs.base }}
+          head: ${{ steps.scanrange.outputs.head }}
+          extra_args: --only-verified
+
+  workflow-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Verify action pinning and trigger policy
+        run: |
+          fail=0
+          for f in .github/workflows/*.yml; do
+            if grep -q "pull_request_target" "$f"; then
+              echo "::error file=$f::pull_request_target is not allowed"
+              fail=1
+            fi
+            while IFS= read -r line; do
+              case "$line" in
+                *"uses: ./"*) continue ;;
+              esac
+              ref=$(printf '%s\n' "$line" | sed -E 's/.*uses:[[:space:]]*[^@]+@([^[:space:]]+).*/\1/')
+              if ! printf '%s\n' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+                echo "::error file=$f::unpinned action reference: $line"
+                fail=1
+              fi
+            done < <(grep -E '^\s*-?\s*uses:' "$f")
+          done
+          exit "$fail"
+
+  vuln-scan:
+    runs-on: ubuntu-latest
+    container:
+      image: casjaysdev/go:latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - run: govulncheck ./...
+
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    container:
+      image: casjaysdev/go:latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - run: go vet ./...
+      - run: staticcheck ./...
+
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    container:
+      image: casjaysdev/go:latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Run tests with coverage
+        run: |
+          mkdir -p "/tmp/${{ github.repository_owner }}"
+          COVDIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/$(basename "${{ github.repository }}")-XXXXXX")
+          echo "COVDIR=$COVDIR" >> "$GITHUB_ENV"
+          go test -cover -coverprofile="$COVDIR/coverage.out" ./...
+
+      - name: Enforce coverage threshold
+        run: |
+          THRESHOLD=60
+          PCT=$(go tool cover -func="$COVDIR/coverage.out" | awk '/^total:/ {gsub("%","",$3); print int($3)}')
+          if [ "$PCT" -lt "$THRESHOLD" ]; then
+            echo "::error::coverage $PCT% < threshold $THRESHOLD%"
+            exit 1
+          fi
+
+  build:
+    if: github.event_name != 'schedule'
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    container:
+      image: casjaysdev/go:latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - run: go build -buildvcs=false ./...
+
+  image-scan:
+    if: github.event_name != 'schedule'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Build image for scan
+        run: docker build -t gitignore:ci-scan -f docker/Dockerfile .
+
+      - name: Scan image
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.70.0 image \
+            --exit-code 1 --severity CRITICAL,HIGH gitignore:ci-scan

@@ -1,0 +1,6 @@
+{{define "content"}}
+<h1>Categories</h1>
+<ul class="templates">
+{{range .Data.categories}}<li><a href="/list?category={{.}}">{{.}}</a></li>{{end}}
+</ul>
+{{end}}

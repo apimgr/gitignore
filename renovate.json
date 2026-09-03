@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "UTC",
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "automerge": false
+    },
+    {
+      "matchManagers": ["gomod"],
+      "automerge": false
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true,
+      "automerge": false
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  }
+}

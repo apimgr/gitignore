@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>About GitIgnore</h1>
+<p>GitIgnore is a full-stack Go web application for serving <code>.gitignore</code> templates. It provides a curated library of templates for languages, frameworks, editors, and tools through a versioned REST API, a GraphQL endpoint, and a server-side rendered web UI with a browser and composer.</p>
+<h2>What it does</h2>
+<ul>
+<li>Curated <code>.gitignore</code> templates for languages, editors, frameworks, and OS patterns.</li>
+<li>Single template retrieval by name (case-insensitive).</li>
+<li>Template composition — merge multiple templates into one output.</li>
+<li>A companion CLI, <code>gitignore-cli</code>, for shell-pipeline use.</li>
+<li>A drop-in compatible replacement for the gitignore.io / Toptal gitignore API.</li>
+</ul>
+<p>Templates are embedded in the binary at build time, so the service deploys as a single self-contained static binary with no external dependencies at runtime.</p>
+<p>This service stores and serves no personal data. All endpoints are public and require no authentication.</p>
+<p>Source and issues: <a href="https://github.com/apimgr/gitignore" rel="noopener noreferrer">github.com/apimgr/gitignore</a>.</p>
+{{end}}

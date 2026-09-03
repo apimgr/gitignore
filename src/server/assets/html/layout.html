@@ -1,0 +1,63 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="{{.Lang}}" dir="{{.Dir}}" class="theme-{{.Theme}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} — GitIgnore</title>
+<meta name="description" content="{{.Description}}">
+<meta name="theme-color" content="#1a1a1a">
+<meta name="color-scheme" content="dark light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="GitIgnore">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/static/images/icon.svg">
+<link rel="apple-touch-icon" href="/static/images/icon.svg">
+<link rel="manifest" href="/manifest.json">
+<link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="header">
+<a href="/" class="site-brand">GitIgnore</a>
+<div class="header-actions">
+<button type="button" class="theme-button" data-action="theme-toggle" aria-label="Switch theme" title="Toggle theme (current: {{.Theme}})">
+<span class="theme-icon" aria-hidden="true">◐</span>
+<span class="theme-label">{{.Theme}}</span>
+</button>
+<noscript>
+<form class="theme-form" action="/server/theme" method="post">
+<input type="hidden" name="return" value="/">
+<button type="submit" name="theme" value="dark">Dark</button>
+<button type="submit" name="theme" value="light">Light</button>
+<button type="submit" name="theme" value="auto">Auto</button>
+</form>
+</noscript>
+</div>
+</header>
+<nav class="nav" aria-label="Main navigation">
+<a href="/search">Search</a>
+<a href="/list">All Templates</a>
+<a href="/categories">Categories</a>
+<a href="/combine">Combine</a>
+<a href="/stats">Stats</a>
+<a href="/docs">API Docs</a>
+<a href="/cli">CLI</a>
+</nav>
+<main id="main">
+{{template "content" .}}
+</main>
+<footer class="footer">
+<nav class="footer-links" aria-label="Footer">
+<a href="/server/about">About</a>
+<a href="/server/privacy">Privacy</a>
+<a href="/server/contact">Contact</a>
+<a href="/server/help">Help</a>
+<a href="/server/terms">Terms</a>
+<a href="https://github.com/apimgr/gitignore" rel="noopener noreferrer">GitHub</a>
+</nav>
+<p class="footer-meta">GitIgnore API Server v{{.Version}} · <a href="/api/v1">/api/v1</a></p>
+</footer>
+<script src="/static/js/app.js" defer></script>
+</body>
+</html>{{end}}

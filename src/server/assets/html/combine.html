@@ -1,0 +1,9 @@
+{{define "content"}}
+<h1>Combine Templates</h1>
+<form action="/combine" method="get">
+<input type="text" name="templates" value="{{.Data.templates}}" placeholder="go,node,macos" aria-label="Templates">
+<button type="submit">Combine</button>
+</form>
+{{if .Data.content}}<pre>{{.Data.content}}</pre>{{end}}
+{{if .Data.error}}<p>Error: {{.Data.error}}</p>{{end}}
+{{end}}

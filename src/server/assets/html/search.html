@@ -1,0 +1,13 @@
+{{define "content"}}
+<h1>Search Templates</h1>
+<form action="/search" method="get">
+<input type="text" name="q" value="{{.Data.query}}" placeholder="Search templates…" aria-label="Search">
+<button type="submit">Search</button>
+</form>
+{{if .Data.query}}
+<p>{{len .Data.results}} result(s) for "{{.Data.query}}":</p>
+<ul class="templates">
+{{range .Data.results}}<li><a href="/template/{{.Name}}">{{.Name}}</a></li>{{end}}
+</ul>
+{{end}}
+{{end}}

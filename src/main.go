@@ -305,39 +305,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// ── First-run: generate admin credentials ─────────────────────────────
-	if hasCredentials, err := db.HasAdminCredentials(); err == nil && !hasCredentials {
-		adminUser := "admin"
-		adminPass, err := db.GeneratePassword(20)
-		if err != nil {
-			log.Printf("Failed to generate admin password: %v", err)
-			os.Exit(exOSErr)
-		}
-		rawToken, err := db.GenerateToken(32)
-		if err != nil {
-			log.Printf("Failed to generate API token: %v", err)
-			os.Exit(exOSErr)
-		}
-		if err := db.SetAdminCredentials(adminUser, adminPass, rawToken); err != nil {
-			log.Printf("Failed to store admin credentials: %v", err)
-			os.Exit(exIOErr)
-		}
-
-		// Display ONCE — not logged, printed directly to stdout
-		heading := "  Admin credentials (shown once — copy now)"
-		if colorEnabled {
-			heading = "\033[1;33m" + heading + "\033[0m"
-		}
-		fmt.Println()
-		fmt.Println("══════════════════════════════════════════════════════════")
-		fmt.Printf("%s\n\n", heading)
-		fmt.Printf("  Username : %s\n", adminUser)
-		fmt.Printf("  Password : %s\n", adminPass)
-		fmt.Printf("  API Token: %s\n", rawToken)
-		fmt.Println("══════════════════════════════════════════════════════════")
-		fmt.Println()
-	}
-
 	// ── Resolve server address & port ────────────────────────────────────────
 	serverAddress := cfg.Server.Address
 	if *address != "" {

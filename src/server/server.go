@@ -13,10 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/apimgr/gitignore/src/admin"
 	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
-	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/geoip"
 	"github.com/apimgr/gitignore/src/mode"
 	apppath "github.com/apimgr/gitignore/src/path"
@@ -56,7 +54,6 @@ type Server struct {
 	config        *Config
 	router        *chi.Mux
 	server        *http.Server
-	adminHandler  *admin.Handler
 	limiter       *rateLimiter
 	metrics       *metrics.Metrics
 	trustedProxies []*net.IPNet
@@ -107,28 +104,6 @@ func New(config *Config) *Server {
 		additional = config.Cfg.Server.TrustedProxies.Additional
 	}
 	s.trustedProxies = buildTrustedProxies(config.Address, additional)
-
-	// Load admin credentials from database (never from config file)
-	adminUsername := "admin"
-	adminPassHash := ""
-	adminTokenHash := ""
-	if creds, err := db.GetAdminCredentials(); err == nil && creds != nil {
-		adminUsername = creds.Username
-		adminPassHash = creds.PassHash
-		adminTokenHash = creds.TokenHash
-	}
-
-	sslEnabled := config.Cfg != nil && config.Cfg.Server.SSL.Enabled
-	s.adminHandler = admin.NewHandler(
-		adminUsername,
-		adminPassHash,
-		adminTokenHash,
-		3600,
-		sslEnabled,
-		config.Version,
-		config.Commit,
-		config.BuildDate,
-	)
 
 	// Apply the configured language-cookie name and lifetime (AI.md PART 30).
 	if config.Cfg != nil {
@@ -227,9 +202,6 @@ func (s *Server) setupMiddleware() {
 
 // setupRoutes configures all routes
 func (s *Server) setupRoutes() {
-	// Admin routes (session auth for web, bearer token for API)
-	s.adminHandler.RegisterRoutes(s.router)
-
 	// Themed error handlers for unmatched routes and methods (AI.md PART 16)
 	s.router.NotFound(s.handleNotFound)
 	s.router.MethodNotAllowed(s.handleMethodNotAllowed)

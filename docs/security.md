@@ -1,41 +1,27 @@
 # Security
 
-## Authentication
+## Public API
 
-Public endpoints (templates, list, search, combine, health) require no
-authentication. Administrative and debug endpoints require either:
+The service is intentionally public and read only. It has no user accounts,
+login, API keys, admin panel, or user-submitted templates. Requests can retrieve
+only the curated catalog embedded in the binary.
 
-- **Bearer token**: `Authorization: Bearer YOUR_TOKEN`
-- **Basic auth**: `Authorization: Basic base64(user:pass)`
-
-Tokens are never stored in plaintext; they are hashed before storage.
-
-## Public Security Endpoints
+## Security endpoints
 
 | Endpoint | Purpose |
-|----------|---------|
+|---|---|
 | `/security.txt` | Security contact and policy |
-| `/.well-known/security.txt` | RFC 9116 well-known location |
+| `/.well-known/security.txt` | Well-known security contact |
 | `/robots.txt` | Crawler directives |
-| `/healthz` | Liveness/health probe |
-| `/api/v1/server/healthz` | Versioned health probe |
+| `/healthz` | Health check |
+| `/api/v1/server/healthz` | Versioned health check |
 
-## Security Reporting
+Use the contact and disclosure process published in `/.well-known/security.txt`
+to report vulnerabilities.
 
-Researchers should use the contact details published in
-`/.well-known/security.txt`. That file points to the maintainer contact and
-disclosure policy for the project.
+## Deployment guidance
 
-## Well-Known Namespace
-
-The server serves `/.well-known/security.txt`. Unknown entries under
-`/.well-known/*` return `404`. Feature-gated entries (app association files,
-provider metadata, and similar) are only served when explicitly enabled; none
-are enabled by default in this project.
-
-## Transport & Hardening
-
-- Debug and pprof routes are only mounted when `--debug` is set.
-- The server honors `X-Forwarded-*` headers only when the request arrives from a
-  trusted proxy, preventing client-URL spoofing.
-- All responses set standard security headers via middleware.
+- Put the service behind HTTPS when it is exposed over an untrusted network.
+- Configure trusted proxy addresses before relying on forwarded request headers.
+- Debug and profiling endpoints are enabled only when debug mode is selected.
+- Keep the binary and its embedded template catalog current.

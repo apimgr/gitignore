@@ -7,7 +7,7 @@
 | `/server/docs/swagger` | Swagger UI |
 | `/server/docs/graphql` | GraphiQL playground |
 | `/api/swagger` | OpenAPI JSON |
-| `/api/graphql` | GraphQL schema (GET) / endpoint (POST) |
+| `/graphql` and `/api/graphql` | GraphQL schema (GET) / endpoint (POST); versioned aliases at `/api/v1/graphql` and `/api/v1/server/graphql` |
 | `/api/autodiscover` | Client autodiscovery document |
 | `/manifest.json` | PWA web app manifest |
 | `/sw.js` | Service worker for offline/PWA support |

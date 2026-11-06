@@ -48,14 +48,15 @@ variant for plain-text output.
 ## GraphQL
 
 - Playground: [/server/docs/graphql](/server/docs/graphql)
-- Endpoint: `POST /api/graphql` (also `/api/v1/server/graphql`)
-- Schema (SDL): `GET /api/graphql`
+- Query endpoint: `POST /graphql` or `POST /api/graphql`
+- Versioned aliases: `POST /api/v1/graphql` and `POST /api/v1/server/graphql`
+- Schema (SDL): `GET` on any query endpoint above
 
 Example query:
 
 ```graphql
 {
-  template(name: "go") {
+  template(name: "Go") {
     name
     content
   }

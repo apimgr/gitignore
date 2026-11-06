@@ -66,3 +66,10 @@ config file > built-in default.
 When `server.baseurl` (or `--baseurl`) is set to a non-root path such as
 `/gitignore`, the server transparently strips the prefix from incoming requests
 and redirects the bare prefix to the trailing-slash form.
+
+## Update Channel
+
+`server.update.branch` accepts `stable`, `beta`, or `devel`. The aliases
+`daily`, `rolling`, `dev`, and `development` are accepted and stored as
+`devel`. The `devel` channel checks the rolling release against the binary's
+embedded build time and ignores `defer_days`.

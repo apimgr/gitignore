@@ -491,7 +491,9 @@
     "error_unsupported_shell": "Shell no soportado: {shell}",
     "requires_privileges": "{action} requiere privilegios elevados.",
     "escalate_prompt": "¿Escalar? [S/n]: ",
-    "running_in_mode_label": "Modo"
+    "running_in_mode_label": "Modo",
+    "update_branch_usage": "Establece el canal de actualización: stable, beta o devel (alias: daily, rolling, dev, development)",
+    "invalid_update_branch": "Canal de actualización no válido. Canales válidos: stable, beta, devel."
   },
 
   "version": {

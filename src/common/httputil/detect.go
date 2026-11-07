@@ -65,10 +65,7 @@ func IsHttpTool(r *http.Request) bool {
 			return true
 		}
 	}
-	if ua == "" {
-		return true
-	}
-	return false
+	return ua == ""
 }
 
 // IsNonInteractiveClient reports whether the client needs pre-formatted text

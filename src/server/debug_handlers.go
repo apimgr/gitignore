@@ -45,7 +45,6 @@ func (s *Server) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 // handleDebugTemplates shows template statistics
 func (s *Server) handleDebugTemplates(w http.ResponseWriter, r *http.Request) {
 	stats := s.config.Templates.Stats()
@@ -54,14 +53,5 @@ func (s *Server) handleDebugTemplates(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data":    stats,
-	})
-}
-
-// handleDebugReset resets to fresh state (dev mode only)
-func (s *Server) handleDebugReset(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Reset not implemented (would be dangerous in production)",
 	})
 }

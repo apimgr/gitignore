@@ -491,7 +491,9 @@
     "error_unsupported_shell": "Unsupported shell: {shell}",
     "requires_privileges": "{action} requires elevated privileges.",
     "escalate_prompt": "Escalate? [Y/n]: ",
-    "running_in_mode_label": "Mode"
+    "running_in_mode_label": "Mode",
+    "update_branch_usage": "Set update channel: stable, beta, or devel (aliases: daily, rolling, dev, development)",
+    "invalid_update_branch": "Invalid update channel. Valid channels: stable, beta, devel."
   },
 
   "version": {

@@ -157,19 +157,40 @@ func TestCheckBetaChannelCumulative(t *testing.T) {
 	}
 }
 
-func TestCheckDailyChannelSelectsNewest(t *testing.T) {
+func TestCheckDevelChannelSelectsRollingRelease(t *testing.T) {
 	releases := []Release{
-		{TagName: "20260101120000", Prerelease: true},
+		{TagName: "devel", Prerelease: true, PublishedAt: time.Unix(2_000, 0)},
 		{TagName: "v1.2.0", Prerelease: false},
 	}
 	fx := newFixture(t, "v1.2.0", releases)
-	u := fx.updater("v1.2.0", "daily")
+	u := fx.updater("v1.2.0", "devel")
+	u.cfg.BuildEpoch = 1_000
 	rel, err := u.Check(context.Background())
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if rel == nil || rel.TagName != "20260101120000" {
-		t.Fatalf("expected daily build, got %+v", rel)
+	if rel == nil || rel.TagName != "devel" {
+		t.Fatalf("expected rolling devel build, got %+v", rel)
+	}
+}
+
+func TestCheckDevelIgnoresDeferAndSkipsOlderRollingRelease(t *testing.T) {
+	releases := []Release{
+		{TagName: "devel", Prerelease: true, PublishedAt: time.Unix(1_000, 0)},
+		{TagName: "v1.2.0", PublishedAt: time.Now().Add(-40 * 24 * time.Hour)},
+	}
+	fx := newFixture(t, "v1.2.0", releases)
+	u := fx.updater("current-build", "daily")
+	u.cfg.BuildEpoch = 1_100
+	if u.Branch() != "devel" {
+		t.Fatalf("daily alias normalized to %q, want devel", u.Branch())
+	}
+	rel, err := u.CheckDeferred(context.Background(), 365)
+	if err != nil {
+		t.Fatalf("CheckDeferred: %v", err)
+	}
+	if rel == nil || rel.TagName != "v1.2.0" {
+		t.Fatalf("expected eligible stable fallback, got %+v", rel)
 	}
 }
 
@@ -200,19 +221,19 @@ func TestCheckDeferredGatesRecentRelease(t *testing.T) {
 	}
 }
 
-func TestCheckDeferredDailySelectsAgedRelease(t *testing.T) {
+func TestCheckDeferredDevelIgnoresDeferAndUsesBuildEpoch(t *testing.T) {
 	releases := []Release{
-		{TagName: "20260201000000", Prerelease: true, PublishedAt: time.Now().Add(-5 * 24 * time.Hour)},
-		{TagName: "20260101000000", Prerelease: true, PublishedAt: time.Now().Add(-40 * 24 * time.Hour)},
+		{TagName: "devel", Prerelease: true, PublishedAt: time.Now().Add(-5 * 24 * time.Hour)},
 	}
-	fx := newFixture(t, "20260201000000", releases)
-	u := fx.updater("20251201000000", "daily")
+	fx := newFixture(t, "v1.2.0", releases)
+	u := fx.updater("current-build", "daily")
+	u.cfg.BuildEpoch = time.Now().Add(-6 * 24 * time.Hour).Unix()
 	rel, err := u.CheckDeferred(context.Background(), 30)
 	if err != nil {
 		t.Fatalf("CheckDeferred: %v", err)
 	}
-	if rel == nil || rel.TagName != "20260101000000" {
-		t.Fatalf("expected the 40-day-old build, got %+v", rel)
+	if rel == nil || rel.TagName != "devel" {
+		t.Fatalf("expected the newer rolling build regardless of defer window, got %+v", rel)
 	}
 }
 
@@ -314,9 +335,9 @@ func TestReplaceBinaryAtomicAndRollback(t *testing.T) {
 func TestMatchesBranch(t *testing.T) {
 	stable := Release{TagName: "v1.0.0", Prerelease: false}
 	beta := Release{TagName: "202601011200-beta", Prerelease: true}
-	daily := Release{TagName: "20260101120000", Prerelease: true}
+	devel := Release{TagName: "devel", Prerelease: true}
 
-	if !matchesBranch(stable, "beta") || !matchesBranch(stable, "daily") || !matchesBranch(stable, "stable") {
+	if !matchesBranch(stable, "beta") || !matchesBranch(stable, "devel") || !matchesBranch(stable, "stable") {
 		t.Fatal("stable release must match every channel")
 	}
 	if !matchesBranch(beta, "beta") {
@@ -325,10 +346,10 @@ func TestMatchesBranch(t *testing.T) {
 	if matchesBranch(beta, "stable") {
 		t.Fatal("beta must not match stable channel")
 	}
-	if !matchesBranch(daily, "daily") {
-		t.Fatal("daily must match daily channel")
+	if !matchesBranch(devel, "devel") {
+		t.Fatal("devel must match devel channel")
 	}
-	if matchesBranch(daily, "beta") {
-		t.Fatal("daily must not match beta channel")
+	if matchesBranch(devel, "beta") {
+		t.Fatal("devel must not match beta channel")
 	}
 }

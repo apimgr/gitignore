@@ -470,7 +470,9 @@
     "error_unsupported_shell": "صدفة غير مدعومة: {shell}",
     "requires_privileges": "‏{action} يتطلب صلاحيات مرتفعة.",
     "escalate_prompt": "تصعيد؟ ‏[Y/n]: ",
-    "running_in_mode_label": "الوضع"
+    "running_in_mode_label": "الوضع",
+    "update_branch_usage": "تعيين قناة التحديث: stable أو beta أو devel (الأسماء البديلة: daily وrolling وdev وdevelopment)",
+    "invalid_update_branch": "قناة التحديث غير صالحة. القنوات الصالحة: stable وbeta وdevel."
   },
   "version": {
     "name_version": "{project_name} {project_version}",

@@ -59,7 +59,8 @@ func (s *Server) handleAPIAutodiscover(w http.ResponseWriter, r *http.Request) {
 		"api_version": apiVersion,
 		"api_base":    apiBasePath(),
 		"swagger":     "/api/swagger",
-		"graphql":     "/api/graphql",
+		"graphql":     "/graphql",
+		"graphql_alias": "/api/graphql",
 		"healthz":     "/api/healthz",
 	})
 }
@@ -161,20 +162,6 @@ func (s *Server) handleOpenAPIJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "api")
 	json.NewEncoder(w).Encode(s.openAPISpec(r))
-}
-
-// handleGraphQL handles GraphQL queries. A full GraphQL engine is not bundled;
-// the endpoint responds with the spec-compliant NOT_IMPLEMENTED envelope so
-// clients receive a structured, machine-readable error.
-func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
-	sendAPIResponseError(w, "NOT_IMPLEMENTED", "GraphQL endpoint is not enabled on this server")
-}
-
-// handleGraphQLSchema returns the GraphQL SDL schema for the API.
-func (s *Server) handleGraphQLSchema(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	setCacheHeaders(w, "api")
-	_, _ = w.Write([]byte(graphQLSchema))
 }
 
 // handleStatic serves embedded static assets under /static/.

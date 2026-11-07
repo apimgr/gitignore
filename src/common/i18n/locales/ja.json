@@ -491,7 +491,9 @@
     "error_unsupported_shell": "サポートされていないシェル: {shell}",
     "requires_privileges": "{action} には昇格された権限が必要です。",
     "escalate_prompt": "昇格しますか？ [Y/n]: ",
-    "running_in_mode_label": "モード"
+    "running_in_mode_label": "モード",
+    "update_branch_usage": "更新チャネルを設定: stable、beta、devel（別名: daily、rolling、dev、development）",
+    "invalid_update_branch": "更新チャネルが無効です。有効なチャネル: stable、beta、devel。"
   },
 
   "version": {

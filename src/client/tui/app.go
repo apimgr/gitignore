@@ -5,10 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/apimgr/gitignore/src/client/api"
 	"github.com/apimgr/gitignore/src/client/config"
@@ -38,7 +38,7 @@ const (
 )
 
 type (
-	namesLoadedMsg    struct {
+	namesLoadedMsg struct {
 		names []string
 		mode  nameListMode
 		err   error
@@ -67,7 +67,6 @@ type Model struct {
 	styles  Styles
 
 	screen   screen
-	prev     screen
 	width    int
 	height   int
 	quitting bool
@@ -462,7 +461,6 @@ func (m Model) View() string {
 	}
 	if m.message != "" {
 		body += "\n\n" + m.styles.Success.Render(m.message)
-		m.message = ""
 	}
 	return body
 }

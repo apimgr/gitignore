@@ -12,10 +12,6 @@ import (
 	"github.com/apimgr/gitignore/src/config"
 )
 
-const (
-	appName = "gitignore"
-)
-
 // Mode represents the application execution mode
 type Mode string
 

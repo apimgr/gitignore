@@ -5,13 +5,14 @@ on:
     tags:
       - 'v*'
       - '[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch: {}
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   PROJECT_NAME: gitignore
@@ -21,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: casjaysdev/go:latest
+      options: "--user 0:0"
     strategy:
       matrix:
         include:
@@ -54,7 +56,9 @@ jobs:
             echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
           fi
           echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          echo "BUILD_DATE=$(date +"%a %b %d, %Y at %H:%M:%S %Z")" >> $GITHUB_ENV
+          BUILD_EPOCH=$(date -u +%s)
+          echo "BUILD_EPOCH=${BUILD_EPOCH}" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date -u -d @${BUILD_EPOCH} +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
           if [ -f site.txt ]; then
             echo "OFFICIAL_SITE=$(cat site.txt)" >> $GITHUB_ENV
           else
@@ -67,7 +71,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIAL_SITE }}'"
+          LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildEpoch=${{ env.BUILD_EPOCH }}' -X 'main.OfficialSite=${{ env.OFFICIAL_SITE }}'"
           go build -buildvcs=false -trimpath -ldflags "${LDFLAGS}" -o ${{ env.PROJECT_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src
 
       - name: Build CLI
@@ -77,7 +81,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildDate=${{ env.BUILD_DATE }}' -X 'main.OfficialSite=${{ env.OFFICIAL_SITE }}'"
+          LDFLAGS="-s -w -X 'main.Version=${{ env.VERSION }}' -X 'main.CommitID=${{ env.COMMIT_ID }}' -X 'main.BuildEpoch=${{ env.BUILD_EPOCH }}' -X 'main.OfficialSite=${{ env.OFFICIAL_SITE }}'"
           go build -buildvcs=false -trimpath -ldflags "${LDFLAGS}" -o ${{ env.PROJECT_NAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./src/client
 
       - name: Upload server artifact
@@ -98,6 +102,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -111,28 +117,35 @@ jobs:
       - name: Set version
         run: |
           TAG="${GITHUB_REF_NAME}"
-          echo "VERSION=${TAG#v}" >> $GITHUB_ENV
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
           if [[ "$TAG" == v* ]]; then
-            echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
           elif [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "RELEASE_TAG=v$TAG" >> $GITHUB_ENV
+            echo "RELEASE_TAG=v$TAG" >> "$GITHUB_ENV"
           else
-            echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
           fi
 
       - name: Create version.txt
         run: echo "${{ env.VERSION }}" > binaries/version.txt
 
+      - name: Create source archive
+        run: tar --exclude='.git' --exclude='.github' --exclude='.gitea' --exclude='binaries' --exclude='releases' --exclude='*.tar.gz' -czf "binaries/${{ env.PROJECT_NAME }}-${{ env.VERSION }}-source.tar.gz" .
+
+      - name: Generate SBOM (CycloneDX)
+        run: docker run --rm -v "$PWD:/app" -w /app -e GOFLAGS=-buildvcs=false casjaysdev/go:latest cyclonedx-gomod mod -json -output "binaries/${{ env.PROJECT_NAME }}-${{ env.VERSION }}-sbom.cdx.json"
+
       - name: Create checksums
         run: |
           cd binaries
-          sha256sum * > checksums.txt
+          FILES=$(find . -maxdepth 1 -type f ! -name sha256.txt ! -name sha512.txt -printf '%f\n' | sort)
+          printf '%s\n' "$FILES" | xargs sha256sum > sha256.txt
+          printf '%s\n' "$FILES" | xargs sha512sum > sha512.txt
 
-      - name: Create source archive
-        run: |
-          tar --exclude='.git' --exclude='.github' --exclude='.gitea' \
-            --exclude='binaries' --exclude='releases' --exclude='*.tar.gz' \
-            -czf binaries/${{ env.PROJECT_NAME }}-${{ env.VERSION }}-source.tar.gz .
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: binaries/${{ env.PROJECT_NAME }}-*
 
       - name: Create Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1

@@ -491,7 +491,9 @@
     "error_unsupported_shell": "Nicht unterstützte Shell: {shell}",
     "requires_privileges": "{action} erfordert erhöhte Berechtigungen.",
     "escalate_prompt": "Erhöhen? [J/n]: ",
-    "running_in_mode_label": "Modus"
+    "running_in_mode_label": "Modus",
+    "update_branch_usage": "Update-Kanal festlegen: stable, beta oder devel (Aliase: daily, rolling, dev, development)",
+    "invalid_update_branch": "Ungültiger Update-Kanal. Gültige Kanäle: stable, beta, devel."
   },
 
   "version": {

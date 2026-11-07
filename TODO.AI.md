@@ -16,3 +16,4 @@ wrapper with a 90-second bound on 2026-10-31. Docker created the Go image
 container but left it in `Created` state without starting it; the command timed
 out before emitting test output. The container created by that attempt was
 removed. Retry the verification gate when Docker can start containers.
+- gitignore: cmd/i18n-validate is an entry point outside src/ (layout); CI go build lacks -ldflags strip/build-info flags

@@ -8,8 +8,9 @@ RUN apk add --no-cache git bash
 
 ARG TARGETARCH
 ARG VERSION=dev
-ARG BUILD_DATE
+ARG BUILD_EPOCH
 ARG COMMIT_ID
+ARG OFFICIAL_SITE
 
 WORKDIR /build
 
@@ -22,7 +23,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -buildvcs=false \
     -trimpath \
-    -ldflags "-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildDate=${BUILD_DATE}'" \
+    -ldflags "-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildEpoch=${BUILD_EPOCH}' -X 'main.OfficialSite=${OFFICIAL_SITE}'" \
     -o /build/bin/gitignore ./src
 
 # =============================================================================

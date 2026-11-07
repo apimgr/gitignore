@@ -1,0 +1,25 @@
+type Template {
+  name: String!
+  fileName: String!
+  category: String!
+  content: String
+  description: String
+  tags: [String!]!
+  size: Int!
+}
+
+type Stats {
+  totalTemplates: Int!
+  categories: Int!
+  totalSizeBytes: Int!
+}
+
+type Query {
+  template(name: String!): Template
+  list: [Template!]!
+  search(q: String!): [Template!]!
+  categories: [String!]!
+  category(name: String!): [Template!]!
+  combine(templates: [String!]!): String!
+  stats: Stats!
+}

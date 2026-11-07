@@ -1,40 +1,42 @@
 # Production Docker Compose - HUMAN USE ONLY
 # Persistent storage under ./volumes; container internal port is always 80.
-# Values are hardcoded with sane defaults - NO .env files.
+# Copy this file to a deployment directory before starting the service.
 
 name: gitignore
+
+x-logging: &default-logging
+  options:
+    max-size: "5m"
+    max-file: "1"
+  driver: json-file
 
 services:
   gitignore:
     image: ghcr.io/apimgr/gitignore:latest
-    container_name: gitignore
-    restart: unless-stopped
-
+    container_name: gitignore-app
+    hostname: gitignore
+    restart: always
+    pull_policy: always
+    logging: *default-logging
     environment:
-      - MODE=production
-      - TZ=America/New_York
-      - ADDRESS=0.0.0.0
-      - PORT=80
-      - CONFIG_DIR=/config/gitignore
-      - DATA_DIR=/data/gitignore
-
+      PORT: 80
+      TZ: ${TZ:-America/New_York}
+      ADDRESS: 0.0.0.0
+      CONFIG_DIR: /config/gitignore
+      DATA_DIR: /data/gitignore
     volumes:
-      - './volumes/config:/config:z'
-      - './volumes/data:/data:z'
-
+      - ./volumes/config:/config:z
+      - ./volumes/data:/data:z
     ports:
-      # Bound to the Docker bridge only
       - "172.17.0.1:64180:80"
-
-    networks:
-      - gitignore
-
     healthcheck:
       test: ["CMD", "/usr/local/bin/gitignore", "--status"]
-      interval: 5m
+      interval: 10s
       timeout: 15s
       retries: 3
       start_period: 10m
+    networks:
+      - gitignore
 
 networks:
   gitignore:

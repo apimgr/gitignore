@@ -45,18 +45,18 @@ var KnownVariables = map[string]bool{
 	"timestamp":             true,
 	"year":                  true,
 	// Template-specific variables.
-	"event":       true,
-	"ip":          true,
-	"details":     true,
-	"filename":    true,
-	"size":        true,
-	"error":       true,
-	"expires_in":  true,
-	"expiry_date": true,
-	"valid_until": true,
-	"next_retry":  true,
-	"task_name":   true,
-	"next_run":    true,
+	"event":           true,
+	"ip":              true,
+	"details":         true,
+	"filename":        true,
+	"size":            true,
+	"error":           true,
+	"expires_in":      true,
+	"expiry_date":     true,
+	"valid_until":     true,
+	"next_retry":      true,
+	"task_name":       true,
+	"next_run":        true,
 	"current_version": true,
 	"new_version":     true,
 }
@@ -151,14 +151,14 @@ func ValidateTemplate(raw string) error {
 		return err
 	}
 	if strings.TrimSpace(subject) == "" {
-		return errors.New("Subject cannot be empty")
+		return errors.New("subject cannot be empty")
 	}
 	if strings.TrimSpace(body) == "" {
-		return errors.New("Body cannot be empty")
+		return errors.New("body cannot be empty")
 	}
 	for _, m := range varPattern.FindAllStringSubmatch(subject+"\n"+body, -1) {
 		if !KnownVariables[m[1]] {
-			return fmt.Errorf("Unknown variable: {%s}", m[1])
+			return fmt.Errorf("unknown variable: {%s}", m[1])
 		}
 	}
 	return nil

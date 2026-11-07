@@ -1,11 +1,13 @@
 package tor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cretz/bine/control"
 	"github.com/cretz/bine/torutil/ed25519"
@@ -175,6 +177,90 @@ func TestSaveLoadOnionKeyRoundTrip(t *testing.T) {
 	}
 	if gotID != wantID {
 		t.Errorf("service ID after round trip = %s, want %s", gotID, wantID)
+	}
+}
+
+// TorService methods with a nil dialer/tor field must be safe, pure
+// no-ops — no real tor process is required to exercise them.
+func TestTorServiceMethodsZeroDialer(t *testing.T) {
+	s := &TorService{serviceID: "abc123"}
+
+	if got, want := s.OnionAddress(), "abc123.onion"; got != want {
+		t.Errorf("OnionAddress() = %q, want %q", got, want)
+	}
+	if s.OutboundEnabled() {
+		t.Error("OutboundEnabled() = true with nil dialer, want false")
+	}
+
+	client := s.GetHTTPClient(true)
+	if client == nil {
+		t.Fatal("GetHTTPClient(true) returned nil")
+	}
+	if client.Timeout != 30*time.Second {
+		t.Errorf("GetHTTPClient(true) with nil dialer Timeout = %v, want 30s (falls back to direct client)", client.Timeout)
+	}
+
+	if got := s.GetHTTPClient(false).Timeout; got != 30*time.Second {
+		t.Errorf("GetHTTPClient(false) Timeout = %v, want 30s", got)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() with nil tor = %v, want nil", err)
+	}
+}
+
+func TestCommonTorPaths(t *testing.T) {
+	paths := commonTorPaths()
+	if len(paths) == 0 {
+		t.Fatal("commonTorPaths() returned no paths")
+	}
+	for _, p := range paths {
+		if p == "" {
+			t.Error("commonTorPaths() contains an empty path")
+		}
+	}
+}
+
+// TorManager methods called before Start() (service is still nil) must be
+// safe, pure no-ops.
+func TestTorManagerZeroValueMethods(t *testing.T) {
+	cfg := config.DefaultTorConfig()
+	dataDir := t.TempDir()
+	tm := NewTorManager(context.Background(), 8080, t.TempDir(), dataDir, &cfg)
+	defer tm.Close()
+
+	if got := tm.OnionAddress(); got != "" {
+		t.Errorf("OnionAddress() before Start() = %q, want empty", got)
+	}
+	client := tm.GetHTTPClient(true)
+	if client == nil {
+		t.Fatal("GetHTTPClient(true) returned nil")
+	}
+	if client.Timeout != 30*time.Second {
+		t.Errorf("GetHTTPClient(true) before Start() Timeout = %v, want 30s", client.Timeout)
+	}
+}
+
+// Monitor must return promptly when given an already-cancelled context,
+// without waiting for its internal 30s ticker.
+func TestTorManagerMonitorRespectsCancelledContext(t *testing.T) {
+	cfg := config.DefaultTorConfig()
+	tm := NewTorManager(context.Background(), 8080, t.TempDir(), t.TempDir(), &cfg)
+	defer tm.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		tm.Monitor(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Monitor() did not return promptly for a cancelled context")
 	}
 }
 

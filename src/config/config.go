@@ -66,7 +66,7 @@ type HealthzRootConfig struct {
 }
 
 // UpdateConfig controls self-update behavior (AI.md PART 22). Branch is the
-// release channel (stable|beta|daily); AutoInstall lets the update_check
+// release channel (stable|beta|devel); AutoInstall lets the update_check
 // scheduler task install a found update rather than only notifying (default
 // off — installing is always an explicit operator decision); DeferDays gates
 // the scheduled task to releases at least this many days old.
@@ -655,6 +655,16 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+	branch, ok := NormalizeUpdateBranch(cfg.Server.Update.Branch)
+	if !ok {
+		return nil, fmt.Errorf("invalid server.update.branch %q", cfg.Server.Update.Branch)
+	}
+	if branch != cfg.Server.Update.Branch {
+		cfg.Server.Update.Branch = branch
+		if err := saveConfig(cfg, path); err != nil {
+			return nil, fmt.Errorf("failed to normalize update branch: %w", err)
+		}
+	}
 
 	// Fill in computed defaults for existing configs missing these fields
 	if cfg.Server.Port == "" {
@@ -696,8 +706,30 @@ func Update(fn func(*Config)) error {
 	if current == nil {
 		return fmt.Errorf("no configuration loaded")
 	}
+	previousBranch := current.Server.Update.Branch
 	fn(current)
+	branch, ok := NormalizeUpdateBranch(current.Server.Update.Branch)
+	if !ok {
+		invalidBranch := current.Server.Update.Branch
+		current.Server.Update.Branch = previousBranch
+		return fmt.Errorf("invalid server.update.branch %q", invalidBranch)
+	}
+	current.Server.Update.Branch = branch
 	return saveConfig(current, configPath)
+}
+
+// NormalizeUpdateBranch maps supported channel aliases to their canonical name.
+func NormalizeUpdateBranch(branch string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(branch)) {
+	case "", "stable":
+		return "stable", true
+	case "beta":
+		return "beta", true
+	case "devel", "daily", "rolling", "dev", "development":
+		return "devel", true
+	default:
+		return "", false
+	}
 }
 
 func saveConfig(cfg *Config, path string) error {
@@ -894,7 +926,7 @@ server:
       whois: true
 
   update:
-    # Release channel: stable | beta | daily (also settable via --update branch)
+    # Release channel: stable | beta | devel (also settable via --update branch)
     branch: %s
     # Auto-install updates found by the update_check task
     # Default OFF: the task only notifies; installing is always an explicit operator decision

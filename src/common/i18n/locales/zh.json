@@ -491,7 +491,9 @@
     "error_unsupported_shell": "不支持的 shell：{shell}",
     "requires_privileges": "{action} 需要提升的权限。",
     "escalate_prompt": "是否提升权限？[Y/n]：",
-    "running_in_mode_label": "模式"
+    "running_in_mode_label": "模式",
+    "update_branch_usage": "设置更新通道：stable、beta 或 devel（别名：daily、rolling、dev、development）",
+    "invalid_update_branch": "更新通道无效。有效通道：stable、beta、devel。"
   },
 
   "version": {

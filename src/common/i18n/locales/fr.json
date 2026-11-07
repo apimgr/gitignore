@@ -491,7 +491,9 @@
     "error_unsupported_shell": "Shell non pris en charge : {shell}",
     "requires_privileges": "{action} nécessite des privilèges élevés.",
     "escalate_prompt": "Élever les privilèges ? [O/n] : ",
-    "running_in_mode_label": "Mode"
+    "running_in_mode_label": "Mode",
+    "update_branch_usage": "Définir le canal de mise à jour : stable, beta ou devel (alias : daily, rolling, dev, development)",
+    "invalid_update_branch": "Canal de mise à jour invalide. Canaux valides : stable, beta, devel."
   },
 
   "version": {

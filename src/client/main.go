@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/apimgr/gitignore/src/client/api"
 	"github.com/apimgr/gitignore/src/client/cmd"
@@ -24,10 +26,21 @@ import (
 
 // Version information (set by build flags via -ldflags -X).
 var (
-	Version   = "dev"
-	CommitID  = "unknown"
-	BuildDate = "unknown"
+	Version    = "dev"
+	CommitID   = "unknown"
+	BuildDate  = "N/A"
+	BuildEpoch = "0"
 )
+
+func init() {
+	if epoch, err := strconv.ParseInt(BuildEpoch, 10, 64); err == nil && epoch > 0 {
+		BuildDate = buildDate(epoch)
+	}
+}
+
+func buildDate(epoch int64) string {
+	return time.Unix(epoch, 0).UTC().Format(time.RFC3339)
+}
 
 func main() {
 	cmd.BinaryName = filepath.Base(os.Args[0])

@@ -64,6 +64,62 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 		}
 		return map[string]interface{}{"get": op}
 	}
+	graphQLRequestBody := map[string]interface{}{
+		"required": true,
+		"content": map[string]interface{}{
+			"application/json": map[string]interface{}{
+				"schema": map[string]interface{}{
+					"type":     "object",
+					"required": []string{"query"},
+					"properties": map[string]interface{}{
+						"query":         map[string]interface{}{"type": "string"},
+						"operationName": map[string]interface{}{"type": "string"},
+						"variables":     map[string]interface{}{"type": "object", "additionalProperties": true},
+					},
+				},
+			},
+		},
+	}
+	graphQLPost := map[string]interface{}{
+		"post": map[string]interface{}{
+			"summary":     "Execute a read-only GraphQL query",
+			"requestBody": graphQLRequestBody,
+			"responses": map[string]interface{}{
+				"200": map[string]interface{}{
+					"description": "GraphQL query result",
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
+					},
+				},
+				"400": map[string]interface{}{
+					"description": "Invalid GraphQL request body",
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
+					},
+				},
+				"500": map[string]interface{}{
+					"description": "GraphQL schema unavailable",
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
+					},
+				},
+			},
+		},
+	}
+	graphQLPath := map[string]interface{}{
+		"get": map[string]interface{}{
+			"summary": "Get the GraphQL SDL schema",
+			"responses": map[string]interface{}{
+				"200": map[string]interface{}{
+					"description": "GraphQL SDL schema",
+					"content": map[string]interface{}{
+						"text/plain": map[string]interface{}{"schema": map[string]interface{}{"type": "string"}},
+					},
+				},
+			},
+		},
+		"post": graphQLPost["post"],
+	}
 
 	return map[string]interface{}{
 		"openapi": "3.0.3",
@@ -76,6 +132,10 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 			map[string]interface{}{"url": base},
 		},
 		"paths": map[string]interface{}{
+			"/graphql":                   graphQLPath,
+			"/api/graphql":               graphQLPath,
+			api + "/graphql":             graphQLPath,
+			api + "/server/graphql":      graphQLPath,
 			api + "/list":              get("List all templates", nil),
 			api + "/categories":        get("List all categories", nil),
 			api + "/stats":             get("Template statistics", nil),
@@ -147,31 +207,3 @@ const graphiQLHTML = `<!DOCTYPE html>
 <script src="/static/vendor/graphiql/graphiql-init.js"></script>
 </body>
 </html>`
-
-// graphQLSchema is the SDL description of the API's GraphQL surface.
-const graphQLSchema = `type Template {
-  name: String!
-  fileName: String!
-  category: String!
-  content: String
-  description: String
-  tags: [String!]
-  size: Int!
-}
-
-type Stats {
-  totalTemplates: Int!
-  categories: Int!
-  totalSizeBytes: Int!
-}
-
-type Query {
-  template(name: String!): Template
-  list: [Template!]!
-  search(q: String!): [Template!]!
-  categories: [String!]!
-  category(name: String!): [Template!]!
-  combine(templates: [String!]!): String!
-  stats: Stats!
-}
-`

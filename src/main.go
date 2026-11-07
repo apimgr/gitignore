@@ -16,6 +16,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/mode"
@@ -29,9 +30,10 @@ import (
 
 // Version information (set by build flags)
 var (
-	Version   = "dev"
-	CommitID  = "unknown"
-	BuildDate = "unknown"
+	Version    = "dev"
+	CommitID   = "unknown"
+	BuildDate  = "N/A"
+	BuildEpoch = "0"
 	// OfficialSite is the official hosted instance URL, embedded from site.txt
 	// or the OFFICIAL_SITE build arg (AI.md PART 25). Empty for self-hosted.
 	OfficialSite = ""
@@ -52,8 +54,23 @@ const (
 )
 
 func init() {
+	if epoch := buildEpoch(); epoch > 0 {
+		BuildDate = buildDate(epoch)
+	}
 	log.SetPrefix("gitignore: ")
 	log.SetFlags(log.Lshortfile)
+}
+
+func buildDate(epoch int64) string {
+	return time.Unix(epoch, 0).UTC().Format(time.RFC3339)
+}
+
+func buildEpoch() int64 {
+	epoch, err := strconv.ParseInt(BuildEpoch, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return epoch
 }
 
 func main() {
@@ -94,7 +111,7 @@ func main() {
 	flag.BoolVar(forceFlag, "y", false, "Assume yes to confirmation prompts (shorthand)")
 
 	// Update commands
-	updateCmd := flag.String("update", "", "Update commands: check, yes, branch {stable|beta|daily}")
+	updateCmd := flag.String("update", "", "Update commands: check, yes, branch {stable|beta|devel}")
 
 	// Directory and runtime path flags (AI.md PART 8 "Directory Flags"). Each
 	// directory flag creates its target if missing; empty means "use the env
@@ -566,7 +583,7 @@ Maintenance Commands:
 Update Commands:
   --update check               Check for updates
   --update yes                 Install latest update
-  --update branch BRANCH       Set update branch (stable|beta|daily)
+  --update branch BRANCH       %[3]s
 
 Scheduler Commands:
   scheduler list               List all scheduled tasks and status
@@ -607,7 +624,7 @@ Configuration:
   User:    ~/.config/apimgr/gitignore/server.yml
   Docker:  /config/server.yml
 
-`, binaryName, Version)
+`, binaryName, Version, i18n.Translate(i18n.ResolveCLILang("", ""), "cli.update_branch_usage"))
 }
 
 func checkHealth(port string) error {
@@ -858,15 +875,16 @@ func handleUpdateCommand(sub string, subArgs []string, cfg *config.Config) {
 			fmt.Printf("Current branch: %s\n", cfg.Server.Update.Branch)
 			return
 		}
-		if subArgs[0] != "stable" && subArgs[0] != "beta" && subArgs[0] != "daily" {
-			fmt.Fprintf(os.Stderr, "Invalid branch: %s\nValid: stable, beta, daily\n", subArgs[0])
+		branch, ok := config.NormalizeUpdateBranch(subArgs[0])
+		if !ok {
+			fmt.Fprintln(os.Stderr, i18n.Translate(i18n.ResolveCLILang("", ""), "cli.invalid_update_branch"))
 			os.Exit(exUsage)
 		}
-		if err := config.Update(func(c *config.Config) { c.Server.Update.Branch = subArgs[0] }); err != nil {
+		if err := config.Update(func(c *config.Config) { c.Server.Update.Branch = branch }); err != nil {
 			log.Printf("Failed to save config: %v", err)
 			os.Exit(exConfig)
 		}
-		fmt.Printf("Branch set to: %s\n", subArgs[0])
+		fmt.Printf("Branch set to: %s\n", branch)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown update command: %s\n", sub)
 		os.Exit(exUsage)

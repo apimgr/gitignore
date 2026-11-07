@@ -7,6 +7,7 @@ on:
     branches: [main, master]
   schedule:
     - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,8 +54,8 @@ jobs:
         run: |
           fail=0
           for f in .github/workflows/*.yml; do
-            if grep -q "pull_request_target" "$f"; then
-              echo "::error file=$f::pull_request_target is not allowed"
+            if grep -qE '^\s*pull_request_target\s*:' "$f"; then
+              echo "::error file=$f::pull_request_target trigger is not allowed"
               fail=1
             fi
             while IFS= read -r line; do
@@ -74,6 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: casjaysdev/go:latest
+      options: "--user 0:0"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - run: govulncheck ./...
@@ -83,25 +85,30 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: casjaysdev/go:latest
+      options: "--user 0:0"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - run: go vet ./...
-      - run: staticcheck ./...
+      - run: GOTOOLCHAIN=go1.26.4 staticcheck ./...
 
   test:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     container:
       image: casjaysdev/go:latest
+      options: "--user 0:0"
     env:
       CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
+      - name: Validate translations
+        run: go run ./cmd/i18n-validate src/common/i18n/locales/
+
       - name: Run tests with coverage
         run: |
           mkdir -p "/tmp/${{ github.repository_owner }}"
-          COVDIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/$(basename "${{ github.repository }}")-XXXXXX")
+          COVDIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/gitignore-XXXXXX")
           echo "COVDIR=$COVDIR" >> "$GITHUB_ENV"
           go test -cover -coverprofile="$COVDIR/coverage.out" ./...
 
@@ -116,15 +123,46 @@ jobs:
 
   build:
     if: github.event_name != 'schedule'
-    needs: [lint, test]
+    needs: [lint, test, vuln-scan, secret-scan, workflow-policy]
     runs-on: ubuntu-latest
     container:
       image: casjaysdev/go:latest
+      options: "--user 0:0"
     env:
       CGO_ENABLED: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            ext: .exe
+          - goos: freebsd
+            goarch: amd64
+          - goos: freebsd
+            goarch: arm64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      - run: go build -buildvcs=false ./...
+      - name: Build server and CLI
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p "/tmp/${{ github.repository_owner }}"
+          OUTPUT_DIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/gitignore-XXXXXX")
+          go build -buildvcs=false -trimpath -o "$OUTPUT_DIR/gitignore${{ matrix.ext }}" ./src
+          go build -buildvcs=false -trimpath -o "$OUTPUT_DIR/gitignore-cli${{ matrix.ext }}" ./src/client
 
   image-scan:
     if: github.event_name != 'schedule'

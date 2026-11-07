@@ -2,6 +2,7 @@
 * @casjay
 
 # CI/CD and release automation
+/.github/ @casjay
 /.github/workflows/ @casjay
 /Makefile @casjay
 
@@ -11,3 +12,4 @@
 
 # Security-sensitive server code
 /src/server/ @casjay
+SECURITY.md @casjay

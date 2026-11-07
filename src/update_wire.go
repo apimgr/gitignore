@@ -26,6 +26,7 @@ func newUpdater(cfg *config.Config) *updater.Updater {
 		BinaryName:     projectName,
 		CurrentVersion: Version,
 		Branch:         cfg.Server.Update.Branch,
+		BuildEpoch:     buildEpoch(),
 	})
 }
 

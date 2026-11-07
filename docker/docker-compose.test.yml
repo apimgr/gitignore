@@ -1,42 +1,43 @@
 # Test Docker Compose - AI/AUTOMATED TESTING ONLY
-# Ephemeral storage under /tmp; container internal port is always 80.
-# Values are hardcoded with sane defaults - NO .env files.
+# Copy this file to an isolated project-scoped OS temporary directory first.
 
-name: gitignore-test
+name: gitignore
+
+x-logging: &default-logging
+  options:
+    max-size: "5m"
+    max-file: "1"
+  driver: json-file
 
 services:
   gitignore:
-    image: gitignore:dev
-    container_name: gitignore-test
+    image: ghcr.io/apimgr/gitignore:devel
+    pull_policy: always
+    container_name: gitignore-app
+    hostname: gitignore
     restart: "no"
-
+    logging: *default-logging
     environment:
-      - MODE=development
-      - TZ=America/New_York
-      - ADDRESS=0.0.0.0
-      - PORT=80
-      - DEBUG=true
-      - CONFIG_DIR=/config/gitignore
-      - DATA_DIR=/data/gitignore
-      - ADMIN_USER=administrator
-      - ADMIN_PASSWORD=testpass123
-
+      PORT: 80
+      DEBUG: true
+      MODE: development
+      TZ: ${TZ:-America/New_York}
+      ADDRESS: 0.0.0.0
+      CONFIG_DIR: /config/gitignore
+      DATA_DIR: /data/gitignore
     volumes:
-      - '/tmp/gitignore/volumes/config:/config:z'
-      - '/tmp/gitignore/volumes/data:/data:z'
-
+      - ./volumes/config:/config:z
+      - ./volumes/data:/data:z
     ports:
-      - "64181:80"
-
-    networks:
-      - gitignore
-
+      - "172.17.0.1:64181:80"
     healthcheck:
       test: ["CMD", "/usr/local/bin/gitignore", "--status"]
-      interval: 30s
+      interval: 10s
       timeout: 15s
       retries: 3
-      start_period: 30s
+      start_period: 90s
+    networks:
+      - gitignore
 
 networks:
   gitignore:

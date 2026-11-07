@@ -1057,7 +1057,7 @@ func installWindows() error {
 
 	// Run as a Virtual Service Account (NT SERVICE\gitignore) rather than
 	// defaulting to LocalSystem (see PART 23).
-	displayName := strings.Title(appName)
+	displayName := strings.ToUpper(appName[:1]) + appName[1:]
 	cmd := exec.Command("sc.exe", "create", appName,
 		"binPath=", binaryPath,
 		"DisplayName=", displayName+" API",

@@ -13,6 +13,108 @@ import (
 	apppath "github.com/apimgr/gitignore/src/path"
 )
 
+// TestBannerClass verifies the status banner CSS class matches each status.
+func TestBannerClass(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"healthy", "status-ok"},
+		{"degraded", "status-warning"},
+		{"unhealthy", "status-error"},
+		{"unknown", "status-error"},
+	}
+	for _, c := range cases {
+		if got := bannerClass(c.status); got != c.want {
+			t.Errorf("bannerClass(%q) = %q, want %q", c.status, got, c.want)
+		}
+	}
+}
+
+// TestStatusIcon verifies the status icon matches each status.
+func TestStatusIcon(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"healthy", "✅"},
+		{"degraded", "⚠️"},
+		{"unhealthy", "❌"},
+		{"unknown", "❌"},
+	}
+	for _, c := range cases {
+		if got := statusIcon(c.status); got != c.want {
+			t.Errorf("statusIcon(%q) = %q, want %q", c.status, got, c.want)
+		}
+	}
+}
+
+// TestStatusText verifies the human-readable status text matches each status.
+func TestStatusText(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"healthy", "All Systems Operational"},
+		{"degraded", "Degraded Performance"},
+		{"unhealthy", "Service Unavailable"},
+		{"unknown", "Service Unavailable"},
+	}
+	for _, c := range cases {
+		if got := statusText(c.status); got != c.want {
+			t.Errorf("statusText(%q) = %q, want %q", c.status, got, c.want)
+		}
+	}
+}
+
+// TestOverallStatus verifies status aggregation: a failed database is fatal,
+// any other failed check degrades, and all-ok is healthy.
+func TestOverallStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		c    ChecksInfo
+		want string
+	}{
+		{"all ok", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok"}, "healthy"},
+		{"database error is fatal", ChecksInfo{Database: "error", Cache: "ok", Disk: "ok", Scheduler: "ok"}, "unhealthy"},
+		{"cache error degrades", ChecksInfo{Database: "ok", Cache: "error", Disk: "ok", Scheduler: "ok"}, "degraded"},
+		{"disk error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "error", Scheduler: "ok"}, "degraded"},
+		{"scheduler error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "error"}, "degraded"},
+		{"tor error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Tor: "error"}, "degraded"},
+		{"database error wins over other errors", ChecksInfo{Database: "error", Cache: "error", Disk: "error", Scheduler: "error"}, "unhealthy"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := overallStatus(c.c); got != c.want {
+				t.Errorf("overallStatus(%+v) = %q, want %q", c.c, got, c.want)
+			}
+		})
+	}
+}
+
+// TestFormatUptime verifies the compact human-readable duration formatting,
+// including the negative-duration clamp to zero.
+func TestFormatUptime(t *testing.T) {
+	cases := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{"zero", 0, "0m"},
+		{"negative clamps to zero", -5 * time.Minute, "0m"},
+		{"minutes only", 42 * time.Minute, "42m"},
+		{"hours and minutes", 3*time.Hour + 15*time.Minute, "3h 15m"},
+		{"days hours minutes", 2*24*time.Hour + 5*time.Hour + 30*time.Minute, "2d 5h 30m"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatUptime(c.d); got != c.want {
+				t.Errorf("formatUptime(%v) = %q, want %q", c.d, got, c.want)
+			}
+		})
+	}
+}
+
 // newTestHealthServer builds a Server wired to a real in-memory-on-disk store so
 // the health probes (db.Ping, scheduler load, disk stat) resolve to "ok",
 // yielding an overall "healthy" status for the shape assertions.

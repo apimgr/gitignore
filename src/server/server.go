@@ -10,11 +10,13 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
+	graphapi "github.com/apimgr/gitignore/src/graphql"
 	"github.com/apimgr/gitignore/src/geoip"
 	"github.com/apimgr/gitignore/src/mode"
 	apppath "github.com/apimgr/gitignore/src/path"
@@ -56,6 +58,9 @@ type Server struct {
 	server        *http.Server
 	limiter       *rateLimiter
 	metrics       *metrics.Metrics
+	graphQL       *graphapi.Schema
+	graphQLError  error
+	graphQLOnce   sync.Once
 	trustedProxies []*net.IPNet
 	geoip         *geoip.Manager
 	startTime     time.Time
@@ -280,6 +285,8 @@ func (s *Server) setupRoutes() {
 	// Server docs UI pages (root level, AI.md PART 14 "Root-Level Endpoints")
 	s.router.Get("/server/docs/swagger", s.handleSwaggerUI)
 	s.router.Get("/server/docs/graphql", s.handleGraphiQLPage)
+	s.router.Get("/graphql", s.handleGraphQLSchema)
+	s.router.Post("/graphql", s.handleGraphQL)
 
 	// Static files
 	s.router.Get("/static/*", s.handleStatic)
@@ -307,6 +314,8 @@ func (s *Server) setupRoutes() {
 		r.Get("/server/swagger", s.handleOpenAPIJSON)
 		r.Post("/server/graphql", s.handleGraphQL)
 		r.Get("/server/graphql", s.handleGraphQLSchema)
+		r.Post("/graphql", s.handleGraphQL)
+		r.Get("/graphql", s.handleGraphQLSchema)
 
 		// Read-only scheduler status (AI.md PART 18 "Scheduler Status")
 		r.Get("/server/scheduler", s.handleAPISchedulerStatus)

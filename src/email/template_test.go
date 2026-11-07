@@ -67,9 +67,9 @@ func TestValidateTemplateErrors(t *testing.T) {
 	}{
 		{"no subject", "Hello\n---\nbody", "Subject:"},
 		{"no separator", "Subject: Hi\nbody with no sep", "separator"},
-		{"empty subject", "Subject: \n---\nbody", "Subject cannot be empty"},
-		{"empty body", "Subject: Hi\n---\n   \n", "Body cannot be empty"},
-		{"unknown var", "Subject: Hi\n---\nbody {bogus}", "Unknown variable: {bogus}"},
+		{"empty subject", "Subject: \n---\nbody", "subject cannot be empty"},
+		{"empty body", "Subject: Hi\n---\n   \n", "body cannot be empty"},
+		{"unknown var", "Subject: Hi\n---\nbody {bogus}", "unknown variable: {bogus}"},
 	}
 	for _, c := range cases {
 		err := ValidateTemplate(c.raw)

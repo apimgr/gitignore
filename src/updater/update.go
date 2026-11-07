@@ -47,6 +47,7 @@ type Config struct {
 	BinaryName     string
 	CurrentVersion string
 	Branch         string
+	BuildEpoch     int64
 	APIBaseURL     string
 	UserAgent      string
 	Client         *http.Client
@@ -65,6 +66,7 @@ func New(cfg Config) *Updater {
 	if cfg.Branch == "" {
 		cfg.Branch = "stable"
 	}
+	cfg.Branch = normalizeBranch(cfg.Branch)
 	if cfg.BinaryName == "" {
 		cfg.BinaryName = "gitignore"
 	}
@@ -96,6 +98,9 @@ func (u *Updater) CheckDeferred(ctx context.Context, deferDays int) (*Release, e
 
 // check is the shared implementation. deferDays > 0 gates by publish age.
 func (u *Updater) check(ctx context.Context, deferDays int) (*Release, error) {
+	if u.cfg.Branch == "devel" {
+		deferDays = 0
+	}
 	var url string
 	switch u.cfg.Branch {
 	case "stable":
@@ -144,7 +149,7 @@ func (u *Updater) check(ctx context.Context, deferDays int) (*Release, error) {
 		return &release, nil
 	}
 
-	// Beta/daily: releases are newest-first; channels are cumulative, so the
+	// Beta/devel: releases are newest-first; channels are cumulative, so the
 	// first eligible match is the newest across this channel and every
 	// more-stable channel (AI.md PART 22 "Channel Semantics").
 	var releases []Release
@@ -153,6 +158,9 @@ func (u *Updater) check(ctx context.Context, deferDays int) (*Release, error) {
 	}
 	for i := range releases {
 		r := releases[i]
+		if r.TagName == "devel" && u.cfg.Branch == "devel" && u.cfg.BuildEpoch > 0 && r.PublishedAt.Unix() <= u.cfg.BuildEpoch {
+			continue
+		}
 		if r.TagName != u.cfg.CurrentVersion && matchesBranch(r, u.cfg.Branch) && cutoffOK(r) {
 			return &r, nil
 		}
@@ -339,14 +347,26 @@ func matchesBranch(r Release, branch string) bool {
 		return true
 	}
 	isBeta := strings.HasSuffix(r.TagName, "-beta")
-	// Daily builds are 14-digit timestamps: YYYYMMDDHHMMSS.
-	isDaily := len(r.TagName) == 14 && !strings.Contains(r.TagName, ".")
+	isDevel := r.TagName == "devel"
 	switch branch {
 	case "beta":
 		return isBeta
-	case "daily":
-		return isBeta || isDaily
+	case "devel":
+		return isBeta || isDevel
 	default:
 		return false
+	}
+}
+
+func normalizeBranch(branch string) string {
+	switch strings.ToLower(strings.TrimSpace(branch)) {
+	case "", "stable":
+		return "stable"
+	case "beta":
+		return "beta"
+	case "devel", "daily", "rolling", "dev", "development":
+		return "devel"
+	default:
+		return strings.ToLower(strings.TrimSpace(branch))
 	}
 }

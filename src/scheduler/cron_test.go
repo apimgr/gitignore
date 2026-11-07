@@ -24,6 +24,9 @@ func TestParseScheduleErrors(t *testing.T) {
 
 func TestEverySchedule(t *testing.T) {
 	s := mustParse(t, "@every 15m")
+	if got := s.String(); got != "@every 15m" {
+		t.Errorf("String() = %q, want %q", got, "@every 15m")
+	}
 	base := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 	next := s.Next(base)
 	if want := base.Add(15 * time.Minute); !next.Equal(want) {
@@ -36,6 +39,9 @@ func TestEverySchedule(t *testing.T) {
 
 func TestCronDaily(t *testing.T) {
 	s := mustParse(t, "0 2 * * *")
+	if got := s.String(); got != "0 2 * * *" {
+		t.Errorf("String() = %q, want %q", got, "0 2 * * *")
+	}
 	base := time.Date(2025, 1, 15, 1, 0, 0, 0, time.UTC)
 	next := s.Next(base)
 	want := time.Date(2025, 1, 15, 2, 0, 0, 0, time.UTC)
@@ -89,6 +95,34 @@ func TestCronStepAndRange(t *testing.T) {
 	want := time.Date(2025, 1, 15, 10, 15, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("step Next = %v, want %v", next, want)
+	}
+}
+
+// TestParseScheduleFieldErrors covers the field-parsing failure branches:
+// non-numeric step, zero step, non-numeric range bounds, an inverted range,
+// an out-of-range value inside a comma list, and an out-of-range dow value.
+func TestParseScheduleFieldErrors(t *testing.T) {
+	for _, expr := range []string{
+		"*/x * * * *",
+		"*/0 * * * *",
+		"1-x * * * *",
+		"x-5 * * * *",
+		"5-1 * * * *",
+		"1,2,99 * * * *",
+		"* * * * 8",
+	} {
+		if _, err := ParseSchedule(expr); err == nil {
+			t.Errorf("ParseSchedule(%q) expected error, got nil", expr)
+		}
+	}
+}
+
+func TestParseScheduleWrongFieldCount(t *testing.T) {
+	if _, err := ParseSchedule("* * * *"); err == nil {
+		t.Error("expected error for 4-field expression")
+	}
+	if _, err := ParseSchedule("* * * * * *"); err == nil {
+		t.Error("expected error for 6-field expression")
 	}
 }
 

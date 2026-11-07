@@ -1,0 +1,57 @@
+FROM casjaysdev/go:latest AS builder
+
+RUN apk add --no-cache git bash
+
+ARG TARGETARCH
+ARG VERSION=devel
+ARG BUILD_EPOCH
+ARG COMMIT_ID
+ARG OFFICIAL_SITE
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+	-buildvcs=false \
+	-trimpath \
+	-ldflags "-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildEpoch=${BUILD_EPOCH}' -X 'main.OfficialSite=${OFFICIAL_SITE}'" \
+	-o /build/bin/gitignore ./src
+
+FROM alpine:latest
+
+ARG VERSION=devel
+ARG BUILD_DATE
+ARG BUILD_EPOCH
+ARG COMMIT_ID
+ARG LICENSE=MIT
+
+RUN apk add --no-cache \
+	git \
+	curl \
+	bash \
+	jq \
+	bind-tools \
+	tini \
+	tor
+
+COPY --from=builder /build/bin/gitignore /usr/local/bin/gitignore
+COPY docker/rootfs/ /
+COPY docker/Dockerfile.dev /root/Dockerfile
+
+RUN chmod 755 /usr/local/bin/*
+
+ENV TZ=America/New_York \
+	MODE=development \
+	DEBUG=true
+
+EXPOSE 80
+
+STOPSIGNAL SIGRTMIN+3
+
+HEALTHCHECK --start-period=10m --interval=5m --timeout=15s --retries=3 \
+	CMD /usr/local/bin/gitignore --status || exit 1
+
+ENTRYPOINT [ "tini", "-p", "SIGTERM", "--", "/usr/local/bin/entrypoint.sh" ]

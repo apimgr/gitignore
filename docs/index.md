@@ -1,53 +1,55 @@
-# gitignore
+# GitIgnore API Server
 
-GitIgnore API Server is a full-stack Go web application for serving `.gitignore`
-templates. It provides a curated library of templates for languages, frameworks,
-editors, and tools through a versioned REST API, a GraphQL endpoint, and a
-server-side rendered web UI with a browser and composer. Templates are embedded
-in the binary at build time, and a companion CLI tool enables shell-pipeline use.
-It ships as a single self-contained static binary.
+GitIgnore serves a curated catalog of `.gitignore` templates through a versioned REST API, read-only GraphQL API, server-rendered browser interface, and companion CLI. The template catalog and interface locales are embedded in the static Go binaries.
 
-## Quick Start
+## Quick start
 
-```bash
-# Docker
-docker run --name gitignore -p 127.0.0.1:8080:8080 ghcr.io/apimgr/gitignore:latest
+The production Compose file is under `docker/`; copy it to a deployment directory so its persistent relative `volumes/` paths stay outside the source checkout. It listens on host address `172.17.0.1:64180` and routes to container port `80`.
 
-# Binary
-./gitignore-linux-amd64 --port 8080
+From the deployment directory containing the copied Compose file, start it with:
+
+```sh
+docker compose -f docker-compose.yml up -d
 ```
 
-Fetch a template:
+Retrieve a template from a running instance:
 
-```bash
-curl http://localhost:8080/api/v1/templates/go.txt
+```sh
+curl http://172.17.0.1:64180/api/v1/templates/go.txt
 ```
 
 ## Features
 
-- Curated `.gitignore` templates embedded in the binary
-- Versioned REST API with plain-text, JSON, and HTML content negotiation
-- GraphQL endpoint with an interactive playground
-- Server-side rendered web UI: browser, template viewer, and combiner/composer
-- Companion CLI (`gitignore-cli`) for shell pipelines
-- Health, metrics, security.txt, PWA manifest, and Swagger/GraphQL docs endpoints
+- Search, browse, inspect, and combine templates in the browser.
+- Retrieve and export the catalog over REST, or query it through GraphQL.
+- Use unversioned gitignore.io-compatible routes.
+- Run the companion client in a shell pipeline or download generated shell helpers and completions.
+- Visit public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages.
+- Use seven bundled locales: English, Arabic, German, Spanish, French, Japanese, and Chinese.
+
+The service is read-only and public. It has no accounts, admin web panel, or user-submitted templates. The `/server/contact` route currently serves project contact information; it is not a message-submission endpoint.
 
 ## Documentation
 
-- [Installation](installation.md) - How to install and run
-- [Configuration](configuration.md) - All configuration options
-- [API Reference](api.md) - REST API, Swagger, GraphQL
-- [CLI Reference](cli.md) - Server flags and the companion client
-- [Security](security.md) - Auth, public endpoints, reporting, and hardening
-- [Integrations](integrations.md) - Discovery and platform integrations
-- [Development](development.md) - Contributing guide
+- [Installation](installation.md)
+- [Configuration](configuration.md)
+- [API reference](api.md)
+- [CLI reference](cli.md)
+- [Security](security.md)
+- [Integrations and discovery](integrations.md)
+- [Development](development.md)
+- [Translation guide](translating.md)
+
+## Browser pages
+
+The main interface includes `/`, `/search`, `/template/{name}`, `/combine`, `/categories`, `/list`, `/stats`, `/docs`, and `/cli`. Public server information pages are `/server`, `/server/about`, `/server/help`, `/server/privacy`, `/server/contact`, `/server/terms`, `/server/security`, `/server/security/policy`, and `/server/healthz`. Interactive API tools are at `/server/docs/swagger` and `/server/docs/graphql`.
 
 ## Links
 
-- [Repository](https://github.com/apimgr/gitignore)
+- [Source repository](https://github.com/apimgr/gitignore)
 - [Swagger UI](/server/docs/swagger)
-- [GraphQL Playground](/server/docs/graphql)
+- [GraphQL playground](/server/docs/graphql)
 
 ## License
 
-MIT - See [LICENSE.md](https://github.com/apimgr/gitignore/blob/main/LICENSE.md)
+The application source is MIT licensed; see [LICENSE.md](../LICENSE.md). Embedded template data can carry additional attributions and terms listed there.

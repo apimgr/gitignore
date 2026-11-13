@@ -1,54 +1,49 @@
 # Installation
 
-## Docker (Recommended)
+GitIgnore runs as a static server binary or as a Docker container. The template catalog and locale files are embedded in the binaries.
 
-```bash
-docker run -d \
-  --name gitignore \
-  -p 127.0.0.1:8080:8080 \
-  -v gitignore-config:/config \
-  -v gitignore-data:/data \
-  ghcr.io/apimgr/gitignore:latest
+## Docker Compose
+
+The repository's production Compose file uses `ghcr.io/apimgr/gitignore:latest`, publishes the service on host address `172.17.0.1:64180`, and mounts persistent configuration and data directories. Copy `docker/docker-compose.yml` to a deployment directory before starting it; the relative `volumes/` paths then remain outside the source checkout.
+
+```sh
+docker compose -f docker-compose.yml up -d
 ```
 
-The container listens on port 8080 by default. Templates are embedded in the
-binary, so no external template volume is required.
+The container listens on port `80`. Configuration and data paths are set by the Compose environment. The health check invokes the binary's `--status` command.
 
 ## Binary
 
-Download the matching artifact from
-[releases](https://github.com/apimgr/gitignore/releases):
+Download the artifact for your operating system and architecture from the [GitHub releases page](https://github.com/apimgr/gitignore/releases). Release builds cover Linux, macOS, Windows, and FreeBSD on amd64 and arm64. A Linux example:
 
-```bash
-# Linux AMD64
-wget https://github.com/apimgr/gitignore/releases/latest/download/gitignore-linux-amd64
+```sh
 chmod +x gitignore-linux-amd64
 ./gitignore-linux-amd64 --port 8080
 ```
 
-Builds are published for linux, darwin, windows, and freebsd on both amd64 and
-arm64.
+The companion client is published separately as `gitignore-cli-{os}-{arch}` (with `.exe` on Windows). See the [CLI reference](cli.md).
 
-## Systemd Service
+## Service installation
 
-The server can install and manage its own systemd unit:
+The server binary includes service-management commands for supported operating systems. For example, on Linux:
 
-```bash
-sudo ./gitignore --service --install
-sudo systemctl start gitignore
-sudo systemctl enable gitignore
+```sh
+sudo gitignore --service --install
+sudo gitignore --service start
 ```
 
-## Running as a Daemon
+Use `gitignore --service --help` for supported service operations. Service installation changes host service configuration and should be performed on the intended deployment host.
 
-On Unix platforms the server can detach from the terminal:
+## Daemon mode
 
-```bash
-./gitignore --daemon --port 8080 --pid /var/run/gitignore.pid
+On supported Unix systems, start the server detached from the terminal with `--daemon`:
+
+```sh
+gitignore --daemon --port 8080
 ```
 
-On Windows use `--service --install` instead; `--daemon` is not supported there.
+Windows uses the service integration; daemon mode is not supported there.
 
 ## Configuration
 
-See [Configuration](configuration.md) for all options and directory locations.
+The server creates its configuration file and runtime directories on startup when needed. Operators edit `server.yml`; CLI flags and environment variables can override settings. See [configuration](configuration.md) for paths, precedence, and supported settings.

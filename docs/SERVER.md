@@ -1,38 +1,41 @@
 # Server Operations
 
-GitIgnore is a public, read-only template service. Configure it with
-`server.yml`, environment variables, or command-line flags. It has no user
-accounts or admin web panel.
+GitIgnore is a public, read-only template service. Operators configure the server with `server.yml`, startup environment variables, and CLI flags. There is no web management interface.
 
 ## Install and run
 
-See [Installation](installation.md) for Docker, binary, and system service
-options. Templates are embedded in the binary; no template volume or database
-setup is needed to serve the catalog.
+See [Installation](installation.md) for Docker, binary, service, and daemon options. The template catalog and locale data are embedded in the server binary.
 
 ## Configuration
 
-See [Configuration](configuration.md) for directory flags, environment
-variables, server options, and update channels. A minimal configuration is:
+See [Configuration](configuration.md) for supported paths, settings, and precedence. The server creates a default `server.yml` when it starts without one.
 
-```yaml
-server:
-  address: 0.0.0.0
-  port: 8080
-  baseurl: /
-  api_version: v1
-```
+## Browser pages
 
-## Health and API documentation
+| Page | Purpose |
+|------|---------|
+| `/server` | Server information and links to documentation |
+| `/server/about` | Product and build information |
+| `/server/help` | Browser, CLI, and API usage help |
+| `/server/privacy` | Privacy and data handling information |
+| `/server/contact` | Project issue, source, and security-report links; static page, no message form |
+| `/server/terms` | Terms of use |
+| `/server/healthz` | Content-negotiated server health |
+| `/server/security` | Security overview and reporting information |
+| `/server/security/policy` | Security policy page |
+| `/server/docs/swagger` | Interactive OpenAPI UI |
+| `/server/docs/graphql` | GraphiQL playground |
 
-- Health: `/healthz` or `/api/v1/server/healthz`
-- OpenAPI: `/api/v1/server/swagger`
-- GraphiQL: `/server/docs/graphql`
-- GraphQL SDL: `GET /graphql`
-- REST and GraphQL routes: [API Reference](API.md)
+The optional root health alias `/healthz` is disabled by default. The API health routes `/api/healthz`, `/api/healthz.txt`, and `/api/v1/server/healthz` are available independently. See [API Reference](api.md).
+
+## Other public endpoints
+
+- `/api/v1/server/scheduler` returns read-only scheduler status.
+- `/security.txt` and `/.well-known/security.txt` expose the configured security contact.
+- `/robots.txt` is generated from the `web_robots` settings.
+- `/manifest.json`, `/sw.js`, and `/locales/{lang}.json` support the PWA and locale selector.
+- `/metrics` is enabled by default and should be firewalled from public access.
 
 ## Security
 
-The API serves public catalog data without authentication. See the
-[Security guide](security.md) for trusted proxy handling, debug endpoints, and
-security reporting details.
+API and browser content are public and require no authentication. Keep debug routes disabled in production, restrict metrics to trusted monitoring systems, and configure trusted proxies accurately. See the [Security](security.md) guide.

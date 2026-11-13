@@ -2,63 +2,59 @@
 
 ## Prerequisites
 
-- Go (latest stable; never pin a specific version)
-- Make
-- Docker (all builds and tests run inside the `casjaysdev/go:latest` toolchain
-  image; nothing is built on the host)
+- Git and Make
+- Docker with access to the `casjaysdev/go:latest` image
+
+The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go build or test commands directly on the host; see the repository's [AI.md](../AI.md) for the complete development rules.
 
 ## Layout
 
-- `src/` - server source (package `main`)
-- `src/client/` - companion CLI client
-- `src/server/` - HTTP server, routes, and handlers
-- `src/config/`, `src/db/`, `src/path/` - configuration, storage, and paths
-- `docs/` - this documentation set (ReadTheDocs / MkDocs)
+- `src/` — server and shared Go packages
+- `src/client/` — companion CLI and terminal interface
+- `src/server/` — HTTP routes, handlers, templates, and embedded assets
+- `src/common/i18n/locales/` — embedded locale JSON files
+- `cmd/i18n-validate/` — translation consistency validator
+- `docker/` — Dockerfiles and Compose definitions
+- `docs/` — MkDocs and ReadTheDocs documentation
+- `tests/` — Docker and optional integration/browser test runners
 
 ## Build
 
-```bash
-git clone https://github.com/apimgr/gitignore
-cd gitignore
-make build
+```sh
+make dev    # Build server and client into a project-scoped temporary directory
+make local  # Build binaries for the host OS/architecture into binaries/
+make build  # Build server and client for the configured platform matrix
 ```
 
-Binaries are written to `binaries/`. Builds are static (`CGO_ENABLED=0`).
+The Go toolchain runs in the Makefile's Docker image. The binaries are static (`CGO_ENABLED=0`) and contain their web assets, template data, and locale files.
 
-## Run Locally
+## Test and security checks
 
-```bash
-make run          # build and run on :8080
-make run-dev      # run from source in dev mode
-```
-
-## Testing
-
-```bash
+```sh
 make test
 ```
 
-`make test` validates translation files, runs `go vet ./...`, and executes the
-test suite inside Docker.
+This target runs `go vet`, `govulncheck`, the Go test suite, and the coverage threshold inside the Go container. Translation-key consistency is covered by the test suite. Optional container/integration scripts are in `tests/`; consult their help or source before running them because some require Incus or a configured browser environment.
 
-## Cross-Platform Builds
+## Release artifacts
 
-```bash
-make build-all    # all supported OS/arch pairs
-make release      # build-all plus packaged release artifacts
+```sh
+make build
+make release
 ```
+
+`make release` builds the configured platform matrix and writes version, source archive, and checksum artifacts under `releases/`. `make docker` builds and pushes the configured multi-architecture image, so use it only when publishing is intended.
+
+## Documentation
+
+Update the relevant pages in `docs/` when browser routes, API behavior, configuration, CLI behavior, security, or integrations change. Update the translation guide and locale documentation when language support changes. Build commands are described in the root Makefile; there are no `make run`, `make run-dev`, or `make build-all` targets.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make changes and add tests for new behavior
-4. Run `make test`
-5. Update the relevant `docs/` pages
-6. Submit a pull request
+1. Create a feature branch.
+2. Make the change and add or update focused tests where behavior changes.
+3. Run `make test` in Docker.
+4. Update the affected documentation pages.
+5. Submit a pull request with a concise description of behavior and verification.
 
-## Code Style
-
-- Follow standard Go formatting (`gofmt`)
-- Keep comments above the code they describe, never inline
-- Add a test that fails before and passes after any behavior change
+Follow standard Go formatting and place comments above the code they describe. See [AI.md](../AI.md) for the repository's full coding requirements.

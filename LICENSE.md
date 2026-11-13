@@ -39,6 +39,16 @@ This software includes the following third-party libraries:
 | github.com/charmbracelet/bubbles | v1.0.0 | MIT | 2020-2023 Charmbracelet, Inc |
 | github.com/charmbracelet/lipgloss | v1.1.0 | MIT | 2021-2023 Charmbracelet, Inc |
 
+### GeoIP Database Attribution
+
+The GeoIP databases downloaded by this software are licensed under CC BY 4.0.
+The City database is from DB-IP; the Country and ASN databases include data
+licensed by the Number Resource Organization (NRO).
+
+<a href="https://db-ip.com/">IP Geolocation by DB-IP</a>
+
+Country and ASN data licensed CC BY 4.0 by the Number Resource Organization (NRO).
+
 For BSD-3-Clause licensed dependencies (`golang.org/x/crypto`, `golang.org/x/term`, `modernc.org/sqlite`), the
 non-endorsement clause applies: neither the name of the copyright holder nor the names
 of its contributors may be used to endorse or promote products derived from this

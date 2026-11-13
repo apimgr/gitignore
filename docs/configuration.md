@@ -1,75 +1,69 @@
 # Configuration
 
-The server reads a YAML config file at startup and applies environment and CLI
-overrides on top of it.
-
-## Config File
-
-Default location: `{config_dir}/server.yml`. The config directory is resolved
-from `--config`, the `CONFIG_DIR` environment variable, or a platform default
-(system path when privileged, XDG path otherwise).
+The server creates `{config_dir}/server.yml` on first startup and fills unset values with defaults. The YAML root sections are `server`, `web`, `web_robots`, and `web_security`.
 
 ```yaml
 server:
-  address: 0.0.0.0
-  port: 8080
-  # Base URL path prefix the app is mounted under. "/" means the root.
+  address: "[::]"
+  port: "64080"
   baseurl: /
-  # REST API version segment used in /api/{version}/ routes.
   api_version: v1
-  # Detach from the controlling terminal at startup (Unix only).
-  daemonize: false
-
-database:
-  type: sqlite
-  # Path auto-detected from the data/database directory when unset.
+  mode: production
+  database:
+    driver: sqlite
+web:
+  ui:
+    theme: dark
+  cors: "*"
+web_robots:
+  allow: ["/", "/api"]
+  deny: ["/debug"]
 ```
 
-## Directory Flags
+Review the generated file before changing values. It contains comments and computed defaults for optional capabilities.
 
-The server creates each directory it is given at startup. Directory permissions
-are locked at process start from the effective UID: root uses `0755`
-directories / `0644` files, an unprivileged user uses `0700` / `0600`.
+## Configuration paths
 
-| Flag | Environment | Purpose |
-|------|-------------|---------|
-| `--config` | `CONFIG_DIR` | Configuration directory |
-| `--data` | `DATA_DIR` | Application data directory |
-| (n/a) | `DATABASE_DIR` | Database directory (defaults under data) |
-| `--cache` | `CACHE_DIR` | Cache directory |
-| `--log` | `LOG_DIR` | Log directory |
-| `--backup` | `BACKUP_DIR` | Backup directory |
-| `--pid` | (n/a) | PID file path (skipped in containers) |
+`--config DIR` and `CONFIG_DIR` select the configuration directory. `--data DIR` and `DATA_DIR` select the data directory. `--cache DIR` / `CACHE_DIR`, `--log DIR` / `LOG_DIR`, and `--backup DIR` / `BACKUP_DIR` select their respective directories. `DATABASE_DIR` selects the database directory. The `--pid FILE` flag selects a PID file; PID files are skipped in containers.
 
-## Init-Only Environment Variables
+The server chooses platform-appropriate defaults when paths are not supplied. The binary creates required directories at startup. See [Server Operations](SERVER.md) for runtime and service information.
 
-These are read once at startup and cannot be changed at runtime:
+## Server settings
 
-```bash
-CONFIG_DIR    # configuration directory
-DATA_DIR      # data directory
-DATABASE_DIR  # database directory
-CACHE_DIR     # cache directory
-LOG_DIR       # log directory
-BACKUP_DIR    # backup directory
-PORT          # listen port
-LISTEN        # listen address
-```
+Settings are grouped under `server` in `server.yml`:
 
-## Precedence
+| Group | Settings |
+|-------|----------|
+| Listener and routing | `port`, `fqdn`, `address`, `baseurl`, `api_version`, `daemonize`, `mode` |
+| Runtime identity | `user`, `group`, `pidfile` |
+| Branding and discovery | `branding`, `seo`, `admin` |
+| TLS | `ssl.enabled`, `ssl.letsencrypt` (including challenge and DNS credentials) |
+| Scheduling and protection | `schedule`, `rate_limit`, `maintenance`, `healthz.root.enabled` |
+| Metrics and proxy trust | `metrics`, `trusted_proxies.additional` |
+| Storage and logs | `database`, `logging` |
+| Backups and notifications | `backup.encryption`, `notifications.webui`, `notifications.email` |
+| Language | `i18n.enabled`, `default_language`, `fallback_language`, `available_languages`, `cookie_name`, `cookie_max_age` |
+| Network integrations | `tor`, `geoip` |
+| Updates | `update.branch`, `auto_install`, `defer_days` |
 
-For each setting the order of precedence is: CLI flag > environment variable >
-config file > built-in default.
+Email SMTP fields can also be supplied with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM_NAME`, and `SMTP_FROM_EMAIL`. Secrets such as SMTP passwords, metrics tokens, and TLS DNS credentials should be kept private and must not be committed.
 
-## Base URL
+The `web` section controls the UI theme and CORS setting. `web_robots.allow` and `web_robots.deny` determine the generated `robots.txt` directives. `web_security.admin` supplies the security contact shown by `security.txt`; `web_security.cors` controls the web security CORS setting.
 
-When `server.baseurl` (or `--baseurl`) is set to a non-root path such as
-`/gitignore`, the server transparently strips the prefix from incoming requests
-and redirects the bare prefix to the trailing-slash form.
+## Environment variables and precedence
 
-## Update Channel
+Directory environment variables are read during startup. `PORT` and `LISTEN` override the listen port and address; `DOMAIN` and `HOSTNAME` influence FQDN discovery. SMTP variables override their corresponding values from `server.yml`.
 
-`server.update.branch` accepts `stable`, `beta`, or `devel`. The aliases
-`daily`, `rolling`, `dev`, and `development` are accepted and stored as
-`devel`. The `devel` channel checks the rolling release against the binary's
-embedded build time and ignores `defer_days`.
+For settings that have all three sources, the precedence is CLI flag, environment variable, config file, then built-in default. Init-only directory variables must be present before starting the process.
+
+## Base URL and API version
+
+`server.baseurl` (or `--baseurl`) sets a URL path prefix, for example `/gitignore`. A root prefix (`/`) serves the app at the origin root. `server.api_version` controls the version segment, which is `v1` by default.
+
+## Update channel
+
+`server.update.branch` accepts `stable`, `beta`, or `devel`. The aliases `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `auto_install` controls whether scheduled update checks install a found update, and `defer_days` controls release age for scheduled checks.
+
+## Optional endpoints
+
+The canonical health page is `/server/healthz`. The root `/healthz` alias is enabled only with `server.healthz.root.enabled: true`. Prometheus metrics are enabled by default at `/metrics`; the endpoint can be changed with `server.metrics.endpoint`. Metrics should be firewalled from public access; an optional bearer token is available through `server.metrics.token`.

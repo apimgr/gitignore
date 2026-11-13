@@ -14,7 +14,10 @@ The application serves a curated template catalog embedded in the binary. Catalo
 | `/server/healthz` | Canonical health page/API; output is negotiated by request |
 | `/server/security` | Human-readable security policy and reporting information |
 | `/server/security/policy` | Security policy page |
-| `/server/security/thanks` | Acknowledgment after submitting a security report |
+| `/server/security/thanks` | Public researcher acknowledgments |
+| `/server/security/report/{tracking_id}` | Researcher status page; requires the one-time token emailed with the tracking ID |
+| `/server/contact?security_id={id}` | Contact form in security-report mode when the rotating ID is valid |
+| `POST /api/{api_version}/server/contact` | Contact or security-report submission; version defaults to `v1` |
 | `/api/v1/server/healthz` | Versioned health API |
 | `/api/healthz` and `/api/healthz.txt` | Unversioned health aliases |
 

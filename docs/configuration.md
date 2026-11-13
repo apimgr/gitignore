@@ -44,9 +44,12 @@ Settings are grouped under `server` in `server.yml`:
 | Backups and notifications | `backup.encryption`, `notifications.webui`, `notifications.email` |
 | Language | `i18n.enabled`, `default_language`, `fallback_language`, `available_languages`, `cookie_name`, `cookie_max_age` |
 | Network integrations | `tor`, `geoip` |
+| Contact and pages | `contact.general.email`, `contact.security.email`, `contact.abuse.email`, `pages.contact.enabled`, `pages.contact.captcha`, `pages.contact.success_message` |
 | Updates | `update.branch`, `auto_install`, `defer_days` |
 
 Email SMTP fields can also be supplied with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM_NAME`, and `SMTP_FROM_EMAIL`. Secrets such as SMTP passwords, metrics tokens, and TLS DNS credentials should be kept private and must not be committed.
+
+The contact page uses a self-hosted challenge by default. Contact submissions require `server.contact.general.email` (or a configured fallback recipient) and a working SMTP configuration. The configured captcha provider must be `simple` unless another provider is supported by the current build.
 
 The `web` section controls the UI theme and CORS setting. `web_robots.allow` and `web_robots.deny` determine the generated `robots.txt` directives. `web_security.admin` supplies the security contact shown by `security.txt`; `web_security.cors` controls the web security CORS setting.
 

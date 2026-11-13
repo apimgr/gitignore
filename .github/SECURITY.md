@@ -19,8 +19,8 @@ If you are unable to use GitHub's private reporting, email security@apimgr.us. P
 
 ## Response Process
 
-- We will acknowledge receipt of your report within 5 business days.
-- We will investigate and provide an initial assessment within 10 business days.
+- We will acknowledge receipt within 48 hours.
+- We will provide an initial assessment as soon as possible. Critical vulnerabilities are targeted for a fix within 14 days.
 - We will coordinate a disclosure timeline with you once a fix is available.
 - Credit will be given in the release notes unless you request otherwise.
 

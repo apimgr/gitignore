@@ -25,7 +25,7 @@ curl http://172.17.0.1:64180/api/v1/templates/go.txt
 - Use unversioned gitignore.io-compatible routes.
 - Run the companion client in a shell pipeline or download generated shell helpers and completions.
 - Visit public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages.
-- Use seven bundled locales: English, Arabic, German, Spanish, French, Japanese, and Chinese.
+- Use eight bundled locales: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
 The service is read-only and public. It has no accounts, admin web panel, or user-submitted templates. The `/server/contact` route currently serves project contact information; it is not a message-submission endpoint.
 

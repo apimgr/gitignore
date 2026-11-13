@@ -9,7 +9,7 @@ GitIgnore serves an embedded catalog of `.gitignore` templates through a public 
 - Use the unversioned routes compatible with the gitignore.io API.
 - Run the companion CLI in shell pipelines and download generated shell helpers and completions.
 - Use the public About, Help, Privacy, Contact, Terms, Security, and health pages.
-- Choose from seven bundled interface languages: English, Arabic, German, Spanish, French, Japanese, and Chinese.
+- Choose from eight bundled interface languages: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
 The service is public and read-only. It has no user accounts, admin web panel, or user-submitted templates. See [IDEA.md](IDEA.md) for product scope.
 

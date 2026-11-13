@@ -1,6 +1,6 @@
 # Translating GitIgnore
 
-GitIgnore ships seven interface locales in `src/common/i18n/locales/`. Locale files are embedded into the server and CLI binaries at build time. English (`en.json`) is the source locale; translation files use the same JSON keys and structure.
+GitIgnore ships eight interface locales in `src/common/i18n/locales/`. Locale files are embedded into the server and CLI binaries at build time. English (`en.json`) is the source locale; translation files use the same JSON keys and structure.
 
 ## Supported locales
 
@@ -11,6 +11,7 @@ GitIgnore ships seven interface locales in `src/common/i18n/locales/`. Locale fi
 | `de` | German | Deutsch | Left to right |
 | `es` | Spanish | Español | Left to right |
 | `fr` | French | Français | Left to right |
+| `it` | Italian | Italiano | Left to right |
 | `ja` | Japanese | 日本語 | Left to right |
 | `zh` | Chinese | 中文 | Left to right |
 

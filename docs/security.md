@@ -2,7 +2,7 @@
 
 ## Public, read-only service
 
-The application serves a curated template catalog embedded in the binary. Its API and browser pages are public and require no account, API key, or login. The server does not accept user-submitted templates. `/server/contact` is a static page with repository and security-report links; it does not accept messages.
+The application serves a curated template catalog embedded in the binary. Catalog APIs and browser pages are public and do not require an account or API key. The server does not accept user-submitted templates. The `/server/contact` page accepts operator messages through a no-JavaScript form protected by a self-hosted arithmetic challenge; delivery requires configured SMTP and a contact recipient. Security reports use the private disclosure routes described below.
 
 ## Security and health endpoints
 
@@ -14,10 +14,13 @@ The application serves a curated template catalog embedded in the binary. Its AP
 | `/server/healthz` | Canonical health page/API; output is negotiated by request |
 | `/server/security` | Human-readable security policy and reporting information |
 | `/server/security/policy` | Security policy page |
+| `/server/security/thanks` | Acknowledgment after submitting a security report |
 | `/api/v1/server/healthz` | Versioned health API |
 | `/api/healthz` and `/api/healthz.txt` | Unversioned health aliases |
 
 The root `/healthz` endpoint is optional and disabled by default. Enable it with `server.healthz.root.enabled`. The security contact defaults to `security@apimgr.us` and can be configured under `web_security.admin`.
+
+The contact form is enabled by default and uses the built-in `simple` challenge. Configure `server.contact.general.email` (or the fallback admin recipient) and SMTP settings before expecting messages to be delivered. Captcha challenges are single-use, expire after ten minutes, and are rate limited. If SMTP is unavailable, the form returns an error and does not claim delivery.
 
 ## Operational protections
 

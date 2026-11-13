@@ -21,7 +21,7 @@ The browser UI exposes `/manifest.json` and `/sw.js` and embeds its CSS, JavaScr
 
 ## Localization
 
-The server embeds English, Arabic, German, Spanish, French, Japanese, and Chinese locale files and serves the raw locale catalogs at `/locales/{lang}.json`. Unsupported locale values fall back to English. See the [translation guide](translating.md).
+The server embeds English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese locale files and serves the raw locale catalogs at `/locales/{lang}.json`. Unsupported locale values fall back to English. See the [translation guide](translating.md).
 
 ## Security and crawler metadata
 

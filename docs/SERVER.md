@@ -18,11 +18,12 @@ See [Configuration](configuration.md) for supported paths, settings, and precede
 | `/server/about` | Product and build information |
 | `/server/help` | Browser, CLI, and API usage help |
 | `/server/privacy` | Privacy and data handling information |
-| `/server/contact` | Project issue, source, and security-report links; static page, no message form |
+| `/server/contact` | Public message form with self-hosted challenge; requires configured SMTP for delivery |
 | `/server/terms` | Terms of use |
 | `/server/healthz` | Content-negotiated server health |
 | `/server/security` | Security overview and reporting information |
 | `/server/security/policy` | Security policy page |
+| `/server/security/thanks` | Security report acknowledgment page |
 | `/server/docs/swagger` | Interactive OpenAPI UI |
 | `/server/docs/graphql` | GraphiQL playground |
 

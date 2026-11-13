@@ -24,7 +24,7 @@ client_binary: gitignore-cli
 - Template composition: merge multiple templates into one output
 - List all available template names
 - Full web frontend (browser, search, composer) using server-side Go templates, dark/light/auto theme, PWA, mobile-first
-- Server pages: `/server/about`, `/server/help`, `/server/healthz`, `/server/privacy`, `/server/terms`
+- Server pages: `/server/about`, `/server/help`, `/server/healthz`, `/server/privacy`, `/server/terms`, `/server/contact`, `/server/security`, `/server/security/policy`, and `/server/security/thanks`
 - CLI client (`gitignore-cli`) for shell-pipeline use: `gitignore-cli Go Node > .gitignore`
 - OpenAPI/Swagger docs at `/api/{api_version}/server/swagger`
 - GraphQL at `/graphql`
@@ -38,12 +38,12 @@ client_binary: gitignore-cli
 
 ### Roles & permissions
 
-There are no user roles. All endpoints are public and require no authentication.
+There are no user accounts or user roles. Public template, browsing, and documentation endpoints require no authentication. Any baseline operator or owner endpoints use the authentication rules defined in AI.md.
 
 | Actor | Access |
 |-------|--------|
-| **Anonymous visitor (browser)** | Full read access to all web pages and API endpoints |
-| **Anonymous API client (curl/CLI)** | Full read access to all API endpoints |
+| **Anonymous visitor (browser)** | Public pages and catalog access; may submit a contact message or security report |
+| **Anonymous API client (curl/CLI)** | Full read access to public catalog API endpoints |
 | **Server operator** | Configures server via `server.yml` only; no web management interface |
 
 ### Data model & sensitivity
@@ -57,16 +57,20 @@ There are no user roles. All endpoints are public and require no authentication.
 | `content` | string — raw `.gitignore` template text | Public |
 | `tags` | string[] — category tags (language, editor, os, framework) | Public |
 
-No PII stored or served.
+Catalog records contain no PII.
+
+The contact form collects a sender name, reply email address, subject, and message. AI.md's security-report flow may also persist vulnerability report details and researcher contact information under its specified protection and retention rules. These records are not user accounts or public catalog data; delivery and access follow AI.md's security requirements.
 
 ### Trust boundaries & external services
 
 | Boundary | Trust level | Notes |
 |----------|-------------|-------|
 | Template dataset (embedded at build) | Fully trusted | Static, compiled into binary |
-| Incoming HTTP requests | **Untrusted** | Template names validated against known list only |
+| Incoming HTTP requests | **Untrusted** | Template names validated against known list only; baseline security and operator endpoints follow AI.md authentication and validation rules |
+| GeoIP dataset source | External; used by the required security baseline | Downloaded and updated as defined in AI.md PART 19; lookup failures fail open and never replace other security checks |
+| Configured SMTP/CAPTCHA providers | External; optional configuration | SMTP is used only when configured; third-party CAPTCHA is used only when selected, while the built-in challenge remains self-hosted |
 
-No external services called at runtime.
+Template retrieval and composition use the embedded catalog and do not call external services. Required baseline services and operator-configured integrations are described above.
 
 ### Threat model & abuse cases
 
@@ -75,15 +79,19 @@ No external services called at runtime.
 **Attacker/abuser goals:**
 - DoS via high-rate requests
 - Path traversal via template name parameter (e.g., `../etc/passwd`) — mitigated by lookup against known name list only, no filesystem access
+- Spam the public contact form or submit oversized/malformed messages to consume operator attention or abuse SMTP delivery.
+- Submit forged security reports or exploit report contents to expose sensitive data or disrupt processing.
 
 **Defenses:**
 - Rate limiting on all endpoints
 - Template name lookup is against an in-memory map — no filesystem path construction from user input
 - No user accounts eliminates credential stuffing and privilege escalation entirely
+- Contact submissions require a single-use challenge, enforce request and field size limits, validate the reply address, and are sent only to a configured recipient.
+- Security reports and researcher data follow the encrypted storage, access, retention, and audit rules in AI.md.
 
 ### Security decisions & exceptions
 
-- **No authentication on any endpoint**: intentional. Public read-only reference API.
+- **No authentication on public catalog endpoints**: intentional. The read-only template API is public; baseline operator and owner endpoints follow AI.md's token and permission rules.
 - **All responses include `Access-Control-Allow-Origin: *`**: intentional. Public data API designed for cross-origin browser use.
 - **External route compatibility (gitignore.io)**: intentional. This app is a full replacement for gitignore.io — existing scripts, editor plugins, and shell functions written against gitignore.io's API must work unmodified against this server. See "External API Compatibility" below.
 

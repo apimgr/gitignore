@@ -9,6 +9,7 @@ project_org: apimgr
 internal_name: gitignore
 internal_org: apimgr
 owner_token: gitignore_owner_token_5qvQQyc5
+resource_label_plural: templates
 app_name: GitIgnore API
 repo: https://github.com/apimgr/gitignore
 license: MIT

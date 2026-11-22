@@ -28,6 +28,6 @@ GitIgnore serves an embedded catalog of `.gitignore` templates through a public 
 | GET | `/api/v1/server/swagger` | OpenAPI JSON |
 | GET | `/server/healthz` | Browser health page and negotiated health API |
 | GET | `/server/preferences` | Public browser-preferences hub |
-| GET | `/server/preferences/tokens` | Owner-token management page |
+| GET | `/server/preferences/sync` | Cookie-only preference export and import workflow |
 
 See the [documentation home](index.md) and [API reference](api.md) for the full route list and aliases.

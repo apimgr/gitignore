@@ -39,6 +39,8 @@ gitignore --maintenance security update sec_0123456789abcdef --status triaged --
 
 The security command never prints report bodies. `update` accepts `--status`, `--comment`, `--disclosure-date YYYY-MM-DD`, and `--severity`; statuses may only move forward or to `wont_fix`. `--shell completions [SHELL]` and `--shell init [SHELL]` print shell integration text. Supported shells include Bash, Zsh, Fish, POSIX shells, and PowerShell.
 
+Backups include `server.yml`, `secrets.yml` when present, the SQLite database, and existing `yaml.d/`, `assets/`, `template/`, `theme/`, and `security/` files. Restore verifies the archive manifest and checksums before installing files. Backup encryption follows `server.backup.encryption.enabled`.
+
 ## Client (`gitignore-cli`)
 
 With no arguments, the client selects its interactive interface based on the terminal. Bare template names compose templates directly:

@@ -67,7 +67,7 @@ All server settings are nested under `server` unless noted.
 | Contact recipients | `contact.general.email`, `contact.security.email`, `contact.abuse.email` |
 | Contact page | `pages.contact.enabled`, `pages.contact.captcha`, `pages.contact.captcha_site_key`, `pages.contact.captcha_secret_key`, `pages.contact.success_message` |
 | Help pages | `pages.help.content`, `pages.help.mcp` |
-| Security reports | `security.reports.retention_days` and `web.security` disclosure settings; encryption credentials belong in `secrets.yml` |
+| Security reports | `server.security.reports.retention_days` and `web.security` disclosure settings; encryption credentials belong in `secrets.yml` |
 | Updates | `update.branch`, `update.auto_install`, `update.defer_days` |
 | Browser behavior | `web.ui.theme`, `web.cors`, `web_robots.allow`, `web_robots.deny`, `web_security.admin`, `web_security.cors` |
 

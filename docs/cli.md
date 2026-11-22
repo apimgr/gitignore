@@ -29,7 +29,15 @@ gitignore [flags]
 | `--color auto\|yes\|no` | Select colored output |
 | `--force`, `-y` | Skip confirmation prompts where supported |
 
-Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. `--shell completions [SHELL]` and `--shell init [SHELL]` print shell integration text. Supported shells include Bash, Zsh, Fish, POSIX shells, and PowerShell.
+Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. Security report metadata can be managed by an elevated operator:
+
+```sh
+gitignore --maintenance security list [--status received]
+gitignore --maintenance security show sec_0123456789abcdef
+gitignore --maintenance security update sec_0123456789abcdef --status triaged --comment "Reproduced and under review"
+```
+
+The security command never prints report bodies. `update` accepts `--status`, `--comment`, `--disclosure-date YYYY-MM-DD`, and `--severity`; statuses may only move forward or to `wont_fix`. `--shell completions [SHELL]` and `--shell init [SHELL]` print shell integration text. Supported shells include Bash, Zsh, Fish, POSIX shells, and PowerShell.
 
 ## Client (`gitignore-cli`)
 

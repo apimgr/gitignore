@@ -8,6 +8,7 @@ project_name: gitignore
 project_org: apimgr
 internal_name: gitignore
 internal_org: apimgr
+owner_token: gitignore_owner_token_5qvQQyc5
 app_name: GitIgnore API
 repo: https://github.com/apimgr/gitignore
 license: MIT
@@ -29,7 +30,7 @@ client_binary: gitignore-cli
 - CLI client (`gitignore-cli`) for shell-pipeline use: `gitignore-cli Go Node > .gitignore`
 - OpenAPI/Swagger docs at `/api/{api_version}/server/swagger`
 - GraphQL at `/api/{api_version}/server/graphql` with `/api/graphql` as the current-version alias
-- MCP Streamable HTTP at `/api/{api_version}/server/mcp` with `/api/mcp` and `/mcp` aliases; exposes the public catalog API as read-only tools
+- MCP Streamable HTTP at `/api/{api_version}/server/mcp` with `/api/mcp` and `/mcp` aliases; exposes the public catalog API as read-only tools and requires a valid owner or operator bearer token
 - gitignore.io route/API compatibility layer (see "External API Compatibility" below) — this project is a full drop-in replacement for gitignore.io/toptal's gitignore API
 
 **Non-goals:**
@@ -140,7 +141,7 @@ All project-defined API routes are public and read-only. Template routes use the
 | GET | `/api/{api_version}/templates.tar.gz` | None | Download the complete catalog as a gzip tar archive. |
 | POST | `/api/{api_version}/server/graphql` | None | Submit a read-only GraphQL query as JSON; returns query data. |
 | POST | `/api/graphql` | None | Current-version alias of the GraphQL query endpoint. |
-| POST | `/api/{api_version}/server/mcp` | None | Stateless MCP endpoint exposing public read-only API operations as tools. |
+| POST | `/api/{api_version}/server/mcp` | Bearer token | Stateless MCP endpoint exposing public read-only API operations as tools. |
 | GET | `/api/list` | None | gitignore.io-compatible list; `format=json` returns its compatible JSON catalog. |
 | GET | `/api/{name1,name2,...}` | None | gitignore.io-compatible composition; returns wrapped template text and compatibility errors for unknown names. |
 

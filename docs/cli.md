@@ -29,7 +29,7 @@ gitignore [flags]
 | `--color auto\|yes\|no` | Select colored output |
 | `--force`, `-y` | Skip confirmation prompts where supported |
 
-Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. Security report metadata requires root privileges or an interactive `server.token` prompt:
+Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. `--i2p` enables the I2P eepsite; `--i2p=false` disables it for that run. Security report metadata requires root privileges or an interactive `server.token` prompt:
 
 ```sh
 gitignore --maintenance security list [--status received]

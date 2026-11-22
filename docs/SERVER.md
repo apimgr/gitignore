@@ -23,7 +23,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 | `/server/privacy` | Privacy and data-handling information |
 | `/server/contact` | Public contact form for abuse, DMCA, privacy, and security reports |
 | `/server/terms` | Terms of service |
-| `/server/healthz` | Content-negotiated health page and endpoint |
+| `/server/healthz` | Content-negotiated health page and endpoint, including Tor/I2P status when active |
 | `/server/security` | Security contact methods and reporting instructions |
 | `/server/security/policy` | Coordinated-disclosure policy |
 | `/server/security/thanks` | Public researcher acknowledgments |

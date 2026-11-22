@@ -63,7 +63,7 @@ All server settings are nested under `server` unless noted.
 | Metrics and trusted proxies | `metrics`, `trusted_proxies.additional` |
 | Backup and notifications | `backup`, `notifications.webui`, `notifications.email` |
 | Localization | `i18n.enabled`, `i18n.default_language`, `i18n.fallback_language`, `i18n.available_languages`, `i18n.cookie_name`, `i18n.cookie_max_age` |
-| Network services | `tor`, `geoip` |
+| Network services | `tor`, `i2p`, `geoip` |
 | Contact recipients | `contact.general.email`, `contact.security.email`, `contact.abuse.email` |
 | Contact page | `pages.contact.enabled`, `pages.contact.captcha`, `pages.contact.captcha_site_key`, `pages.contact.captcha_secret_key`, `pages.contact.success_message` |
 | Help pages | `pages.help.content`, `pages.help.mcp` |

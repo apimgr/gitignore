@@ -29,7 +29,7 @@ gitignore [flags]
 | `--color auto\|yes\|no` | Select colored output |
 | `--force`, `-y` | Skip confirmation prompts where supported |
 
-Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. Security report metadata can be managed by an elevated operator:
+Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. Security report metadata requires root privileges or an interactive `server.token` prompt:
 
 ```sh
 gitignore --maintenance security list [--status received]

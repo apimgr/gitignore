@@ -28,12 +28,13 @@ curl http://172.17.0.1:64180/api/v1/templates/go.txt
 - Visit the public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages. General reports use the contact form; coordinated-disclosure reports use the rotating security link published by the instance.
 - Use eight bundled locales: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
-The template catalog is read-only and public. The application has no user registration, admin web panel, or user-submitted templates. Anonymous owner identities use Bearer tokens for protected operations and MCP; catalog REST reads remain public. The contact form accepts abuse, DMCA, privacy, and security reports. Delivery requires configured SMTP, and security-report storage requires the configured encryption key or project PGP key.
+The template catalog is read-only and public. The application has no user registration, admin web panel, or user-submitted templates. Anonymous owner identities use Bearer tokens for protected operations and MCP; catalog REST reads remain public. The contact form accepts abuse, DMCA, privacy, and security reports. Delivery requires configured SMTP. The server generates an at-rest encryption key in `secrets.yml`; an optional project PGP key encrypts stored security-report bodies when available.
 
 ## Documentation
 
 - [Installation](installation.md)
 - [Configuration](configuration.md)
+- [Server operations and pages](SERVER.md)
 - [API reference](api.md)
 - [CLI reference](cli.md)
 - [Security](security.md)

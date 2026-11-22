@@ -1,6 +1,6 @@
 # Configuration
 
-On first startup, the server creates `{config_dir}/server.yml` and, as needed, the area files under `{config_dir}/yaml.d/` plus `{config_dir}/secrets.yml`. Edit the generated files; the repository does not ship runtime configuration. Unknown or invalid values are handled by the validation rules in AI.md PART 12. The generated files contain the complete settings and comments supported by the running build.
+On first startup, the server creates `{config_dir}/server.yml` and, as needed, area files under `{config_dir}/yaml.d/` plus `{config_dir}/secrets.yml`. Edit the generated files; the repository does not ship runtime configuration. Unknown or invalid values are handled by the validation rules in AI.md PART 12. Built-in defaults apply to settings that are not explicitly saved; area files are written only when needed for migration or an operator-driven change.
 
 ```yaml
 # {config_dir}/server.yml — node-specific settings
@@ -90,7 +90,7 @@ All server settings are nested under `server` unless noted.
 | Notifications | `server.notifications.*` |
 | Project settings | Project-specific settings belong in `yaml.d/app.yml` |
 
-The table lists every persisted setting group. Generated settings include their defaults and validation guidance. `server.token` and runtime-derived `notifications.email.enabled` are not persisted settings. `server.database.password`, SMTP credentials, CAPTCHA secrets, metrics token, CVE API key, and encryption key are secrets and belong in the protected `secrets.yml` file.
+The table lists every persisted setting group. Generated settings include their defaults and validation guidance. `server.token` and runtime-derived `notifications.email.enabled` are not persisted settings. Database and cache connection credentials, SMTP credentials, CAPTCHA secrets, metrics service tokens, CVE API key, and encryption key belong in the protected `secrets.yml` file. Metrics tokens use `server.metrics.auth.tokens.prometheus`, `.grafana`, and `.loki`.
 
 The canonical area-file assignments and all accepted settings are specified in AI.md PART 5 and PART 12. The server reads the SMTP environment variables listed there for mail transport. Keep credentials and private key material out of source control and logs.
 
@@ -104,7 +104,23 @@ Abuse, DMCA, and privacy reports use the public contact form. Security reports a
 
 ## Environment variables and precedence
 
-`PORT` and `LISTEN` override listener settings; `DOMAIN` and `HOSTNAME` contribute to FQDN discovery. SMTP environment variables override matching SMTP configuration values. Configuration files are merged in this order:
+The server reads the following environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `CONFIG_DIR`, `DATA_DIR`, `CACHE_DIR`, `LOG_DIR`, `BACKUP_DIR` | Runtime directory overrides; matching directory flags take precedence |
+| `DATABASE_DIR` | Runtime override for the SQLite database directory |
+| `NO_COLOR`, `TERM` | Control terminal color and terminal mode |
+| `DOMAIN`, `HOSTNAME` | Set or contribute to FQDN resolution; `DOMAIN` has highest priority |
+| `MODE`, `DEBUG` | Select application mode and debug behavior; command-line flags take precedence |
+| `PORT`, `LISTEN` | First-run listener defaults; `--port` and `--address` take precedence |
+| `APPLICATION_NAME`, `APPLICATION_TAGLINE` | First-run application title and description |
+| `DATABASE_DRIVER`, `DATABASE_URL` | First-run database connection; the URL scheme selects the driver unless SQLite needs `DATABASE_DRIVER` |
+| `CACHE_URL` | First-run cache connection string |
+| `I2P_ENABLED` | I2P override; explicit `--i2p` takes precedence |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL`, `SMTP_TLS` | Configure SMTP transport and sender defaults |
+
+`PORT` and `LISTEN` override listener settings. `DOMAIN` and `HOSTNAME` contribute to FQDN discovery. SMTP environment variables override matching SMTP configuration values. Configuration files are merged in this order:
 
 1. Embedded defaults
 2. `server.yml`
@@ -113,7 +129,7 @@ Abuse, DMCA, and privacy reports use the public contact form. Security reports a
 
 Supported startup overrides are then applied for the individual settings documented above. For listener settings, the command-line flag wins over its environment variable, which wins over the merged configuration.
 
-Directory variables are initialization inputs and must be set before startup.
+Directory variables are read at every startup. `PORT`, `LISTEN`, `APPLICATION_NAME`, `APPLICATION_TAGLINE`, `DATABASE_DRIVER`, `DATABASE_URL`, and `CACHE_URL` seed configuration only on first run; after the connection values are saved, later environment changes do not replace them. See AI.md PART 5 for exact precedence and URL credential handling.
 
 ### I2P eepsite
 
@@ -144,6 +160,6 @@ When enabled, the app prefers a managed dedicated `i2pd` process and falls back 
 
 `server.update.branch` accepts `stable`, `beta`, or `devel`; `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `auto_install` controls whether scheduled update checks install a found version, while `defer_days` controls release age for scheduled checks.
 
-`/server/healthz` is always available. The root `/healthz` alias is disabled unless `server.healthz.root.enabled` is true. Prometheus metrics use `/metrics` by default and can be moved with `server.metrics.endpoint`; restrict the endpoint to trusted monitoring systems and configure `server.metrics.token` when needed. Language detection follows the request's supported locale and the `lang` preference; the explicit language control is on `/server/preferences`.
+`/server/healthz` is always available. The root `/healthz` alias is disabled unless `server.healthz.root.enabled` is true. Metrics use `/server/metrics` and its service-specific Prometheus, Grafana, and Loki routes. Root `/metrics` aliases are controlled by `server.metrics.root.enabled`; each service has a separate bearer token in `server.metrics.auth.tokens.*`. Restrict these internal endpoints to trusted monitoring systems. Language detection follows the request's supported locale and the `lang` preference; the explicit language control is on `/server/preferences`.
 
 Health responses use cached component and dataset checks. Core probes and loaded datasets refresh on a schedule, and relevant data reloads refresh the cache immediately. NVD/CVE health is included as `checks.data_cve_nvd`; `checks.data_trivy_db` appears only when Trivy database support is enabled. Individual dataset states are `ok`, `degraded`, or `error`; the public response contains no paths or error details.

@@ -7,6 +7,7 @@
 - Never interpolate untrusted input into SQL, filesystem paths, shell commands, or executable content.
 - Never expose credentials, sensitive paths, or private data in logs or public responses.
 - Never let Tor/I2P setup escape the application-managed configuration and data paths.
+- Never route an inbound visitor-supplied destination through the application's outbound Tor client.
 
 ## CRITICAL - ALWAYS DO
 
@@ -14,11 +15,14 @@
 - Use idempotent database schema creation/updates and prepared statements.
 - Apply security headers, configurable abuse protection, structured audit/security logs, and safe log rotation.
 - Treat internet-facing endpoints as hostile-input boundaries; minimize public health/diagnostic data and return generic public errors.
-- Keep security reports encrypted and access-controlled, and enable Tor/I2P only through explicit opt-in configuration.
+- Keep security reports encrypted and access-controlled; Tor hidden service starts when the Tor binary is found, while I2P is off on bare metal/VM and defaults on in containers.
+- Keep database migrations idempotent and compatible with existing records; use the configured local or remote database backend and never store operator configuration in the database.
+- Keep logs in the required plain-text formats, mask secrets, and do not emit terminal colors or decorative characters into logs.
 
 ## KEY RULES
 
 - Validate external input and fail safely without exposing private operational detail.
 - Protect persistent data, secrets, logs, and security-report workflows.
+- Keep Tor inbound and outbound paths separate; outbound requests may target only app-determined destinations.
 
 For complete details, see AI.md PART 9, 10, 11, 31.

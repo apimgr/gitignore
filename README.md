@@ -64,7 +64,7 @@ The client also supports `list`, `search`, `categories`, `category`, `get`, `com
 
 ## Configuration
 
-On first startup, the server creates its configuration and required runtime directories. Edit `{config_dir}/server.yml` and supported area drop-ins under `{config_dir}/yaml.d/`; sensitive settings are stored in `{config_dir}/secrets.yml`. The files contain comments and defaults for the active build.
+On first startup, the server creates its configuration and required runtime directories. Edit `{config_dir}/server.yml` and supported area drop-ins under `{config_dir}/yaml.d/`; sensitive settings are stored in `{config_dir}/secrets.yml`. Area files are created when needed; built-in defaults apply to settings that are not explicitly saved.
 
 Key settings include the API version and URL prefix, trusted proxies, rate limits, GeoIP, blocklists, CVE/Trivy data, contact and CAPTCHA behavior, metrics, and optional Tor/I2P services. See [Configuration](docs/configuration.md) for the setting map, environment variables, and precedence.
 

@@ -7,6 +7,7 @@ GitIgnore runs as a static server binary or as a Docker container. The template 
 The repository's production Compose file uses `ghcr.io/apimgr/gitignore:latest`, publishes the service on host address `172.17.0.1:64180`, and mounts persistent configuration and data directories. Copy `docker/docker-compose.yml` to a deployment directory before starting it; the relative `volumes/` paths then remain outside the source checkout.
 
 ```sh
+cp /path/to/gitignore/docker/docker-compose.yml ./docker-compose.yml
 docker compose -f docker-compose.yml up -d
 ```
 

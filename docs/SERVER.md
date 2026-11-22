@@ -12,7 +12,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 
 | Page | Purpose |
 |---|---|
-| `/server` | Server information and public links |
+| `/server` | Permanent redirect to `/server/about` |
 | `/server/about` | Product description, version, features, and attribution |
 | `/server/help` | Browser, API, CLI, and troubleshooting help |
 | `/server/help/mcp` | MCP endpoint setup, tools, and project-specific guidance |
@@ -38,7 +38,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 
 The root `/healthz` alias is disabled by default and can be enabled with `server.healthz.root.enabled`. API health aliases `/api/healthz` and `/api/healthz.txt` are available independently. `GET /api/autodiscover` reports the configured versioned API base and discovery endpoints.
 
-Other public resources include `/security.txt`, `/.well-known/security.txt`, `/robots.txt`, `/manifest.json`, `/sw.js`, and `/locales/{lang}.json`. Prometheus metrics use `/metrics` by default and should be restricted to trusted monitoring systems.
+Other public resources include `/security.txt`, `/.well-known/security.txt`, `/.well-known/pgp-key.asc` when available, `/robots.txt`, `/manifest.json`, `/sw.js`, and `/locales/{lang}.json`. Internal metrics are available under `/server/metrics`; root `/metrics` aliases are enabled by default. Restrict metrics endpoints to trusted monitoring systems and use their per-service bearer tokens.
 
 ## Security
 

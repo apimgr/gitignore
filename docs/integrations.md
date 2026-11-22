@@ -29,7 +29,7 @@ The server embeds English, Arabic, German, Spanish, French, Italian, Japanese, a
 
 ## Security and crawler metadata
 
-`/security.txt` and `/.well-known/security.txt` serve the security contact document. `/robots.txt` is generated from the configured allow and deny paths. Health aliases and optional metrics are documented in [Security](security.md) and [Configuration](configuration.md).
+`/security.txt` and `/.well-known/security.txt` serve the security contact document. `/.well-known/pgp-key.asc` publishes the project public key when available. `/robots.txt` is generated from the configured allow and deny paths. Health aliases and internal metrics endpoints are documented in [Security](security.md) and [Configuration](configuration.md).
 
 ## Platform integrations
 

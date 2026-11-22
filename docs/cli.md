@@ -39,6 +39,8 @@ gitignore --maintenance security update sec_0123456789abcdef --status triaged --
 
 The security command never prints report bodies. `update` accepts `--status`, `--comment`, `--disclosure-date YYYY-MM-DD`, and `--severity`; statuses may only move forward or to `wont_fix`. `--shell completions [SHELL]` and `--shell init [SHELL]` print shell integration text. Supported shells include Bash, Zsh, Fish, POSIX shells, and PowerShell.
 
+Server environment variables include `PORT`, `LISTEN`, `MODE`, `DOMAIN`, the `SMTP_*` settings, and the initialization-only directory variables `CONFIG_DIR`, `DATA_DIR`, `DATABASE_DIR`, `CACHE_DIR`, `LOG_DIR`, and `BACKUP_DIR`. `DEBUG` enables debug output and debug routes; `NO_COLOR` disables colored output. I2P also accepts `I2P_ENABLED`. See [Configuration](configuration.md) for precedence and details.
+
 Manage the project OpenPGP keypair with the operator token or as root. Private-key import, export, rotation, and deletion require the confirmation prompts described by the command:
 
 ```sh
@@ -75,4 +77,4 @@ Commands include:
 | `combine NAME...` | Combine templates |
 | `stats` | Show catalog statistics |
 
-The client supports `--server URL`, `--config NAME`, `--output text\|json\|table`, `--debug`, `--color auto\|yes\|no`, `--lang CODE`, `--version`, and shell integration flags. The default server URL and profile settings come from the client configuration file. See [configuration](configuration.md).
+The client supports `--server URL`, `--config NAME`, `--output text\|json\|table`, `--debug`, `--color auto\|yes\|no`, `--lang CODE`, `--version`, and shell integration flags. `GITIGNORE_SERVER_PRIMARY` sets the default server URL, and `NO_COLOR` disables colored output. The default server URL and profile settings come from the client configuration file. See [configuration](configuration.md).

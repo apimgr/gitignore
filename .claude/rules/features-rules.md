@@ -4,7 +4,7 @@
 
 ## CRITICAL - NEVER DO
 
-- Never use an external scheduler or enable optional network integrations without their documented opt-in.
+- Never use an external scheduler or route an inbound caller-controlled destination through Tor.
 - Never expose internal metrics publicly or store unbounded usage data.
 - Never overwrite data during backup, restore, or update operations without the specified safety checks.
 
@@ -17,6 +17,8 @@
 ## KEY RULES
 
 - Required operational features must be bounded, secure, and fully integrated with configuration and documentation.
-- Network overlays are opt-in; backups and updates must verify integrity before changing data.
+- Tor hidden service starts when a Tor binary is found; I2P is opt-in on bare metal/VM and defaults on inside a container. Both use isolated app-managed paths.
+- Backups must verify integrity and apply specified encryption/retention rules; updates verify checksums/signatures before atomic replacement.
+- GeoIP and blocklists fail safely, respect allowlists and configured reload behavior, and never replace other security controls.
 
 For complete details, see AI.md PART 17, 18, 19, 20, 21, 22.

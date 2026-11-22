@@ -17,8 +17,11 @@ The catalog is public and read-only. Canonical API routes use `/api/{api_version
 | `/api/{api_version}/combine?templates={names}` | GET | Combine comma-separated template names |
 | `/api/{api_version}/combine.txt?templates={names}` | GET | Combined template text |
 | `/api/{api_version}/categories` | GET | List catalog categories |
+| `/api/{api_version}/categories.txt` | GET | List categories as text |
 | `/api/{api_version}/categories/{name}` | GET | List templates in a category |
+| `/api/{api_version}/categories/{name}.txt` | GET | List templates in a category as text |
 | `/api/{api_version}/stats` | GET | Catalog and server statistics |
+| `/api/{api_version}/stats.txt` | GET | Catalog and server statistics as text |
 | `/api/{api_version}/templates.json` | GET | Export the catalog as JSON |
 | `/api/{api_version}/templates.tar.gz` | GET | Download the catalog as a gzip tar archive |
 
@@ -40,6 +43,8 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/preferences/tokens/primary` | POST | Issue a primary owner token on request; does not create a resource |
 | `/api/{api_version}/server/preferences/tokens/primary/reveal` | POST | Reveal the primary token; requires the primary Bearer token |
 | `/api/{api_version}/server/preferences/tokens/primary/rotate` | POST | Rotate the primary token |
+| `/api/{api_version}/server/preferences/tokens/{id}/reveal` | POST | Reveal a linked token; requires the owner's Bearer token |
+| `/api/{api_version}/server/preferences/tokens/{id}/rotate` | POST | Rotate a linked token; requires the owner's Bearer token |
 | `/api/{api_version}/server/preferences/tokens/{id}` | PATCH / DELETE | Update or revoke one linked token |
 | `/api/{api_version}/server/preferences/sync` | GET | Export preferences for cross-device sync |
 | `/api/{api_version}/server/preferences/sync/import` | GET | Import synchronized preferences |
@@ -48,7 +53,12 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/security/policy` | GET | Disclosure policy |
 | `/api/{api_version}/server/security/thanks` | GET | Public researcher acknowledgments |
 | `/api/{api_version}/server/healthz` | GET | Health status; JSON by default, with supported text negotiation |
+| `/api/{api_version}/server/healthz.txt` | GET | Health status as text |
 | `/api/{api_version}/server/scheduler` | GET | Read-only scheduler status |
+| `/api/{api_version}/server/metrics` | GET | Prometheus exposition; requires the Prometheus metrics bearer token |
+| `/api/{api_version}/server/metrics/prometheus` | GET | Prometheus exposition; requires the Prometheus metrics bearer token |
+| `/api/{api_version}/server/metrics/grafana` | GET | Grafana dashboard JSON; requires the Grafana metrics bearer token |
+| `/api/{api_version}/server/metrics/loki` | GET | Loki-compatible log stream; requires the Loki metrics bearer token |
 | `/api/{api_version}/server/swagger` | GET | OpenAPI document |
 | `/api/{api_version}/server/graphql` | POST | GraphQL query endpoint |
 | `/api/{api_version}/server/mcp` | POST | Stateless MCP JSON-RPC endpoint; requires the same Bearer token as the REST API and exposes only operations authorized for that token |
@@ -66,7 +76,7 @@ Security reporting for a deployed instance starts from `/.well-known/security.tx
 
 ## Health and discovery aliases
 
-`/server/healthz` is the canonical browser health page. `/healthz` is an optional direct alias controlled by `server.healthz.root.enabled`. The unversioned `/api/healthz` and `/api/healthz.txt` aliases expose API health. `GET /api/autodiscover` is intentionally unversioned so clients can discover the configured API version and base path before making versioned requests.
+`/server/healthz` is the canonical browser health page. `/healthz` is an optional direct alias controlled by `server.healthz.root.enabled`. The unversioned `/api/healthz` and `/api/healthz.txt` aliases expose API health. Metrics aliases include `/api/metrics`, `/api/metrics/{prometheus,grafana,loki}`, and the optional root `/metrics` aliases. `GET /api/autodiscover` is intentionally unversioned so clients can discover the configured API version and base path before making versioned requests.
 
 ## Gitignore.io compatibility
 

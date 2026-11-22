@@ -1,6 +1,6 @@
 # GitIgnore Documentation
 
-GitIgnore serves an embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, server-rendered browser interface, and companion CLI. It has no user accounts or admin web panel.
+GitIgnore serves an embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, server-rendered browser interface, and companion CLI. It has no user registration or admin web panel. Anonymous owner identities use Bearer tokens for protected operations and MCP; the catalog REST API remains public.
 
 ## Guides
 

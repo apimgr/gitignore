@@ -2,7 +2,7 @@
 
 ## Public service
 
-The catalog and browser pages are public and read-only. The application has no user accounts, registration, login, API keys, or admin web panel. Operators configure the service through `server.yml` and the documented command-line maintenance interface. Template names are resolved from the embedded catalog and are never used to construct filesystem paths.
+The catalog and browser pages are public and read-only. The application has no user registration, profile login, or admin web panel. Anonymous owner identities use Bearer tokens; the REST catalog remains public, while MCP and protected owner or operator operations require the corresponding token. Operators configure the service through `server.yml` and the documented command-line maintenance interface. Template names are resolved from the embedded catalog and are never used to construct filesystem paths.
 
 The contact page accepts reports from visitors. It validates field sizes and addresses, requires a single-use challenge, and sends messages only to configured recipients when SMTP is available. Security reports use a separate encrypted-storage and disclosure flow. These submissions are not public catalog data.
 

@@ -1,6 +1,6 @@
 # Server Operations
 
-GitIgnore serves the public template catalog through a static server binary or Docker container. There are no user accounts or admin web panel. Operators configure the service through the generated `server.yml`, supported startup environment variables, command-line flags, and the documented maintenance commands.
+GitIgnore serves the public template catalog through a static server binary or Docker container. There is no user registration or admin web panel. Anonymous owner identities use Bearer tokens for protected operations and MCP; catalog reads remain public. Operators configure the service through the generated `server.yml`, supported startup environment variables, command-line flags, and the documented maintenance commands.
 
 ## Install and configure
 
@@ -17,6 +17,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 | `/server/help` | Browser, API, CLI, and troubleshooting help |
 | `/server/help/mcp` | MCP endpoint setup, tools, and project-specific guidance |
 | `/server/preferences` | Public theme, language, and privacy preference controls |
+| `/server/preferences/tokens` | Anonymous owner-token management; create one linked token per MCP client |
 | `/server/preferences/sync` | Cross-device browser-preference export and import |
 | `/server/preferences/sync/import` | Shared preference link that applies cookie values and redirects safely |
 | `/server/privacy` | Privacy and data-handling information |

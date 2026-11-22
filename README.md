@@ -13,7 +13,7 @@ GitIgnore serves an embedded catalog of `.gitignore` templates through a public 
 - Carry theme and language preferences between devices with the cookie-only sync page; consent and credentials are excluded.
 - Choose from eight bundled interface languages: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
-The template catalog API is public and read-only. The project has no user accounts, admin web panel, or user-submitted templates. See [IDEA.md](IDEA.md) for product scope.
+The template catalog REST API is public and read-only. The project has no user registration, admin web panel, or user-submitted templates. MCP and protected owner operations use anonymous owner Bearer tokens; each MCP client should use its own linked token. See [IDEA.md](IDEA.md) for product scope.
 
 ## Run with Docker
 

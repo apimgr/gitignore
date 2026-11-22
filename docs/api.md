@@ -37,6 +37,9 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/dpo` | GET | Data protection officer contact |
 | `/api/{api_version}/server/auth/check` | GET | Machine-only bearer-token check; never returns the token |
 | `/api/{api_version}/server/preferences` | GET / POST | Read and update public browser preferences |
+| `/api/{api_version}/server/preferences/tokens` | GET / POST | List and create linked owner tokens; requires the owner's Bearer token |
+| `/api/{api_version}/server/preferences/tokens/primary` | POST | Issue a primary owner token on request; does not create a resource |
+| `/api/{api_version}/server/preferences/tokens/{id}` | PATCH / DELETE | Update or revoke one linked token |
 | `/api/{api_version}/server/preferences/sync` | GET | Export preferences for cross-device sync |
 | `/api/{api_version}/server/preferences/sync/import` | GET | Import synchronized preferences |
 | `/api/{api_version}/server/terms` | GET | Terms content and format |
@@ -47,7 +50,7 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/scheduler` | GET | Read-only scheduler status |
 | `/api/{api_version}/server/swagger` | GET | OpenAPI document |
 | `/api/{api_version}/server/graphql` | POST | GraphQL query endpoint |
-| `/api/{api_version}/server/mcp` | POST | Stateless MCP JSON-RPC endpoint exposing public read-only API tools |
+| `/api/{api_version}/server/mcp` | POST | Stateless MCP JSON-RPC endpoint; requires the same Bearer token as the REST API and exposes only operations authorized for that token |
 | `/api/{api_version}/cli/sh` | GET | Generated POSIX shell helper |
 | `/api/{api_version}/cli/ps` | GET | Generated PowerShell helper |
 | `/api/{api_version}/cli/completion/{bash,zsh,fish}` | GET | Shell completions |
@@ -80,7 +83,7 @@ Template names are matched case-insensitively. Unknown names produce the compati
 
 The read-only GraphQL endpoint accepts JSON POST requests at `/api/graphql` and `/api/{api_version}/server/graphql`. The browser playground is `/server/docs/graphql`. Common query fields include `template(name)`, `list`, `search(q)`, `categories`, `category(name)`, `combine(templates)`, and `stats`.
 
-MCP uses Streamable HTTP JSON-RPC at `/api/{api_version}/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`. It exposes public GET operations as read-only tools. The endpoint is stateless and accepts POST requests only. See [the MCP help page](/server/help/mcp) for its endpoint, tool names, and connection request.
+MCP uses Streamable HTTP JSON-RPC at `/api/{api_version}/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`. Every request requires `Authorization: Bearer <token>`; missing or invalid credentials receive `401`. It uses the REST API's token validation and per-operation authorization. `tools/list` includes only operations allowed to the caller. Token-management and token-issuance operations are never tools. Use a separate linked token for each MCP client; create and manage linked tokens at `/server/preferences/tokens`. The endpoint is stateless, accepts POST only, and targets protocol revision `2026-07-28`. See [the MCP help page](/server/help/mcp) for connection details.
 
 Guest preferences are cookie-only. `GET /api/{api_version}/server/preferences` reads the current values, `POST` applies a partial update, and the sync endpoints export or import a canonical URL-safe preference set. The web UI is at `/server/preferences` and `/server/preferences/sync`; consent, CCPA, and credentials are never included in sync data.
 

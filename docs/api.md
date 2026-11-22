@@ -1,67 +1,88 @@
 # API Reference
 
-All API routes are public. The canonical REST base is `/api/v1` by default; the configured `server.api_version` value controls that segment. Template content is embedded in the server binary.
+The catalog is public and read-only. Canonical API routes use `/api/{api_version}`; the default version is `v1`. The exact configured base path is shown by `/api/autodiscover`. Template files and locale catalogs are embedded in the binaries.
 
-## Template REST API
+## Template API
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/` | GET | API and endpoint information |
-| `/api/v1/templates/{name}` | GET | Retrieve a template using content negotiation |
-| `/api/v1/templates/{name}.txt` | GET | Retrieve raw template text |
-| `/api/v1/templates/{name}.json` | GET | Retrieve a template as JSON |
-| `/api/v1/list` | GET | List template names |
-| `/api/v1/list.txt` | GET | List template names as text |
-| `/api/v1/search?q={query}` | GET | Search template names and content |
-| `/api/v1/search.txt?q={query}` | GET | Search results as text |
-| `/api/v1/combine?templates={names}` | GET | Combine comma-separated templates |
-| `/api/v1/combine.txt?templates={names}` | GET | Combined template text |
-| `/api/v1/categories` | GET | List categories |
-| `/api/v1/categories.txt` | GET | List categories as text |
-| `/api/v1/categories/{name}` | GET | List templates in a category |
-| `/api/v1/categories/{name}.txt` | GET | Category results as text |
-| `/api/v1/stats` | GET | Template and server statistics |
-| `/api/v1/stats.txt` | GET | Statistics as text |
-| `/api/v1/templates.json` | GET | Export the full catalog as JSON |
-| `/api/v1/templates.tar.gz` | GET | Download the full catalog as a gzip tar archive |
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/{api_version}/` | GET | API information and endpoint links |
+| `/api/{api_version}/templates/{name}` | GET | Get a template using content negotiation |
+| `/api/{api_version}/templates/{name}.txt` | GET | Get raw template text |
+| `/api/{api_version}/templates/{name}.json` | GET | Get one template as JSON |
+| `/api/{api_version}/list` | GET | List template names |
+| `/api/{api_version}/list.txt` | GET | List template names as text |
+| `/api/{api_version}/search?q={query}` | GET | Search template names and content |
+| `/api/{api_version}/search.txt?q={query}` | GET | Search results as text |
+| `/api/{api_version}/combine?templates={names}` | GET | Combine comma-separated template names |
+| `/api/{api_version}/combine.txt?templates={names}` | GET | Combined template text |
+| `/api/{api_version}/categories` | GET | List catalog categories |
+| `/api/{api_version}/categories/{name}` | GET | List templates in a category |
+| `/api/{api_version}/stats` | GET | Catalog and server statistics |
+| `/api/{api_version}/templates.json` | GET | Export the catalog as JSON |
+| `/api/{api_version}/templates.tar.gz` | GET | Download the catalog as a gzip tar archive |
 
-Where supported, send `Accept: application/json` for JSON; `.txt` and `.json` suffixes request an explicit representation.
+Text endpoints also have `.txt` representations where listed by the server. Send `Accept: application/json` to request JSON when a route supports negotiation. Template identifiers are case-insensitive and resolved from the embedded catalog; request values are never treated as filesystem paths.
 
-## Server and client endpoints
+## Server endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/server/healthz` | GET | Content-negotiated health information |
-| `/api/v1/server/scheduler` | GET | Read-only scheduler status |
-| `/api/v1/server/swagger` | GET | OpenAPI JSON |
-| `/api/v1/server/graphql` | GET / POST | GraphQL schema / query endpoint |
-| `/api/v1/graphql` | GET / POST | Versioned GraphQL alias |
-| `/api/v1/cli/sh` | GET | Generated POSIX shell helper |
-| `/api/v1/cli/ps` | GET | Generated PowerShell helper |
-| `/api/v1/cli/completion/bash` | GET | Bash completion script |
-| `/api/v1/cli/completion/zsh` | GET | Zsh completion script |
-| `/api/v1/cli/completion/fish` | GET | Fish completion script |
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/{api_version}/server/about` | GET | About-page source and format |
+| `/api/{api_version}/server/privacy` | GET | Privacy policy data |
+| `/api/{api_version}/server/contact` | GET | Public form fields, validation limits, and a fresh challenge; does not reveal recipients |
+| `/api/{api_version}/server/contact` | POST | Submit a contact report through review and confirmation; delivery occurs only after confirmation |
+| `/api/{api_version}/server/help` | GET | Help content and registered help-page links |
+| `/api/{api_version}/server/help/mcp` | GET | MCP help and endpoint metadata |
+| `/api/{api_version}/server/dpo` | GET | Data protection officer contact |
+| `/api/{api_version}/server/auth/check` | GET | Machine-only bearer-token check; never returns the token |
+| `/api/{api_version}/server/preferences` | GET / POST | Read and update public browser preferences |
+| `/api/{api_version}/server/preferences/sync` | GET | Export preferences for cross-device sync |
+| `/api/{api_version}/server/preferences/sync/import` | GET | Import synchronized preferences |
+| `/api/{api_version}/server/terms` | GET | Terms content and format |
+| `/api/{api_version}/server/security` | GET | Security contacts, key availability, expiry, and public policy links |
+| `/api/{api_version}/server/security/policy` | GET | Disclosure policy |
+| `/api/{api_version}/server/security/thanks` | GET | Public researcher acknowledgments |
+| `/api/{api_version}/server/healthz` | GET | Health status; JSON by default, with supported text negotiation |
+| `/api/{api_version}/server/scheduler` | GET | Read-only scheduler status |
+| `/api/{api_version}/server/swagger` | GET | OpenAPI document |
+| `/api/{api_version}/server/graphql` | POST | GraphQL query endpoint |
+| `/api/{api_version}/server/mcp` | POST | Stateless MCP JSON-RPC endpoint exposing public read-only API tools |
+| `/api/{api_version}/cli/sh` | GET | Generated POSIX shell helper |
+| `/api/{api_version}/cli/ps` | GET | Generated PowerShell helper |
+| `/api/{api_version}/cli/completion/{bash,zsh,fish}` | GET | Shell completions |
+
+Native API responses use the documented JSON envelope and errors defined in AI.md PART 14. Health endpoints and external compatibility endpoints follow their specified response formats. The OpenAPI UI is `/server/docs/swagger`; the GraphiQL interface is `/server/docs/graphql`.
+
+## Contact and security reports
+
+The HTML contact form is `/server/contact`. The JSON form description is obtained with `GET /api/{api_version}/server/contact`; the response includes field descriptors and a new captcha challenge, but no recipient address. A submission is reviewed first and delivered only after the confirmation request repeats the fields with its review token. A captcha proof and form token are required. Invalid or expired proofs must be replaced by fetching the form description again.
+
+Security reporting for a deployed instance starts from `/.well-known/security.txt` or `/server/security`. The security form is `/server/contact?security_id={id}` and accepts only a currently valid rotating ID. A successful report receives a tracking ID. Its status link is `/server/security/report/{tracking_id}` and requires the one-shot token sent to the researcher. Repository-source vulnerabilities should use the private reporting instructions in `.github/SECURITY.md`.
 
 ## Health and discovery aliases
 
-`/server/healthz` is the canonical browser-facing health page. The root `/healthz` alias is disabled unless `server.healthz.root.enabled` is true. `/api/healthz` and `/api/healthz.txt` are always available. API health responses support JSON and plain text; browser requests receive HTML.
+`/server/healthz` is the canonical browser health page. `/healthz` is an optional direct alias controlled by `server.healthz.root.enabled`. The unversioned `/api/healthz` and `/api/healthz.txt` aliases expose API health. `GET /api/autodiscover` is intentionally unversioned so clients can discover the configured API version and base path before making versioned requests.
 
-`GET /api/autodiscover` returns server name, version, build, API version/base, and the OpenAPI, GraphQL, and health endpoints.
+## Gitignore.io compatibility
 
-## gitignore.io compatibility
+The unversioned compatibility routes reproduce the gitignore.io API paths alongside the native versioned API:
 
-The unversioned compatibility routes support existing gitignore.io clients:
+| Endpoint | Method | Response |
+|---|---|---|
+| `/api/list` | GET | Alphabetically sorted, comma-separated keys wrapped across lines; `?format=lines` is equivalent |
+| `/api/list?format=json` | GET | Compatible JSON catalog keyed by lowercase template key |
+| `/api/{name1,name2,...}` | GET | Plain-text template blocks in request order |
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/list` | GET | Comma-separated, alphabetized template keys; `?format=json` returns the compatible JSON catalog |
-| `/api/{name1,name2,...}` | GET | Concatenated template text in request order; unknown names produce compatibility error blocks and a 404 if the first name is unknown |
+Template names are matched case-insensitively. Unknown names produce the compatibility error block; the response is `404` when the first name is unknown, while resolved names in the same request still render. See [IDEA.md](../IDEA.md) for the byte-level compatibility contract and the intentionally unsupported gitignore.io web UI and integrations.
 
 ## GraphQL
 
-The read-only GraphQL API accepts JSON POST requests at `/graphql`, `/api/graphql`, `/api/v1/graphql`, and `/api/v1/server/graphql`. GET on these endpoints returns the schema. The GraphiQL page is `/server/docs/graphql`.
+The read-only GraphQL endpoint accepts JSON POST requests at `/api/graphql` and `/api/{api_version}/server/graphql`. The browser playground is `/server/docs/graphql`. Common query fields include `template(name)`, `list`, `search(q)`, `categories`, `category(name)`, `combine(templates)`, and `stats`.
 
-Available query fields include `template(name)`, `list`, `search(q)`, `categories`, `category(name)`, `combine(templates)`, and `stats`.
+MCP uses Streamable HTTP JSON-RPC at `/api/{api_version}/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`. It exposes public GET operations as read-only tools. The endpoint is stateless and accepts POST requests only. See [the MCP help page](/server/help/mcp) for its endpoint, tool names, and connection request.
+
+Guest preferences are cookie-only. `GET /api/{api_version}/server/preferences` reads the current values, `POST` applies a partial update, and the sync endpoints export or import a canonical URL-safe preference set. The web UI is at `/server/preferences` and `/server/preferences/sync`; consent, CCPA, and credentials are never included in sync data.
 
 ```graphql
 {
@@ -75,4 +96,4 @@ Available query fields include `template(name)`, `list`, `search(q)`, `categorie
 
 ## OpenAPI
 
-The Swagger UI is at `/server/docs/swagger`. Raw OpenAPI JSON is served at `/api/swagger` and `/api/v1/server/swagger`.
+The interactive Swagger UI is `/server/docs/swagger`. The raw OpenAPI JSON is served at `/api/swagger` and `/api/{api_version}/server/swagger`.

@@ -12,6 +12,13 @@
 
 - Keep unit, binary integration, content-negotiation, and browser E2E coverage aligned with IDEA.md and AI.md.
 - Use `${TMPDIR:-/tmp}/{project_org}/{internal_name}-XXXXXX` for runtime/test output.
-- Build the ReadTheDocs documentation and keep all six locales, accessibility behavior, and fallback rules synchronized.
+- Keep ReadTheDocs pages current with shipped browser, CLI, API, configuration, and integration behavior; build with MkDocs Material.
+- Support at least the six required locales, with complete key parity for every embedded locale; keep RTL, fallback, and accessibility behavior aligned.
+- Translate every human-readable string and keep locale registries, embedded files, and language lists synchronized.
+
+## KEY RULES
+
+- Tests and docs describe the actual shipped behavior and run in the prescribed isolated environment.
+- Every human-readable string is translated; all supported locales have complete key parity.
 
 For complete details, see AI.md PART 28, 29, 30.

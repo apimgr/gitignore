@@ -11,7 +11,13 @@
 ## CRITICAL - ALWAYS DO
 
 - Keep REST, OpenAPI/Swagger, and GraphQL routes and descriptions synchronized.
+- Use `/api/{api_version}/...` as the canonical API namespace; preserve only explicitly specified unversioned aliases and route them to shared handlers.
 - Implement health and version behavior consistently across HTML, API, and text clients.
 - Use proper status codes, response formats, and pagination/filtering where applicable.
+
+## KEY RULES
+
+- Canonical routes are versioned; aliases exist only where AI.md explicitly specifies them.
+- Keep API contracts and equivalent HTML/text behavior synchronized.
 
 For complete details, see AI.md PART 13, 14, 15.

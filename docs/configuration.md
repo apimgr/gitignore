@@ -1,8 +1,9 @@
 # Configuration
 
-The server creates `{config_dir}/server.yml` on first startup and fills unset values with defaults. The YAML root sections are `server`, `web`, `web_robots`, and `web_security`.
+On first startup, the server creates `{config_dir}/server.yml` and, as needed, the area files under `{config_dir}/yaml.d/` plus `{config_dir}/secrets.yml`. Edit the generated files; the repository does not ship runtime configuration. Unknown or invalid values are handled by the validation rules in AI.md PART 12. The generated files contain the complete settings and comments supported by the running build.
 
 ```yaml
+# {config_dir}/server.yml — node-specific settings
 server:
   address: "[::]"
   port: "64080"
@@ -11,62 +12,92 @@ server:
   mode: production
   database:
     driver: sqlite
-web:
-  ui:
-    theme: dark
-  cors: "*"
-web_robots:
-  allow: ["/", "/api"]
-  deny: ["/debug"]
 ```
 
-Review the generated file before changing values. It contains comments and computed defaults for optional capabilities.
+```yaml
+# {config_dir}/yaml.d/pages.yml — public pages
+server:
+  pages:
+    contact:
+      enabled: true
+      captcha: simple
+    help:
+      content: "Project-specific help content in Markdown."
+      mcp: "Project-specific MCP usage guidance appended to the generated help page."
+```
+
+The merged view starts with built-in defaults, then reads `server.yml`, ordered `yaml.d/*.yml` drop-ins, and finally `secrets.yml`. Command-line flags and environment variables have higher precedence. Maps merge by key; later scalar or list values replace earlier ones. The server watches these files for changes and reloads valid settings.
+
+`server.yml`, `secrets.yml`, and each drop-in file use mode `0600`; the `yaml.d/` directory uses `0700`. The `secrets.yml` file holds credentials such as the operator token, encryption key, SMTP password, and CAPTCHA secret. The server generates required secrets and never returns them in API responses or prints them in full in configuration output.
+
+`server.yml` contains node-specific settings. Area files are grouped under `yaml.d/`: `branding.yml`, `web.yml`, `pages.yml`, `contact.yml`, `privacy.yml`, `security.yml`, `logs.yml`, `metrics.yml`, `notifications.yml`, `tor.yml`, `i2p.yml`, `maintenance.yml`, and `app.yml`. The merge uses the same dotted setting names in any file, but the documented area file is each setting's normal home. If a legacy single-file `server.yml` contains area settings or credentials, startup migrates those values to their designated files.
 
 ## Configuration paths
 
-`--config DIR` and `CONFIG_DIR` select the configuration directory. `--data DIR` and `DATA_DIR` select the data directory. `--cache DIR` / `CACHE_DIR`, `--log DIR` / `LOG_DIR`, and `--backup DIR` / `BACKUP_DIR` select their respective directories. `DATABASE_DIR` selects the database directory. The `--pid FILE` flag selects a PID file; PID files are skipped in containers.
+The server uses OS-appropriate paths unless overridden. Directory flags and environment variables are read at startup:
 
-The server chooses platform-appropriate defaults when paths are not supplied. The binary creates required directories at startup. See [Server Operations](SERVER.md) for runtime and service information.
+| Purpose | Flag | Environment variable |
+|---|---|---|
+| Configuration | `--config DIR` | `CONFIG_DIR` |
+| Data | `--data DIR` | `DATA_DIR` |
+| Cache | `--cache DIR` | `CACHE_DIR` |
+| Logs | `--log DIR` | `LOG_DIR` |
+| Backups | `--backup DIR` | `BACKUP_DIR` |
+| Database | — | `DATABASE_DIR` |
+| PID file | `--pid FILE` | — |
 
-## Server settings
+PID files are skipped in containers. See [Server Operations](SERVER.md) for lifecycle and runtime behavior.
 
-Settings are grouped under `server` in `server.yml`:
+## Settings by area
 
-| Group | Settings |
-|-------|----------|
-| Listener and routing | `port`, `fqdn`, `address`, `baseurl`, `api_version`, `daemonize`, `mode` |
+All server settings are nested under `server` unless noted.
+
+| Area | Representative settings |
+|---|---|
+| Listener and routing | `address`, `port`, `fqdn`, `baseurl`, `api_version`, `mode`, `daemonize` |
 | Runtime identity | `user`, `group`, `pidfile` |
-| Branding and discovery | `branding`, `seo`, `admin` |
-| TLS | `ssl.enabled`, `ssl.letsencrypt` (including challenge and DNS credentials) |
+| Branding and SEO | `branding`, `seo`, `admin` |
+| TLS | `ssl.enabled`, `ssl.letsencrypt` and its challenge/provider settings |
+| Database and logs | `database`, `logging` |
 | Scheduling and protection | `schedule`, `rate_limit`, `maintenance`, `healthz.root.enabled` |
-| Metrics and proxy trust | `metrics`, `trusted_proxies.additional` |
-| Storage and logs | `database`, `logging` |
-| Backups and notifications | `backup.encryption`, `notifications.webui`, `notifications.email` |
-| Language | `i18n.enabled`, `default_language`, `fallback_language`, `available_languages`, `cookie_name`, `cookie_max_age` |
-| Network integrations | `tor`, `geoip` |
-| Contact and pages | `contact.general.email`, `contact.security.email`, `contact.abuse.email`, `pages.contact.enabled`, `pages.contact.captcha`, `pages.contact.success_message` |
-| Updates | `update.branch`, `auto_install`, `defer_days` |
+| Metrics and trusted proxies | `metrics`, `trusted_proxies.additional` |
+| Backup and notifications | `backup`, `notifications.webui`, `notifications.email` |
+| Localization | `i18n.enabled`, `i18n.default_language`, `i18n.fallback_language`, `i18n.available_languages`, `i18n.cookie_name`, `i18n.cookie_max_age` |
+| Network services | `tor`, `geoip` |
+| Contact recipients | `contact.general.email`, `contact.security.email`, `contact.abuse.email` |
+| Contact page | `pages.contact.enabled`, `pages.contact.captcha`, `pages.contact.captcha_site_key`, `pages.contact.captcha_secret_key`, `pages.contact.success_message` |
+| Help pages | `pages.help.content`, `pages.help.mcp` |
+| Security reports | `security.reports.retention_days` and `web.security` disclosure settings; encryption credentials belong in `secrets.yml` |
+| Updates | `update.branch`, `update.auto_install`, `update.defer_days` |
+| Browser behavior | `web.ui.theme`, `web.cors`, `web_robots.allow`, `web_robots.deny`, `web_security.admin`, `web_security.cors` |
 
-Email SMTP fields can also be supplied with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM_NAME`, and `SMTP_FROM_EMAIL`. Secrets such as SMTP passwords, metrics tokens, and TLS DNS credentials should be kept private and must not be committed.
+The server reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM_NAME`, and `SMTP_FROM_EMAIL` for mail transport. Keep credentials and private key material out of source control and logs.
 
-The contact page uses a self-hosted challenge by default. Contact submissions require `server.contact.general.email` (or a configured fallback recipient) and a working SMTP configuration. The configured captcha provider must be `simple` unless another provider is supported by the current build.
+## Contact form and security reports
 
-The `web` section controls the UI theme and CORS setting. `web_robots.allow` and `web_robots.deny` determine the generated `robots.txt` directives. `web_security.admin` supplies the security contact shown by `security.txt`; `web_security.cors` controls the web security CORS setting.
+The contact page is enabled by default and uses the built-in `simple` challenge. It works without JavaScript. External `recaptcha` and `hcaptcha` providers require their site and secret keys. Configure a recipient under `server.contact.general.email` or the appropriate role-specific contact setting and configure SMTP before expecting message delivery.
+
+The privacy preferences page only displays the CCPA opt-out control when `server.privacy.data.sold` is `true`. Cookie-consent categories and the CCPA choice stay in browser cookies; they are not included in cross-device preference sync.
+
+Abuse, DMCA, and privacy reports use the public contact form. Security reports are available only through a valid rotating `security_id` advertised by the security contact endpoints. Reports are encrypted before persistence. The server creates the encryption key in `secrets.yml`; configure the security report retention policy in its documented area file. See [Security](security.md) for the reporting workflow.
 
 ## Environment variables and precedence
 
-Directory environment variables are read during startup. `PORT` and `LISTEN` override the listen port and address; `DOMAIN` and `HOSTNAME` influence FQDN discovery. SMTP variables override their corresponding values from `server.yml`.
+`PORT` and `LISTEN` override listener settings; `DOMAIN` and `HOSTNAME` contribute to FQDN discovery. SMTP environment variables override matching SMTP configuration values. Where all sources exist, the precedence is:
 
-For settings that have all three sources, the precedence is CLI flag, environment variable, config file, then built-in default. Init-only directory variables must be present before starting the process.
+1. Command-line flag
+2. Environment variable
+3. `server.yml`
+4. Embedded default
 
-## Base URL and API version
+Directory variables are initialization inputs and must be set before startup.
 
-`server.baseurl` (or `--baseurl`) sets a URL path prefix, for example `/gitignore`. A root prefix (`/`) serves the app at the origin root. `server.api_version` controls the version segment, which is `v1` by default.
+## API version and base URL
 
-## Update channel
+`server.api_version` sets the canonical API version segment (`v1` by default). `server.baseurl` or `--baseurl` places the service below a URL prefix, such as `/gitignore`. The root prefix is `/`. Discovery at `/api/autodiscover` reports the effective version and base path.
 
-`server.update.branch` accepts `stable`, `beta`, or `devel`. The aliases `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `auto_install` controls whether scheduled update checks install a found update, and `defer_days` controls release age for scheduled checks.
+## Update channel and optional endpoints
 
-## Optional endpoints
+`server.update.branch` accepts `stable`, `beta`, or `devel`; `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `auto_install` controls whether scheduled update checks install a found version, while `defer_days` controls release age for scheduled checks.
 
-The canonical health page is `/server/healthz`. The root `/healthz` alias is enabled only with `server.healthz.root.enabled: true`. Prometheus metrics are enabled by default at `/metrics`; the endpoint can be changed with `server.metrics.endpoint`. Metrics should be firewalled from public access; an optional bearer token is available through `server.metrics.token`.
+`/server/healthz` is always available. The root `/healthz` alias is disabled unless `server.healthz.root.enabled` is true. Prometheus metrics use `/metrics` by default and can be moved with `server.metrics.endpoint`; restrict the endpoint to trusted monitoring systems and configure `server.metrics.token` when needed. Language detection follows the request's supported locale and the `lang` preference; the explicit language control is on `/server/preferences`.

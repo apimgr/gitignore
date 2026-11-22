@@ -6,12 +6,14 @@ GitIgnore serves an embedded catalog of `.gitignore` templates through a public 
 
 - Browse, search, preview, and combine templates in the web interface.
 - Retrieve templates, categories, and statistics through REST or GraphQL.
+- Connect AI clients through the stateless, read-only MCP endpoint.
 - Use the unversioned routes compatible with the gitignore.io API.
 - Run the companion CLI in shell pipelines and download generated shell helpers and completions.
-- Use the public About, Help, Privacy, Contact, Terms, Security, and health pages.
+- Use the public About, Help, Privacy, Terms, Security, Data Protection Officer, Preferences, and health pages. Contact reporting is available from the Security page or security.txt.
+- Carry theme and language preferences between devices with the cookie-only sync page; consent and credentials are excluded.
 - Choose from eight bundled interface languages: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
-The service is public and read-only. It has no user accounts, admin web panel, or user-submitted templates. See [IDEA.md](IDEA.md) for product scope.
+The template catalog API is public and read-only. The project has no user accounts, admin web panel, or user-submitted templates. See [IDEA.md](IDEA.md) for product scope.
 
 ## Run with Docker
 
@@ -63,7 +65,7 @@ curl 'http://172.17.0.1:64180/api/v1/combine?templates=Go,Python,VSCode'
 curl http://172.17.0.1:64180/api/v1/server/swagger
 ```
 
-GraphQL is available at `/graphql`, `/api/graphql`, `/api/v1/graphql`, and `/api/v1/server/graphql`; its browser playground is `/server/docs/graphql`. The interactive OpenAPI UI is `/server/docs/swagger`. Existing gitignore.io clients can use `/api/list` and `/api/{template-names}`. See [API documentation](docs/api.md) for routes and response formats.
+GraphQL queries use `POST /api/v1/server/graphql`; `POST /api/graphql` is the current-version alias. Its browser playground is `/server/docs/graphql`. MCP clients use `/api/v1/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`; connection details are at `/server/help/mcp`. The interactive OpenAPI UI is `/server/docs/swagger`. Existing gitignore.io clients can use `/api/list` and `/api/{template-names}`. See [API documentation](docs/api.md) for routes and response formats.
 
 ## Documentation
 

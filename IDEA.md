@@ -24,17 +24,19 @@ client_binary: gitignore-cli
 - Template composition: merge multiple templates into one output
 - List all available template names
 - Full web frontend (browser, search, composer) using server-side Go templates, dark/light/auto theme, PWA, mobile-first
-- Server pages: `/server/about`, `/server/help`, `/server/healthz`, `/server/privacy`, `/server/terms`, `/server/contact`, `/server/security`, `/server/security/policy`, and `/server/security/thanks`
+- Server pages: `/server/about`, `/server/help`, `/server/healthz`, `/server/privacy`, `/server/terms`, `/server/security`, `/server/security/policy`, and `/server/security/thanks`; the report form at `/server/contact` is reached through the security page or its signed security contact link
+- Guest browser preferences at `/server/preferences` with stateless cross-device export/import at `/server/preferences/sync`; preferences and consent remain in browser cookies and are not tied to an account
 - CLI client (`gitignore-cli`) for shell-pipeline use: `gitignore-cli Go Node > .gitignore`
 - OpenAPI/Swagger docs at `/api/{api_version}/server/swagger`
-- GraphQL at `/graphql`
+- GraphQL at `/api/{api_version}/server/graphql` with `/api/graphql` as the current-version alias
+- MCP Streamable HTTP at `/api/{api_version}/server/mcp` with `/api/mcp` and `/mcp` aliases; exposes the public catalog API as read-only tools
 - gitignore.io route/API compatibility layer (see "External API Compatibility" below) — this project is a full drop-in replacement for gitignore.io/toptal's gitignore API
 
 **Non-goals:**
 - No user accounts, registration, or login of any kind
-- No admin web panel (server configured via `server.yml` only)
+- No admin web panel (server configuration and operations use the AI.md-defined configuration files and command-line tools)
 - No user-submitted or community templates (curated dataset only, updated via releases)
-- No paid tiers, no API keys, no rate-limited access tiers
+- No paid tiers or paid access keys; public catalog access is available without an account
 
 ### Roles & permissions
 
@@ -42,9 +44,9 @@ There are no user accounts or user roles. Public template, browsing, and documen
 
 | Actor | Access |
 |-------|--------|
-| **Anonymous visitor (browser)** | Public pages and catalog access; may submit a contact message or security report |
+| **Anonymous visitor (browser)** | Public pages and catalog access; may submit an abuse, DMCA, privacy, or security report through the report form |
 | **Anonymous API client (curl/CLI)** | Full read access to public catalog API endpoints |
-| **Server operator** | Configures server via `server.yml` only; no web management interface |
+| **Server operator** | Configures and manages the server through the AI.md-defined configuration files and command-line tools; no web management interface |
 
 ### Data model & sensitivity
 
@@ -59,7 +61,7 @@ There are no user accounts or user roles. Public template, browsing, and documen
 
 Catalog records contain no PII.
 
-The contact form collects a sender name, reply email address, subject, and message. AI.md's security-report flow may also persist vulnerability report details and researcher contact information under its specified protection and retention rules. These records are not user accounts or public catalog data; delivery and access follow AI.md's security requirements.
+The report form collects sender details and the fields required by its abuse, DMCA, privacy, or security report type. AI.md's security-report flow may also persist vulnerability report details and researcher contact information under its specified protection and retention rules. These records are not user accounts or public catalog data; delivery and access follow AI.md's security requirements.
 
 ### Trust boundaries & external services
 
@@ -68,7 +70,7 @@ The contact form collects a sender name, reply email address, subject, and messa
 | Template dataset (embedded at build) | Fully trusted | Static, compiled into binary |
 | Incoming HTTP requests | **Untrusted** | Template names validated against known list only; baseline security and operator endpoints follow AI.md authentication and validation rules |
 | GeoIP dataset source | External; used by the required security baseline | Downloaded and updated as defined in AI.md PART 19; lookup failures fail open and never replace other security checks |
-| Configured SMTP/CAPTCHA providers | External; optional configuration | SMTP is used only when configured; third-party CAPTCHA is used only when selected, while the built-in challenge remains self-hosted |
+| Configured SMTP/CAPTCHA providers | External; optional configuration | Reports are delivered only through configured SMTP; third-party CAPTCHA is used only when selected, while the built-in challenge remains self-hosted |
 
 Template retrieval and composition use the embedded catalog and do not call external services. Required baseline services and operator-configured integrations are described above.
 
@@ -79,20 +81,20 @@ Template retrieval and composition use the embedded catalog and do not call exte
 **Attacker/abuser goals:**
 - DoS via high-rate requests
 - Path traversal via template name parameter (e.g., `../etc/passwd`) — mitigated by lookup against known name list only, no filesystem access
-- Spam the public contact form or submit oversized/malformed messages to consume operator attention or abuse SMTP delivery.
+- Spam the report form or submit oversized/malformed reports to consume operator attention or abuse SMTP delivery.
 - Submit forged security reports or exploit report contents to expose sensitive data or disrupt processing.
 
 **Defenses:**
 - Rate limiting on all endpoints
 - Template name lookup is against an in-memory map — no filesystem path construction from user input
 - No user accounts eliminates credential stuffing and privilege escalation entirely
-- Contact submissions require a single-use challenge, enforce request and field size limits, validate the reply address, and are sent only to a configured recipient.
+- The report form accepts only its supported report types, mitigates spam and malformed submissions, and sends reports only to configured recipients.
 - Security reports and researcher data follow the encrypted storage, access, retention, and audit rules in AI.md.
 
 ### Security decisions & exceptions
 
 - **No authentication on public catalog endpoints**: intentional. The read-only template API is public; baseline operator and owner endpoints follow AI.md's token and permission rules.
-- **All responses include `Access-Control-Allow-Origin: *`**: intentional. Public data API designed for cross-origin browser use.
+- **Public catalog APIs support cross-origin browser use**: intentional. The default allows all origins; operators may configure the origin list and credentials according to AI.md's CORS rules.
 - **External route compatibility (gitignore.io)**: intentional. This app is a full replacement for gitignore.io — existing scripts, editor plugins, and shell functions written against gitignore.io's API must work unmodified against this server. See "External API Compatibility" below.
 
 ### External API Compatibility
@@ -112,3 +114,34 @@ Template retrieval and composition use the embedded catalog and do not call exte
 **What IS compatible:** the four routes above, byte-for-byte body shape and status codes, `text/plain`/`application/json` content types, case-insensitive template names, comma-separated multi-template requests.
 
 **What is NOT compatible (intentionally out of scope):** gitignore.io's web UI routes (`/`, `?templates=...`), its Slack/analytics integrations, and any endpoint not listed above. Our own richer API (`/api/{api_version}/templates`, composer, GraphQL) remains the canonical, documented interface — the gitignore.io routes exist purely as a compatibility shim for existing external tooling.
+
+### API routes
+
+All project-defined API routes are public and read-only. Template routes use the embedded catalog and return JSON by default, with plain text on the `.txt` routes; explicit `Accept` headers may select the representation where supported.
+
+| Method | Path | Auth | Purpose and request/response |
+|--------|------|------|------------------------------|
+| GET | `/api/{api_version}/templates/{name}` | None | Retrieve one case-insensitive template name; returns the matching template. |
+| GET | `/api/{api_version}/templates/{name}.txt` | None | Retrieve one template as plain text. |
+| GET | `/api/{api_version}/templates/{name}.json` | None | Retrieve one template as JSON. |
+| GET | `/api/{api_version}/list` | None | List all template names as JSON. |
+| GET | `/api/{api_version}/list.txt` | None | List all template names as plain text. |
+| GET | `/api/{api_version}/search?q={query}` | None | Search template names and content; returns matching templates. |
+| GET | `/api/{api_version}/search.txt?q={query}` | None | Search templates and return names as plain text. |
+| GET | `/api/{api_version}/combine?templates={names}` | None | Combine comma-separated template names; returns the combined content. |
+| GET | `/api/{api_version}/combine.txt?templates={names}` | None | Combine templates and return plain text. |
+| GET | `/api/{api_version}/categories` | None | List available categories. |
+| GET | `/api/{api_version}/categories.txt` | None | List category names as plain text. |
+| GET | `/api/{api_version}/categories/{name}` | None | List templates in one category. |
+| GET | `/api/{api_version}/categories/{name}.txt` | None | List category templates as plain text. |
+| GET | `/api/{api_version}/stats` | None | Return template catalog statistics. |
+| GET | `/api/{api_version}/stats.txt` | None | Return catalog statistics as plain text. |
+| GET | `/api/{api_version}/templates.json` | None | Export the complete catalog as JSON. |
+| GET | `/api/{api_version}/templates.tar.gz` | None | Download the complete catalog as a gzip tar archive. |
+| POST | `/api/{api_version}/server/graphql` | None | Submit a read-only GraphQL query as JSON; returns query data. |
+| POST | `/api/graphql` | None | Current-version alias of the GraphQL query endpoint. |
+| POST | `/api/{api_version}/server/mcp` | None | Stateless MCP endpoint exposing public read-only API operations as tools. |
+| GET | `/api/list` | None | gitignore.io-compatible list; `format=json` returns its compatible JSON catalog. |
+| GET | `/api/{name1,name2,...}` | None | gitignore.io-compatible composition; returns wrapped template text and compatibility errors for unknown names. |
+
+AI.md-defined server, health, security, contact, and discovery endpoints are part of the mandatory server baseline rather than additional project-defined routes.

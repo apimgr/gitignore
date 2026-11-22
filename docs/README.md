@@ -1,4 +1,4 @@
-# GitIgnore API Server Documentation
+# GitIgnore Documentation
 
 GitIgnore serves an embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, server-rendered browser interface, and companion CLI. It has no user accounts or admin web panel.
 
@@ -24,8 +24,10 @@ GitIgnore serves an embedded catalog of `.gitignore` templates through a public 
 | GET | `/api/v1/combine?templates={names}` | Combine templates |
 | GET | `/api/v1/categories` | List categories |
 | GET | `/api/v1/stats` | Show catalog statistics |
-| GET / POST | `/graphql` | GraphQL schema / query endpoint |
+| POST | `/api/{api_version}/server/graphql` | Versioned GraphQL query endpoint |
 | GET | `/api/v1/server/swagger` | OpenAPI JSON |
 | GET | `/server/healthz` | Browser health page and negotiated health API |
+| GET | `/server/preferences` | Public browser-preferences hub |
+| GET | `/server/preferences/tokens` | Owner-token management page |
 
-See the [API reference](api.md) for the full route list and aliases.
+See the [documentation home](index.md) and [API reference](api.md) for the full route list and aliases.

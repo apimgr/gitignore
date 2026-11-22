@@ -1,11 +1,11 @@
 # Translating GitIgnore
 
-GitIgnore ships eight interface locales in `src/common/i18n/locales/`. Locale files are embedded into the server and CLI binaries at build time. English (`en.json`) is the source locale; translation files use the same JSON keys and structure.
+GitIgnore embeds its interface locale files in the server and CLI binaries. `src/common/i18n/locales/en.json` is the source of message keys and structure; translators change values in other locale files and keep every key and placeholder intact.
 
 ## Supported locales
 
 | Code | Language | Native name | Direction |
-|------|----------|-------------|-----------|
+|---|---|---|---|
 | `en` | English | English | Left to right |
 | `ar` | Arabic | العربية | Right to left |
 | `de` | German | Deutsch | Left to right |
@@ -15,29 +15,44 @@ GitIgnore ships eight interface locales in `src/common/i18n/locales/`. Locale fi
 | `ja` | Japanese | 日本語 | Left to right |
 | `zh` | Chinese | 中文 | Left to right |
 
-The locale registry defines the order used by the language selector. Unsupported locale requests fall back to English; a missing key in a translated file falls back to its English value.
+The locale registry is the source for supported language names, ordering, text direction, and plural categories. A locale is supported only when its complete file is embedded and passes the key and placeholder checks. Unsupported values fall back to English. The document `<html lang>` and `dir` attributes follow the resolved locale.
 
-## Update an existing translation
+## Update a translation
 
-1. Choose one locale JSON file other than `en.json`.
-2. Preserve every key and the nested structure from `en.json`; translate values only.
-3. Keep placeholders such as `{count}` unchanged, including braces and spelling.
-4. Keep product names, code, URLs, file names, configuration keys, and literal values such as `dark` and `auto` unchanged.
-5. Use consistent terminology and a clear, neutral tone. Follow the target language's punctuation and typography conventions.
-6. Open a pull request with the locale file change. Include the language and any translator credit you want recorded in the PR description.
+1. Edit one locale JSON file other than `en.json`.
+2. Preserve the English file's message keys, nesting, and key order; translate values only.
+3. Preserve every interpolation placeholder exactly, including braces and spelling. `{count}` may be omitted in a plural category when the translated sentence does not need it; all other placeholders must remain in every category.
+4. Include exactly the CLDR plural categories required by that locale. `other` is always required; an explicit `zero` form is also allowed.
+5. Keep product names, protocols, code, filenames, configuration keys, URLs, and literal values such as `dark` and `auto` unchanged.
+6. Use complete, natural sentences and consistent terminology. Follow the target language's typography and use a consistent register.
+7. Check the page at 320, 768, and 1280 pixels. Verify Arabic and any other RTL locale in mirrored layout, and check that long translations do not clip or overflow.
+
+## Glossary
+
+Keep recurring product terms consistent across the UI. Preserve these terms when they refer to code or protocols:
+
+| Term | Translation guidance |
+|---|---|
+| GitIgnore | Product name; do not translate |
+| gitignore.io | External compatibility service name; do not translate |
+| `.gitignore` | Filename; do not translate |
+| API, REST, GraphQL, OpenAPI | Protocol or technology names; do not translate |
+| CLI | Acronym; keep the acronym |
+| template | Use one term consistently for an individual catalog entry |
+| combine | Use one verb consistently for producing one file from multiple templates |
+| category | Use consistently for a group of related templates |
+| dark, light, auto | Configuration values; do not translate when shown as literal values |
+
+Protocol names and literal values may appear within translated sentences; translate the surrounding sentence naturally.
 
 ## Add a locale
 
-Adding a locale requires code and configuration changes because the server validates and orders supported languages. Copy `en.json` to a new lowercase language-code file, translate its values, preserve placeholders and keys, add the locale to the language registry and `server.i18n.available_languages`, and include the locale metadata (`language`, `name`, `native_name`, `direction`, and `version`). Then run the project test workflow and rebuild the server and CLI so the new embedded file is included. Update this table and the language count in the README in the same change.
+Copy `en.json` to `src/common/i18n/locales/{lang}.json`, where `{lang}` is a lowercase BCP 47 language code. Translate every value and fill the locale metadata: `language`, `name`, `native_name`, `direction`, and `version`. Add the locale to the single language registry and the runtime available-language defaults. Registry entries must include direction and the locale's CLDR plural categories. Add the language to this table and update the locale count in the root README in the same change.
 
-## Review checklist
+The English source file is maintained by the project; translators do not change it as part of an ordinary translation contribution. When English strings change, keep every shipped locale in sync in that same change.
 
-- The locale JSON parses and has the same key set as English.
-- Placeholders and plural forms remain valid.
-- The language registry and configured available-language list agree.
-- Review the browser interface at 320, 768, and 1280 pixels; check right-to-left layout where applicable.
-- The README's supported-language count matches the number of locale files.
+## Validation and review
 
-## Translator credits
+The ordinary Go test suite validates locale key sets, empty values, interpolation variables, required plural categories, and orphaned keys. Run the project's `make test` workflow in its approved Go container. The locale JSON uses UTF-8, two-space indentation, no comments, and no trailing commas.
 
-Locale metadata currently contains no named translator credits. Contributors may request a name or handle be added to the locale's `meta.translators` field; credits are optional.
+Reviewers check that the locale registry and embedded locale files match, placeholders and plural forms are valid, glossary terms are consistent, and the translated interface is usable at mobile, tablet, and desktop widths. Native-speaker review is welcome but is not a merge requirement. Translator credits are optional and are stored in the locale's `meta.translators` when requested.

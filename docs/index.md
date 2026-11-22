@@ -24,10 +24,10 @@ curl http://172.17.0.1:64180/api/v1/templates/go.txt
 - Retrieve and export the catalog over REST, or query it through GraphQL.
 - Use unversioned gitignore.io-compatible routes.
 - Run the companion client in a shell pipeline or download generated shell helpers and completions.
-- Visit public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages.
+- Visit the public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages. Submit contact messages and vulnerability reports through the protected form.
 - Use eight bundled locales: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
-The service is read-only and public. It has no accounts, admin web panel, or user-submitted templates. The `/server/contact` route currently serves project contact information; it is not a message-submission endpoint.
+The template catalog is read-only and public. The application has no user accounts, admin web panel, or user-submitted templates. The contact form accepts abuse, DMCA, privacy, and security reports; delivery and encrypted storage require the corresponding server configuration.
 
 ## Documentation
 
@@ -42,7 +42,7 @@ The service is read-only and public. It has no accounts, admin web panel, or use
 
 ## Browser pages
 
-The main interface includes `/`, `/search`, `/template/{name}`, `/combine`, `/categories`, `/list`, `/stats`, `/docs`, and `/cli`. Public server information pages are `/server`, `/server/about`, `/server/help`, `/server/privacy`, `/server/contact`, `/server/terms`, `/server/security`, `/server/security/policy`, and `/server/healthz`. Interactive API tools are at `/server/docs/swagger` and `/server/docs/graphql`.
+The main interface includes `/`, `/search`, `/template/{name}`, `/combine`, `/categories`, `/list`, `/stats`, `/docs`, and `/cli`. Public server pages include `/server/about`, `/server/help`, `/server/help/mcp`, `/server/preferences`, `/server/preferences/sync`, `/server/preferences/sync/import`, `/server/privacy`, `/server/contact`, `/server/terms`, `/server/dpo`, `/server/security`, `/server/security/policy`, `/server/security/thanks`, `/server/security/report/{tracking_id}`, and `/server/healthz`. Interactive API tools are at `/server/docs/swagger` and `/server/docs/graphql`.
 
 ## Links
 

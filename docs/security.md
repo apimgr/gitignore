@@ -1,37 +1,43 @@
 # Security
 
-## Public, read-only service
+## Public service
 
-The application serves a curated template catalog embedded in the binary. Catalog APIs and browser pages are public and do not require an account or API key. The server does not accept user-submitted templates. The `/server/contact` page accepts operator messages through a no-JavaScript form protected by a self-hosted arithmetic challenge; delivery requires configured SMTP and a contact recipient. Security reports use the private disclosure routes described below.
+The catalog and browser pages are public and read-only. The application has no user accounts, registration, login, API keys, or admin web panel. Operators configure the service through `server.yml` and the documented command-line maintenance interface. Template names are resolved from the embedded catalog and are never used to construct filesystem paths.
+
+The contact page accepts reports from visitors. It validates field sizes and addresses, requires a single-use challenge, and sends messages only to configured recipients when SMTP is available. Security reports use a separate encrypted-storage and disclosure flow. These submissions are not public catalog data.
 
 ## Security and health endpoints
 
 | Endpoint | Purpose |
 |---|---|
-| `/security.txt` | Security contact document |
-| `/.well-known/security.txt` | Well-known alias for the security contact document |
-| `/robots.txt` | Crawler rules from `web_robots` configuration |
-| `/server/healthz` | Canonical health page/API; output is negotiated by request |
-| `/server/security` | Human-readable security policy and reporting information |
-| `/server/security/policy` | Security policy page |
-| `/server/security/thanks` | Public researcher acknowledgments |
-| `/server/security/report/{tracking_id}` | Researcher status page; requires the one-time token emailed with the tracking ID |
-| `/server/contact?security_id={id}` | Contact form in security-report mode when the rotating ID is valid |
-| `POST /api/{api_version}/server/contact` | Contact or security-report submission; version defaults to `v1` |
-| `/api/v1/server/healthz` | Versioned health API |
-| `/api/healthz` and `/api/healthz.txt` | Unversioned health aliases |
+| `/.well-known/security.txt` | Machine-readable security contacts and expiry |
+| `/.well-known/pgp-key.asc` | Public encryption key when one has been generated |
+| `/security.txt` | Security contact alias |
+| `/server/security` | Human-readable reporting channels and security information |
+| `/server/security/policy` | Coordinated disclosure policy |
+| `/server/security/thanks` | Public acknowledgments for credited researchers |
+| `/server/contact?security_id={id}` | Security report form using the current rotating token |
+| `/server/security/report/{tracking_id}` | Private report status, protected by the emailed one-shot token |
+| `/api/{api_version}/server/security` | JSON mirror of public security contact metadata |
+| `/api/{api_version}/server/contact` | Contact form description (GET) and confirmed submission (POST) |
+| `/server/healthz` | Canonical HTML/API health endpoint, negotiated by request |
+| `/api/{api_version}/server/healthz` | Versioned API health |
+| `/api/healthz` and `/api/healthz.txt` | Unversioned API health aliases |
+| `/robots.txt` | Crawler directives from configuration |
 
-The root `/healthz` endpoint is optional and disabled by default. Enable it with `server.healthz.root.enabled`. The security contact defaults to `security@apimgr.us` and can be configured under `web_security.admin`.
+Repository-source vulnerabilities should be reported through [GitHub private vulnerability reporting](https://github.com/apimgr/gitignore/security/advisories/new), as described in [.github/SECURITY.md](https://github.com/apimgr/gitignore/blob/main/.github/SECURITY.md). A deployed-instance vulnerability can be reported through the security form linked from `/server/security` and `security.txt`. Do not file vulnerability details in a public issue.
 
-The contact form is enabled by default and uses the built-in `simple` challenge. Configure `server.contact.general.email` (or the fallback admin recipient) and SMTP settings before expecting messages to be delivered. Captcha challenges are single-use, expire after ten minutes, and are rate limited. If SMTP is unavailable, the form returns an error and does not claim delivery.
+The security form is enabled by `server.pages.contact.enabled`. It requires the rotating `security_id`, which is valid for the current and previous 48-hour period. The form asks for impact, reproduction steps, severity, and disclosure preferences. Reports are encrypted before persistence; report content is not included in logs or the public status page. The researcher receives a tracking ID and a one-shot status link. Operators manage report metadata through the `--maintenance security` commands; there is no admin web interface or route for reading report contents.
 
-## Operational protections
+The public Contact page also handles abuse, DMCA, and privacy requests. It uses a one-time challenge, request and field size limits, validation, and rate limiting. `GET /api/{api_version}/server/contact` publishes the form field descriptors and a fresh challenge without disclosing the destination address. The POST flow has a review step; a message is sent only after the confirmation step. Configure a recipient and SMTP before expecting delivery.
 
-- Place the service behind HTTPS when it is exposed over an untrusted network. TLS can be configured in `server.ssl` or terminated by a trusted reverse proxy.
-- Set trusted proxy addresses before relying on forwarded headers. Configure `server.trusted_proxies.additional` for public proxy addresses or CIDRs.
-- Debug and profiling routes under `/debug/*` are registered only when the independent debug setting is enabled; application mode alone does not enable them.
-- Prometheus metrics are enabled by default at `/metrics`. This endpoint is intended for internal monitoring and should be blocked from public networks. An optional bearer token is configured with `server.metrics.token`.
-- Rate limiting is configurable through `server.rate_limit`.
-- Keep the server binary and its embedded template catalog current.
+## Deployment protections
 
-See [Configuration](configuration.md) for the relevant settings and [the repository security policy](https://github.com/apimgr/gitignore/blob/main/.github/SECURITY.md) for vulnerability reporting.
+- Use HTTPS on untrusted networks. Configure built-in TLS or terminate TLS at a trusted reverse proxy.
+- Set `server.trusted_proxies.additional` to the actual proxy addresses or CIDRs before trusting forwarded headers.
+- Keep debug and profiling routes disabled in production. They are enabled only by the explicit debug setting, not by development mode alone.
+- `/metrics` is enabled by default. Restrict it to monitoring systems and configure its bearer token when appropriate.
+- Review rate-limit and security settings, keep the binary current, and protect configuration, database, logs, and backup paths.
+- GeoIP is a risk signal and does not replace other security controls; lookup failures fail open.
+
+See [Configuration](configuration.md) for supported settings and [API Reference](api.md) for route behavior.

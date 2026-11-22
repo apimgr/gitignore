@@ -13,7 +13,7 @@ The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go b
 - `src/client/` — companion CLI and terminal interface
 - `src/server/` — HTTP routes, handlers, templates, and embedded assets
 - `src/common/i18n/locales/` — embedded locale JSON files
-- `cmd/i18n-validate/` — translation consistency validator
+- Locale message-key, placeholder, and plural validation lives in `src/common/i18n/*_test.go` and runs as part of the regular Go test suite.
 - `docker/` — Dockerfiles and Compose definitions
 - `docs/` — MkDocs and ReadTheDocs documentation
 - `tests/` — Docker and optional integration/browser test runners

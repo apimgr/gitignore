@@ -17,6 +17,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 | `/server/help` | Browser, API, CLI, and troubleshooting help |
 | `/server/help/mcp` | MCP endpoint setup, tools, and project-specific guidance |
 | `/server/preferences` | Public theme, language, and privacy preference controls |
+| `POST /server/theme` | No-JavaScript theme switch used by the shared theme control |
 | `/server/preferences/tokens` | Anonymous owner-token management; create one linked token per MCP client |
 | `/server/preferences/sync` | Cross-device browser-preference export and import |
 | `/server/preferences/sync/import` | Shared preference link that applies cookie values and redirects safely |
@@ -27,7 +28,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 | `/server/security` | Security contact methods and reporting instructions |
 | `/server/security/policy` | Coordinated-disclosure policy |
 | `/server/security/thanks` | Public researcher acknowledgments |
-| `/server/security/report/{tracking_id}` | Researcher status page requiring the emailed one-shot token |
+| `/server/security/report/{tracking_id}` | Researcher status page requiring the emailed token, usable once per day and expiring 30 days after closure |
 | `/server/dpo` | Data protection officer contact when configured |
 | `/server/docs/swagger` | Interactive OpenAPI UI |
 | `/server/docs/graphql` | GraphiQL playground |
@@ -38,7 +39,7 @@ The public server pages share the same layout, navigation, theme, skip links, an
 
 The root `/healthz` alias is disabled by default and can be enabled with `server.healthz.root.enabled`. API health aliases `/api/healthz` and `/api/healthz.txt` are available independently. `GET /api/autodiscover` reports the configured versioned API base and discovery endpoints.
 
-Other public resources include `/security.txt`, `/.well-known/security.txt`, `/.well-known/pgp-key.asc` when available, `/robots.txt`, `/manifest.json`, `/sw.js`, and `/locales/{lang}.json`. Internal metrics are available under `/server/metrics`; root `/metrics` aliases are enabled by default. Restrict metrics endpoints to trusted monitoring systems and use their per-service bearer tokens.
+Other public resources include `/security.txt`, `/.well-known/security.txt`, `/.well-known/llms.txt` and `/llms.txt` for AI discovery, `/.well-known/pgp-key.asc` when a keypair exists and `web.security.publish_pgp_key` is enabled, `/robots.txt`, `/manifest.json`, `/sw.js`, and `/locales/{lang}.json`. Internal metrics are available under `/server/metrics`; root `/metrics` aliases are enabled by default. Restrict metrics endpoints to trusted monitoring systems and use their per-service bearer tokens.
 
 ## Security
 

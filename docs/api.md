@@ -72,7 +72,7 @@ Native API responses use the documented JSON envelope and errors defined in AI.m
 
 The HTML contact form is `/server/contact`. The JSON form description is obtained with `GET /api/{api_version}/server/contact`; the response includes field descriptors and a new captcha challenge, but no recipient address. A submission is reviewed first and delivered only after the confirmation request repeats the fields with its review token. A captcha proof and form token are required. Invalid or expired proofs must be replaced by fetching the form description again.
 
-Security reporting for a deployed instance starts from `/.well-known/security.txt` or `/server/security`. The security form is `/server/contact?security_id={id}` and accepts only a currently valid rotating ID. A successful report receives a tracking ID. Its status link is `/server/security/report/{tracking_id}` and requires the one-shot token sent to the researcher. Repository-source vulnerabilities should use the private reporting instructions in `.github/SECURITY.md`.
+Security reporting for a deployed instance starts from `/.well-known/security.txt` or `/server/security`. The security form is `/server/contact?security_id={id}` and accepts only a currently valid rotating ID. A successful report receives a tracking ID. Its status link is `/server/security/report/{tracking_id}` and requires the emailed token, which permits one access per day and expires 30 days after the report closes. Repository-source vulnerabilities should use the private reporting instructions in `.github/SECURITY.md`.
 
 ## Health and discovery aliases
 

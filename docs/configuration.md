@@ -94,6 +94,19 @@ The table lists every persisted setting group. Generated settings include their 
 
 The canonical area-file assignments and all accepted settings are specified in AI.md PART 5 and PART 12. The server reads the SMTP environment variables listed there for mail transport. Keep credentials and private key material out of source control and logs.
 
+### AI-agent discovery
+
+The server always serves its generated discovery document at `/.well-known/llms.txt` and `/llms.txt`. These entries cannot be disabled. Set these options in `yaml.d/web.yml`:
+
+| Setting | Default | Effect |
+|---|---:|---|
+| `web.api_contact` | Empty | Public contact value shown for API questions |
+| `web.llms.include_endpoints` | `true` | Include endpoint paths discovered from registered API routes; internal metrics, debug, and maintenance routes are excluded |
+| `web.llms.include_schemas` | `false` | Include the OpenAPI request and response schema section |
+| `web.llms.custom_sections` | `[]` | Append operator-authored Markdown sections to the generated document |
+
+The generated document resolves its base URL for each request, describes the API and its authentication rules, lists the configured rate limit, and includes API and security contact values. It does not advertise internal metrics routes. See [Integrations](integrations.md) for its output and route behavior.
+
 ## Contact form and security reports
 
 The contact page is enabled by default and uses the built-in `simple` challenge. It works without JavaScript. External `recaptcha` and `hcaptcha` providers require their site and secret keys. Configure a recipient under `server.contact.general.email` or the appropriate role-specific contact setting and configure SMTP before expecting message delivery.

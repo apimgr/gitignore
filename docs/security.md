@@ -10,14 +10,15 @@ The contact page accepts reports from visitors. It validates field sizes and add
 
 | Endpoint | Purpose |
 |---|---|
+| `/.well-known/llms.txt` and `/llms.txt` | Public AI-agent discovery document; GET and HEAD, always available without authentication |
 | `/.well-known/security.txt` | Machine-readable security contacts and expiry |
-| `/.well-known/pgp-key.asc` | Public encryption key when one has been generated |
+| `/.well-known/pgp-key.asc` | Public encryption key when a keypair exists and `web.security.publish_pgp_key` is enabled; otherwise `404` |
 | `/security.txt` | Security contact alias |
 | `/server/security` | Human-readable reporting channels and security information |
 | `/server/security/policy` | Coordinated disclosure policy |
 | `/server/security/thanks` | Public acknowledgments for credited researchers |
 | `/server/contact?security_id={id}` | Security report form using the current rotating token |
-| `/server/security/report/{tracking_id}` | Private report status, protected by the emailed one-shot token |
+| `/server/security/report/{tracking_id}` | Researcher report status; emailed token allows one access per day and expires 30 days after closure |
 | `/api/{api_version}/server/security` | JSON mirror of public security contact metadata |
 | `/api/{api_version}/server/contact` | Contact form description (GET) and confirmed submission (POST) |
 | `/server/healthz` | Canonical HTML/API health endpoint, negotiated by request |
@@ -33,7 +34,7 @@ The contact page accepts reports from visitors. It validates field sizes and add
 
 Repository-source vulnerabilities should be reported through [GitHub private vulnerability reporting](https://github.com/apimgr/gitignore/security/advisories/new), as described in [.github/SECURITY.md](https://github.com/apimgr/gitignore/blob/main/.github/SECURITY.md). A deployed-instance vulnerability can be reported through the security form linked from `/server/security` and `security.txt`. Do not file vulnerability details in a public issue.
 
-The security form is enabled by `server.pages.contact.enabled`. It requires the rotating `security_id`, which is valid for the current and previous 48-hour period. The form asks for impact, reproduction steps, severity, and disclosure preferences. Report bodies are encrypted with the project PGP key when available, otherwise with AES-256-GCM using the generated at-rest key. Researcher contact details and any submitted public key are stored separately under AES-256-GCM. Report content is not included in logs or the public status page. The researcher receives a tracking ID and a one-shot status link. Operators manage report metadata through the `--maintenance security` commands; there is no admin web interface or route for reading report contents.
+The security form is enabled by `server.pages.contact.enabled`. It requires the rotating `security_id`, which is valid for the current and previous 48-hour period. The form asks for impact, reproduction steps, severity, and disclosure preferences. Report bodies are encrypted with the project PGP key when available, otherwise with AES-256-GCM using the generated at-rest key. Researcher contact details and any submitted public key are stored separately under AES-256-GCM. Report content is not included in logs or the public status page. The researcher receives a tracking ID and an emailed status token that permits one status-page access per day; access expires 30 days after the report closes. Operators manage report metadata through the `--maintenance security` commands; there is no admin web interface or route for reading report contents.
 
 ### Project OpenPGP key
 

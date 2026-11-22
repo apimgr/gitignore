@@ -318,6 +318,7 @@ func TestShouldCatchUp(t *testing.T) {
 }
 
 func TestLoadPersistedMergesState(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
 	dataDir := t.TempDir()
 	if err := db.Init(dataDir); err != nil {
 		t.Fatalf("db.Init: %v", err)

@@ -35,7 +35,7 @@ func (m *mockSMTP) addr() (host string, port int) {
 	return "127.0.0.1", a.Port
 }
 
-func (m *mockSMTP) close() { m.ln.Close() }
+func (m *mockSMTP) close() { _ = m.ln.Close() }
 
 func (m *mockSMTP) serve() {
 	for {
@@ -48,12 +48,12 @@ func (m *mockSMTP) serve() {
 }
 
 func (m *mockSMTP) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	r := bufio.NewReader(conn)
 	w := bufio.NewWriter(conn)
 	writeLine := func(s string) {
-		w.WriteString(s + "\r\n")
-		w.Flush()
+		_, _ = w.WriteString(s + "\r\n")
+		_ = w.Flush()
 	}
 	writeLine("220 mock ESMTP ready")
 	inData := false
@@ -173,7 +173,7 @@ func TestDetectNoServer(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	_ = ln.Close()
 	_, _, ok := Detect([]DetectCandidate{{Host: "127.0.0.1", Ports: []int{port}}})
 	if ok {
 		t.Error("Detect should report ok=false when no server is listening")

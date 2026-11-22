@@ -100,6 +100,7 @@ jobs:
         with:
           name: ${{ env.PROJECT_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.PROJECT_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          retention-days: 30
 
       - name: Upload CLI artifact
         if: hashFiles('src/client/') != ''
@@ -107,6 +108,7 @@ jobs:
         with:
           name: ${{ env.PROJECT_NAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.PROJECT_NAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          retention-days: 30
 
   release:
     needs: [version, build]

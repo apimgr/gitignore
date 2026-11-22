@@ -32,9 +32,9 @@ func (m *Manager) HandleGetTemplate(w http.ResponseWriter, r *http.Request, name
 	// Check if requesting JSON
 	if strings.Contains(accept, "application/json") || strings.HasSuffix(r.URL.Path, ".json") {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ok":      true,
-			"data":    tmpl,
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":   true,
+			"data": tmpl,
 		})
 		return
 	}
@@ -48,7 +48,7 @@ func (m *Manager) HandleGetTemplate(w http.ResponseWriter, r *http.Request, name
 
 	// Default: return plain text content
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(tmpl.Content))
+	_, _ = w.Write([]byte(tmpl.Content))
 }
 
 // HandleList returns list of all templates
@@ -59,17 +59,17 @@ func (m *Manager) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ok":      true,
-			"data":    templates,
-			"count":   len(templates),
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    true,
+			"data":  templates,
+			"count": len(templates),
 		})
 		return
 	}
 
 	// Plain text list (comma-separated for CLI compatibility)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(strings.Join(templates, ",")))
+	_, _ = w.Write([]byte(strings.Join(templates, ",")))
 }
 
 // HandleSearch searches templates
@@ -86,11 +86,11 @@ func (m *Manager) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ok":      true,
-			"data":    results,
-			"count":   len(results),
-			"query":   query,
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    true,
+			"data":  results,
+			"count": len(results),
+			"query": query,
 		})
 		return
 	}
@@ -101,7 +101,7 @@ func (m *Manager) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		names[i] = tmpl.Name
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(strings.Join(names, "\n")))
+	_, _ = w.Write([]byte(strings.Join(names, "\n")))
 }
 
 // HandleCombine combines multiple templates
@@ -128,7 +128,7 @@ func (m *Manager) HandleCombine(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":   true,
 			"data":      combined,
 			"templates": names,
@@ -138,7 +138,7 @@ func (m *Manager) HandleCombine(w http.ResponseWriter, r *http.Request) {
 
 	// Default: plain text
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(combined))
+	_, _ = w.Write([]byte(combined))
 }
 
 // HandleCategories returns all categories
@@ -149,17 +149,17 @@ func (m *Manager) HandleCategories(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ok":      true,
-			"data":    categories,
-			"count":   len(categories),
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    true,
+			"data":  categories,
+			"count": len(categories),
 		})
 		return
 	}
 
 	// Plain text list
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(strings.Join(categories, "\n")))
+	_, _ = w.Write([]byte(strings.Join(categories, "\n")))
 }
 
 // HandleCategoryTemplates returns templates in a category
@@ -175,7 +175,7 @@ func (m *Manager) HandleCategoryTemplates(w http.ResponseWriter, r *http.Request
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":  true,
 			"data":     templates,
 			"count":    len(templates),
@@ -190,7 +190,7 @@ func (m *Manager) HandleCategoryTemplates(w http.ResponseWriter, r *http.Request
 		names[i] = tmpl.Name
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(strings.Join(names, "\n")))
+	_, _ = w.Write([]byte(strings.Join(names, "\n")))
 }
 
 // HandleStats returns template statistics
@@ -198,8 +198,8 @@ func (m *Manager) HandleStats(w http.ResponseWriter, r *http.Request) {
 	stats := m.Stats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"ok":      true,
-		"data":    stats,
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":   true,
+		"data": stats,
 	})
 }

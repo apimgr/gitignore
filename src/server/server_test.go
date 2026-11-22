@@ -13,6 +13,143 @@ import (
 	tmpl "github.com/apimgr/gitignore/src/template"
 )
 
+func TestConfiguredAPIVersionIsUsedByRouterAndDiscovery(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Token = "adm_testtoken0123456789012345678901234567"
+	cfg.Server.APIVersion = "v9"
+	s := New(&Config{Version: "test", Cfg: cfg})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v9/", nil)
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("configured API route status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"api_version":"v9"`) || !strings.Contains(rec.Body.String(), `"/api/v9/list"`) {
+		t.Errorf("API info did not advertise configured version: %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/", nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("default API route status = %d, want 404 when v9 is configured", rec.Code)
+	}
+}
+
+func TestMCPPublicReadToolFlowAndAliases(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Token = "adm_testtoken0123456789012345678901234567"
+	manager, err := tmpl.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(&Config{Version: "test", Cfg: cfg, Templates: manager})
+	request := func(path, body, method, name string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Authorization", "Bearer "+cfg.Server.Token)
+		req.Header.Set("MCP-Protocol-Version", "2026-07-28")
+		req.Header.Set("Mcp-Method", method)
+		if name != "" {
+			req.Header.Set("Mcp-Name", name)
+		}
+		rec := httptest.NewRecorder()
+		s.router.ServeHTTP(rec, req)
+		return rec
+	}
+	initialize := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"},"capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`
+	for _, endpoint := range []string{"/api/v1/server/mcp", "/api/mcp", "/mcp"} {
+		rec := request(endpoint, initialize, "initialize", "")
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"protocolVersion":"2026-07-28"`) {
+			t.Errorf("initialize %s status/body = %d %s", endpoint, rec.Code, rec.Body.String())
+		}
+	}
+	meta := `"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}`
+	list := request("/api/v1/server/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{`+meta+`}}`, "tools/list", "")
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "get_api_v1_list") {
+		t.Fatalf("tools/list status/body = %d %s", list.Code, list.Body.String())
+	}
+	call := request("/api/v1/server/mcp", `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_api_v1_list","arguments":{},`+meta+`}}`, "tools/call", "get_api_v1_list")
+	if call.Code != http.StatusOK || !strings.Contains(call.Body.String(), `"isError":false`) || !strings.Contains(call.Body.String(), "Go") {
+		t.Errorf("tools/call status/body = %d %s", call.Code, call.Body.String())
+	}
+}
+
+func TestMCPRequiresBearerAndRejectsLegacyProtocol(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Token = "adm_testtoken0123456789012345678901234567"
+	s := New(&Config{Version: "test", Cfg: cfg})
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Authorization", "Bearer invalid")
+	request.Header.Set("MCP-Protocol-Version", "2026-07-28")
+	request.Header.Set("Mcp-Method", "initialize")
+	recorder := httptest.NewRecorder()
+	s.router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized || recorder.Header().Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("invalid bearer status/WWW-Authenticate = %d %q", recorder.Code, recorder.Header().Get("WWW-Authenticate"))
+	}
+	request = httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Authorization", "Bearer "+cfg.Server.Token)
+	request.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	request.Header.Set("Mcp-Method", "initialize")
+	recorder = httptest.NewRecorder()
+	s.router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "UnsupportedProtocolVersionError") {
+		t.Fatalf("legacy initialize status/body = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMCPRejectsInvalidOriginAndMethod(t *testing.T) {
+	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	request.Host = "gitignore.example"
+	request.Header.Set("Origin", "https://attacker.example")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	recorder := httptest.NewRecorder()
+	s.router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Errorf("invalid Origin status = %d, want 403", recorder.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	recorder = httptest.NewRecorder()
+	s.router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusMethodNotAllowed || recorder.Header().Get("Allow") != http.MethodPost {
+		t.Errorf("GET status/Allow = %d %q, want 405 POST", recorder.Code, recorder.Header().Get("Allow"))
+	}
+}
+
+func TestMCPOriginRequiresExplicitOrOwnOrigin(t *testing.T) {
+	t.Setenv("DOMAIN", "")
+	cfg := config.DefaultConfig()
+	s := New(&Config{Version: "test", Cfg: cfg})
+	request := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	request.Host = "gitignore.example"
+
+	request.Header.Set("Origin", "http://gitignore.example")
+	if !s.validMCPOrigin(request) {
+		t.Fatal("request's own origin was rejected")
+	}
+	request.Header.Set("Origin", "https://attacker.example")
+	if s.validMCPOrigin(request) {
+		t.Fatal("wildcard CORS default authorized an unrelated MCP origin")
+	}
+
+	cfg.Server.CORS.AllowedOrigins = []string{"https://client.example"}
+	request.Header.Set("Origin", "https://client.example")
+	if !s.validMCPOrigin(request) {
+		t.Fatal("explicit CORS origin was rejected for MCP")
+	}
+}
+
 // TestBaseURLHandlerRedirectsBarePrefix verifies a request for the bare
 // prefix is redirected to its trailing-slash form (AI.md PART 8 "--baseurl").
 func TestBaseURLHandlerRedirectsBarePrefix(t *testing.T) {

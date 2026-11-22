@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -15,6 +16,44 @@ func TestDefault(t *testing.T) {
 	}
 	if cfg.Update.Auto != "no" || cfg.Update.Channel != "stable" {
 		t.Errorf("Update = %+v, want {no stable}", cfg.Update)
+	}
+	if cfg.Display.Mode != "auto" {
+		t.Errorf("Display.Mode = %q, want auto", cfg.Display.Mode)
+	}
+}
+
+func TestDisplayModeValidationAndPersistence(t *testing.T) {
+	for _, mode := range []string{"auto", "gui", "tui"} {
+		if !IsValidDisplayMode(mode) {
+			t.Errorf("IsValidDisplayMode(%q) = false", mode)
+		}
+	}
+	if IsValidDisplayMode("cli") {
+		t.Error("IsValidDisplayMode(cli) = true, want false")
+	}
+
+	path := filepath.Join(t.TempDir(), "cli.yml")
+	cfg := Default()
+	cfg.Display.Mode = "tui"
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Display.Mode != "tui" {
+		t.Errorf("Display.Mode = %q, want tui", loaded.Display.Mode)
+	}
+}
+
+func TestLoadRejectsInvalidDisplayMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cli.yml")
+	if err := os.WriteFile(path, []byte("display:\n  mode: cli\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, _, err := Load(path); err == nil {
+		t.Fatal("Load accepted an invalid display.mode")
 	}
 }
 

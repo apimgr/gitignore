@@ -1,0 +1,14 @@
+Subject: Disk Space Low - {app_name}
+---
+DISK SPACE LOW
+
+From: {app_name} ({fqdn})
+Time: {timestamp}
+
+The filesystem containing {path} is {used_percent}% full.
+Free space: {free}
+Alert threshold: {threshold_percent}%
+
+--
+{app_name}
+{app_url}

@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/geoip"
+	"github.com/apimgr/gitignore/src/health"
 	apppath "github.com/apimgr/gitignore/src/path"
 )
 
@@ -28,6 +32,36 @@ func TestBannerClass(t *testing.T) {
 		if got := bannerClass(c.status); got != c.want {
 			t.Errorf("bannerClass(%q) = %q, want %q", c.status, got, c.want)
 		}
+	}
+}
+
+func TestHealthChecksIncludesDatasetAndOverlayStates(t *testing.T) {
+	s := newTestHealthServer(t)
+	s.geoip = geoip.New(config.GeoIPConfig{Enabled: true}, t.TempDir())
+	s.healthRegistry = health.NewRegistry()
+	s.registerHealthChecks()
+	s.config.I2PStatus = func() I2PInfo { return I2PInfo{Enabled: true, Status: "unavailable"} }
+	features := s.healthFeatures()
+	checks := s.healthChecks(features.Tor, features.I2P)
+	if checks.Datasets["geoip_asn"] != "error" || checks.Datasets["geoip_country"] != "error" || checks.Datasets["geoip_city"] != "error" {
+		t.Fatalf("missing GeoIP data not represented in health checks: %+v", checks.Datasets)
+	}
+	if checks.I2P != "degraded" || overallStatus(checks) != "degraded" {
+		t.Fatalf("unavailable optional overlay state not degraded: checks=%+v", checks)
+	}
+
+	s.config.I2PStatus = func() I2PInfo { return I2PInfo{Status: "disabled", Provider: "none"} }
+	checks = s.healthChecks(s.healthFeatures().Tor, s.healthFeatures().I2P)
+	if checks.I2P != "" {
+		t.Fatalf("disabled I2P check should be omitted, got %q", checks.I2P)
+	}
+}
+
+func TestHealthChecksReadsCachedCoreValues(t *testing.T) {
+	s := &Server{healthCore: ChecksInfo{Database: "error", Cache: "ok", Disk: "ok", Scheduler: "ok"}, healthCoreRefreshed: time.Now().UTC()}
+	checks := s.healthChecks(TorInfo{}, I2PInfo{})
+	if checks.Database != "error" || checks.Cache != "ok" || checks.Disk != "ok" || checks.Scheduler != "ok" {
+		t.Fatalf("cached core checks = %+v", checks)
 	}
 }
 
@@ -78,9 +112,11 @@ func TestOverallStatus(t *testing.T) {
 		{"all ok", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok"}, "healthy"},
 		{"database error is fatal", ChecksInfo{Database: "error", Cache: "ok", Disk: "ok", Scheduler: "ok"}, "unhealthy"},
 		{"cache error degrades", ChecksInfo{Database: "ok", Cache: "error", Disk: "ok", Scheduler: "ok"}, "degraded"},
-		{"disk error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "error", Scheduler: "ok"}, "degraded"},
+		{"disk error is fatal", ChecksInfo{Database: "ok", Cache: "ok", Disk: "error", Scheduler: "ok"}, "unhealthy"},
 		{"scheduler error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "error"}, "degraded"},
-		{"tor error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Tor: "error"}, "degraded"},
+		{"tor degraded state degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Tor: "degraded"}, "degraded"},
+		{"dataset error degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Datasets: map[string]string{"blocklist_firehol": "error"}}, "degraded"},
+		{"dataset stale copy degrades", ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Datasets: map[string]string{"geoip_country": "degraded"}}, "degraded"},
 		{"database error wins over other errors", ChecksInfo{Database: "error", Cache: "error", Disk: "error", Scheduler: "error"}, "unhealthy"},
 	}
 	for _, c := range cases {
@@ -89,6 +125,20 @@ func TestOverallStatus(t *testing.T) {
 				t.Errorf("overallStatus(%+v) = %q, want %q", c.c, got, c.want)
 			}
 		})
+	}
+}
+
+func TestChecksJSONKeepsCoreAndDatasetOrder(t *testing.T) {
+	data, err := json.Marshal(ChecksInfo{
+		Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Tor: "ok", I2P: "ok",
+		Datasets: map[string]string{"blocklist_domains": "ok", "geoip_country": "degraded"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"database":"ok","cache":"ok","disk":"ok","scheduler":"ok","tor":"ok","i2p":"ok","blocklist_domains":"ok","geoip_country":"degraded"}`
+	if string(data) != want {
+		t.Fatalf("ChecksInfo JSON = %s, want %s", data, want)
 	}
 }
 
@@ -203,6 +253,36 @@ func TestHealthzJSONShape(t *testing.T) {
 	}
 }
 
+func TestHealthzReportsPendingRestartConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "server.yml")
+	if err := os.WriteFile(path, []byte("server:\n  port: '64580'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := config.NewConfigManager(config.ConfigManagerOptions{
+		ConfigPath: path,
+		Initial:    &config.Config{Server: config.ServerConfig{Port: "64580"}},
+		Load: func() (*config.Config, error) {
+			return &config.Config{Server: config.ServerConfig{Port: "64581"}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("server:\n  port: '64581'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.CheckNow(); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestHealthServer(t)
+	s.config.ConfigManager = manager
+	response := s.buildHealthResponse()
+	if !response.PendingRestart || len(response.RestartReason) != 1 || response.RestartReason[0] != "server.port" {
+		t.Fatalf("pending restart health state = %+v", response)
+	}
+}
+
 // TestHealthzTrailingNewline verifies the JSON body ends with a single newline
 // (AI.md PART 13 JSON format).
 func TestHealthzTrailingNewline(t *testing.T) {
@@ -227,8 +307,8 @@ func TestHealthzContentNegotiation(t *testing.T) {
 		needle    string
 	}{
 		{"browser html", "/server/healthz", "text/html", "Mozilla/5.0", "text/html", "<!DOCTYPE html>"},
-		{"explicit plain", "/server/healthz", "text/plain", "", "text/plain", "project.name:"},
-		{"curl plain", "/server/healthz", "", "curl/8.0.1", "text/plain", "project.name:"},
+		{"explicit plain", "/server/healthz", "text/plain", "", "text/plain", "Status:"},
+		{"curl plain", "/server/healthz", "", "curl/8.0.1", "text/plain", "Status:"},
 		{"api json our-cli", "/api/v1/server/healthz", "", "gitignore-cli/1.0", "application/json", `"status"`},
 		{"api text accept", "/api/v1/server/healthz", "text/plain", "", "text/plain", "project.name:"},
 	}
@@ -249,7 +329,7 @@ func TestHealthzContentNegotiation(t *testing.T) {
 // headers and dot-notation keys in canonical order (AI.md PART 13 plain text).
 func TestHealthzTextSections(t *testing.T) {
 	s := newTestHealthServer(t)
-	rec := doHealth(s, "/server/healthz", "text/plain", "")
+	rec := doHealth(s, "/api/v1/server/healthz", "text/plain", "")
 	body := rec.Body.String()
 	for _, needle := range []string{
 		"# 1. Project", "project.name:", "checks.database:", "stats.requests_total:",

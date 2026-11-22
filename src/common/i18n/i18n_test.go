@@ -1,15 +1,189 @@
 package i18n
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"sort"
+	"strings"
 	"testing"
 )
+
+var interpolationPattern = regexp.MustCompile(`\{[a-zA-Z0-9_]+\}`)
+
+// TestKeyConsistency checks key parity, non-empty values, and interpolation
+// parity for every embedded locale.
+func TestKeyConsistency(t *testing.T) {
+	base := translations[DefaultLang]
+	baseKeys := messageKeys(base)
+	for _, lang := range SupportedLanguages() {
+		locale := translations[lang]
+		keys := messageKeys(locale)
+		if len(keys) != len(baseKeys) {
+			t.Errorf("%s: has %d message keys; en has %d", lang, len(keys), len(baseKeys))
+		}
+		for key := range baseKeys {
+			if strings.HasPrefix(key, "plurals.") {
+				checkPluralMessage(t, lang, key, base, locale)
+				continue
+			}
+			english := base[key]
+			value, ok := locale[key]
+			if !ok {
+				t.Errorf("%s: missing key %q", lang, key)
+				continue
+			}
+			if strings.TrimSpace(value) == "" {
+				t.Errorf("%s: empty value for %q", lang, key)
+			}
+			if !samePlaceholders(english, value) {
+				t.Errorf("%s: interpolation placeholders differ for %q", lang, key)
+			}
+		}
+		for key := range keys {
+			if _, exists := baseKeys[key]; !exists {
+				t.Errorf("%s: orphaned key %q", lang, key)
+			}
+		}
+	}
+}
+
+func messageKeys(values map[string]string) map[string]bool {
+	keys := make(map[string]bool, len(values))
+	for key := range values {
+		if strings.HasPrefix(key, "plurals.") {
+			parts := strings.Split(key, ".")
+			if len(parts) == 3 {
+				switch parts[2] {
+				case "zero", "one", "two", "few", "many", "other":
+					key = strings.Join(parts[:2], ".")
+				}
+			}
+		}
+		keys[key] = true
+	}
+	return keys
+}
+
+func checkPluralMessage(t *testing.T, lang, key string, english, locale map[string]string) {
+	t.Helper()
+	wanted := map[string][]string{
+		"en": {"one", "other"}, "es": {"one", "other"}, "fr": {"one", "other"},
+		"de": {"one", "other"}, "it": {"one", "many", "other"},
+		"zh": {"other"}, "ja": {"other"},
+		"ar": {"zero", "one", "two", "few", "many", "other"},
+	}[lang]
+	baseCategories := pluralCategories(english, key)
+	actualCategories := pluralCategories(locale, key)
+	optionalZero := actualCategories["zero"] && !containsString(wanted, "zero")
+	for _, category := range wanted {
+		if !actualCategories[category] {
+			t.Errorf("%s: %s missing required plural category %q", lang, key, category)
+		}
+	}
+	for category := range actualCategories {
+		if !containsString(wanted, category) && (category != "zero" || !optionalZero) {
+			t.Errorf("%s: %s has unsupported plural category %q", lang, key, category)
+		}
+	}
+	for _, category := range baseCategoriesList(baseCategories) {
+		baseValue := english[key+"."+category]
+		baseOther := withoutCount(interpolationPattern.FindAllString(baseValue, -1))
+		for actual := range actualCategories {
+			value := locale[key+"."+actual]
+			if got := withoutCount(interpolationPattern.FindAllString(value, -1)); !sameStringSlice(baseOther, got) {
+				t.Errorf("%s: %s.%s has inconsistent non-count placeholders", lang, key, actual)
+			}
+		}
+	}
+}
+
+func pluralCategories(values map[string]string, key string) map[string]bool {
+	categories := map[string]bool{}
+	for _, category := range []string{"zero", "one", "two", "few", "many", "other"} {
+		if _, ok := values[key+"."+category]; ok {
+			categories[category] = true
+		}
+	}
+	return categories
+}
+
+func baseCategoriesList(categories map[string]bool) []string {
+	result := make([]string, 0, len(categories))
+	for category := range categories {
+		result = append(result, category)
+	}
+	return result
+}
+
+func withoutCount(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "{count}" {
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func sameStringSlice(first, second []string) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	for index := range first {
+		if first[index] != second[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLocalesFS confirms every registered locale is embedded as valid JSON.
+func TestLocalesFS(t *testing.T) {
+	for _, lang := range supportedOrder {
+		data, ok := LocaleJSON(lang)
+		if !ok {
+			t.Errorf("%s locale is not embedded", lang)
+			continue
+		}
+		var locale map[string]interface{}
+		if err := json.Unmarshal(data, &locale); err != nil {
+			t.Errorf("%s locale is invalid JSON: %v", lang, err)
+		}
+	}
+}
+
+func samePlaceholders(first, second string) bool {
+	left := interpolationPattern.FindAllString(first, -1)
+	right := interpolationPattern.FindAllString(second, -1)
+	sort.Strings(left)
+	sort.Strings(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
 
 // TestSupportedLanguages verifies all seven mandated languages compile in and
 // English is always present (AI.md PART 30 "Supported Languages").
 func TestSupportedLanguages(t *testing.T) {
-	for _, lang := range []string{"en", "es", "zh", "fr", "ar", "de", "ja"} {
+	for _, lang := range []string{"en", "es", "zh", "fr", "ar", "de", "it", "ja"} {
 		if !IsSupported(lang) {
 			t.Errorf("expected %q to be supported", lang)
 		}
@@ -22,11 +196,50 @@ func TestSupportedLanguages(t *testing.T) {
 	}
 }
 
+func TestLanguagePreferenceCookieLifecycle(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	if got := LanguagePreference(request); got != "auto" {
+		t.Fatalf("default preference = %q, want auto", got)
+	}
+	writer := httptest.NewRecorder()
+	if !SetLanguageCookie(writer, request, "it") {
+		t.Fatal("SetLanguageCookie rejected a supported locale")
+	}
+	cookies := writer.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value != "it" || cookies[0].HttpOnly {
+		t.Fatalf("language cookie = %#v", cookies)
+	}
+	request.AddCookie(cookies[0])
+	if got := LanguagePreference(request); got != "it" {
+		t.Fatalf("saved preference = %q, want it", got)
+	}
+	if SetLanguageCookie(httptest.NewRecorder(), request, "xx") {
+		t.Fatal("SetLanguageCookie accepted an unsupported locale")
+	}
+	writer = httptest.NewRecorder()
+	ClearLanguageCookie(writer, request)
+	cleared := writer.Result().Cookies()
+	if len(cleared) != 1 || cleared[0].MaxAge >= 0 {
+		t.Fatalf("cleared language cookie = %#v", cleared)
+	}
+}
+
+func TestMiddlewareWithSecureCookieAttributes(t *testing.T) {
+	handler := MiddlewareWithSecure(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), func(*http.Request) bool { return true })
+	req := httptest.NewRequest(http.MethodGet, "/?lang=fr", nil)
+	writer := httptest.NewRecorder()
+	handler.ServeHTTP(writer, req)
+	cookies := writer.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != cookieName || cookies[0].Value != "fr" || cookies[0].HttpOnly || !cookies[0].Secure {
+		t.Fatalf("language middleware cookie = %#v", cookies)
+	}
+}
+
 // TestKeySetsIdentical enforces the build-time invariant that every language
 // carries exactly the same keys as English (AI.md PART 30).
 func TestKeySetsIdentical(t *testing.T) {
 	base := map[string]bool{}
-	for _, k := range Keys("en") {
+	for k := range messageKeys(translations["en"]) {
 		base[k] = true
 	}
 	if len(base) == 0 {
@@ -37,7 +250,7 @@ func TestKeySetsIdentical(t *testing.T) {
 			continue
 		}
 		got := map[string]bool{}
-		for _, k := range Keys(lang) {
+		for k := range messageKeys(translations[lang]) {
 			got[k] = true
 			if !base[k] {
 				t.Errorf("%s: orphaned key %q not in en", lang, k)

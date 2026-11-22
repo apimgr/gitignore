@@ -126,3 +126,34 @@ func TestTUIKeyHandlingAndHelpers(t *testing.T) {
 		t.Fatal("selectedNames included disabled entries")
 	}
 }
+
+func TestMenuAndSearchInputBranches(t *testing.T) {
+	cfg := clientconfig.Default()
+	cfg.Server.Primary = "https://example.test"
+	model := New(api.New(cfg.Server.Primary), cfg, "")
+	updated, command := model.updateMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil || updated.(Model).screen != screenMenu {
+		t.Fatal("enter on the selected menu item did not schedule its action")
+	}
+	updated, command = model.updateMenu(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if command == nil || !updated.(Model).quitting {
+		t.Fatal("q did not quit from the menu")
+	}
+
+	model.screen = screenSearchInput
+	model.input.SetValue(" ")
+	updated, command = model.updateSearchInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if command != nil || updated.(Model).screen != screenMenu {
+		t.Fatal("empty search did not return to the menu")
+	}
+	model.screen = screenSearchInput
+	model.input.SetValue("Go")
+	updated, command = model.updateSearchInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil || updated.(Model).screen != screenSearchInput {
+		t.Fatal("non-empty search did not schedule a request")
+	}
+	updated, _ = model.updateSearchInput(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated.(Model).screen != screenMenu {
+		t.Fatal("escape did not return from search")
+	}
+}

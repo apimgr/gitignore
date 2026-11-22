@@ -42,7 +42,7 @@ func TestListSuccess(t *testing.T) {
 		if got := r.Header.Get("Accept"); got != "application/json" {
 			t.Errorf("Accept header = %q, want application/json", got)
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":   true,
 			"data": []string{"Go", "Node"},
 		})
@@ -62,7 +62,7 @@ func TestListSuccess(t *testing.T) {
 func TestListServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":    false,
 			"error": "boom",
 		})
@@ -110,11 +110,11 @@ func TestSearchCategoriesCategoryTemplates(t *testing.T) {
 			if got := r.URL.Query().Get("q"); got != "go" {
 				t.Errorf("query q = %q, want go", got)
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Go"}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Go"}})
 		case "/api/v1/categories":
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Root", "Global"}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Root", "Global"}})
 		case "/api/v1/categories/Root":
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Go", "Rust"}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Go", "Rust"}})
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -139,7 +139,7 @@ func TestGetTemplate(t *testing.T) {
 		if r.URL.Path != "/api/v1/templates/Go" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok": true,
 			"data": Template{
 				Name: "Go", FileName: "Go.gitignore", Category: "Root", Content: "*.o\n",
@@ -163,7 +163,7 @@ func TestCombine(t *testing.T) {
 		if got := r.URL.Query().Get("templates"); got != "Go,Node" {
 			t.Errorf("templates query = %q, want Go,Node", got)
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": "*.o\nnode_modules/\n"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": "*.o\nnode_modules/\n"})
 	}))
 	defer srv.Close()
 
@@ -179,7 +179,7 @@ func TestCombine(t *testing.T) {
 
 func TestStats(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":   true,
 			"data": map[string]interface{}{"total_templates": float64(42)},
 		})
@@ -199,7 +199,10 @@ func TestStats(t *testing.T) {
 func TestHealthz(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+			if r.URL.Path != "/api/v1/server/healthz" {
+				t.Errorf("Healthz path = %q, want /api/v1/server/healthz", r.URL.Path)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 		}))
 		defer srv.Close()
 		if err := New(srv.URL).Healthz(); err != nil {
@@ -226,7 +229,7 @@ func TestAcceptLanguageHeaderSentWhenLangSet(t *testing.T) {
 	var gotLang string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotLang = r.Header.Get("Accept-Language")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{}})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{}})
 	}))
 	defer srv.Close()
 

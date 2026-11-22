@@ -50,11 +50,7 @@ jobs:
 
       - name: Set build info
         run: |
-          if [ -f release.txt ]; then
-            echo "VERSION=$(cat release.txt)" >> $GITHUB_ENV
-          else
-            echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
-          fi
+          echo "VERSION=$(printf '%s' "$GITHUB_REF_NAME" | sed 's/^v//')" >> "$GITHUB_ENV"
           echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
           BUILD_EPOCH=$(date -u +%s)
           echo "BUILD_EPOCH=${BUILD_EPOCH}" >> $GITHUB_ENV
@@ -89,6 +85,7 @@ jobs:
         with:
           name: ${{ env.PROJECT_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.PROJECT_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          retention-days: 30
 
       - name: Upload CLI artifact
         if: hashFiles('src/client/') != ''
@@ -96,6 +93,7 @@ jobs:
         with:
           name: ${{ env.PROJECT_NAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.PROJECT_NAME }}-cli-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          retention-days: 30
 
   release:
     needs: build
@@ -116,15 +114,10 @@ jobs:
 
       - name: Set version
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
-          if [[ "$TAG" == v* ]]; then
-            echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-          elif [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "RELEASE_TAG=v$TAG" >> "$GITHUB_ENV"
-          else
-            echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-          fi
+          TAG="$(git describe --tags --exact-match HEAD)"
+          VERSION="$(printf '%s' "$TAG" | sed 's/^v//')"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Create version.txt
         run: echo "${{ env.VERSION }}" > binaries/version.txt

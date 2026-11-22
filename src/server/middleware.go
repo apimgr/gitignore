@@ -1,9 +1,15 @@
 package server
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -11,38 +17,244 @@ import (
 	"github.com/apimgr/gitignore/src/mode"
 )
 
-// clientIP resolves the client's IP address for logging, rate limiting, and
-// blocklists (AI.md PART 12 "Client IP Detection"). Forwarding headers are
-// honored only when the immediate TCP peer is in the trusted-proxy set;
-// otherwise resolution falls straight through to r.RemoteAddr so a direct
-// client cannot spoof a fresh IP per request and bypass the rate limiter.
-//
-// Priority when the peer is trusted: CF-Connecting-IP, True-Client-IP,
-// X-Real-IP, X-Forwarded-For (leftmost), X-Client-IP, then r.RemoteAddr.
-func (s *Server) clientIP(r *http.Request) string {
-	remote := remoteHost(r.RemoteAddr)
+type allowlistedContextKey struct{}
 
-	if s.isTrustedPeer(r.RemoteAddr) {
-		if ip := firstIP(r.Header.Get("CF-Connecting-IP")); ip != "" {
-			return ip
-		}
-		if ip := firstIP(r.Header.Get("True-Client-IP")); ip != "" {
-			return ip
-		}
-		if ip := firstIP(r.Header.Get("X-Real-IP")); ip != "" {
-			return ip
-		}
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if ip := firstIP(strings.Split(xff, ",")[0]); ip != "" {
-				return ip
-			}
-		}
-		if ip := firstIP(r.Header.Get("X-Client-IP")); ip != "" {
-			return ip
+func (s *Server) isAllowlisted(ip string) bool {
+	address, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	for _, prefix := range s.allowlist {
+		if prefix.Contains(address) {
+			return true
 		}
 	}
+	return false
+}
 
-	return remote
+func (s *Server) allowlistMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.isTorRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.isAllowlisted(s.clientIP(r)) {
+			r = r.WithContext(context.WithValue(r.Context(), allowlistedContextKey{}, true))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requestIsAllowlisted(r *http.Request) bool {
+	allowed, _ := r.Context().Value(allowlistedContextKey{}).(bool)
+	return allowed
+}
+
+func (s *Server) blocklistMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.isTorRequest(r) || requestIsAllowlisted(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		now := time.Now().UTC()
+		ip := s.clientIP(r)
+		if address, err := netip.ParseAddr(ip); err == nil {
+			for _, prefix := range s.blockedIPs {
+				if prefix.Contains(address.Unmap()) {
+					log.Printf("security.ip_blocked: ip=[redacted] reason=config")
+					sendAPIResponseError(w, "FORBIDDEN", "access denied")
+					return
+				}
+			}
+		}
+		if s.blocklist == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if source, blocked := s.blocklist.MatchIP(ip, now); blocked {
+			log.Printf("blocklist_block: source=%s ip=[redacted]", source)
+			sendAPIResponseError(w, "FORBIDDEN", "access denied")
+			return
+		}
+		domainHeader := r.Header.Get("Origin")
+		domainField := "origin"
+		if strings.TrimSpace(domainHeader) == "" {
+			domainHeader = r.Header.Get("Referer")
+			domainField = "referer"
+		}
+		if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(domainHeader), now); blocked {
+			log.Printf("blocklist_block: source=%s field=%s", source, domainField)
+			sendAPIResponseError(w, "FORBIDDEN", "access denied")
+			return
+		}
+		for _, value := range r.URL.Query() {
+			for _, candidate := range value {
+				if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(candidate), now); blocked {
+					log.Printf("blocklist_block: source=%s field=query", source)
+					sendAPIResponseError(w, "FORBIDDEN", "access denied")
+					return
+				}
+			}
+		}
+		if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+			if err == nil && len(body) <= 1<<20 {
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/x-www-form-urlencoded") {
+					if values, parseErr := url.ParseQuery(string(body)); parseErr == nil {
+						for key, candidates := range values {
+							if strings.Contains(strings.ToLower(key), "email") || strings.Contains(strings.ToLower(key), "url") {
+								for _, candidate := range candidates {
+									if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(candidate), now); blocked {
+										log.Printf("blocklist_block: source=%s field=form", source)
+										sendAPIResponseError(w, "FORBIDDEN", "access denied")
+										return
+									}
+								}
+							}
+						}
+					}
+				} else if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+					var fields interface{}
+					if json.Unmarshal(body, &fields) == nil {
+						for _, candidate := range jsonDomainTargets(fields, false) {
+							if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(candidate), now); blocked {
+								log.Printf("blocklist_block: source=%s field=json", source)
+								sendAPIResponseError(w, "FORBIDDEN", "access denied")
+								return
+							}
+						}
+					}
+				}
+			} else {
+				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func jsonDomainTargets(value interface{}, targetField bool) []string {
+	var targets []string
+	switch item := value.(type) {
+	case map[string]interface{}:
+		for key, child := range item {
+			lower := strings.ToLower(key)
+			isTarget := strings.Contains(lower, "email") || strings.Contains(lower, "url")
+			targets = append(targets, jsonDomainTargets(child, isTarget)...)
+		}
+	case []interface{}:
+		for _, child := range item {
+			targets = append(targets, jsonDomainTargets(child, targetField)...)
+		}
+	case string:
+		if targetField && strings.TrimSpace(item) != "" {
+			targets = append(targets, item)
+		}
+	}
+	return targets
+}
+
+func requestDomainCandidate(value string) string {
+	value = strings.TrimSpace(value)
+	if at := strings.LastIndexByte(value, '@'); at >= 0 && at+1 < len(value) {
+		return value[at+1:]
+	}
+	return value
+}
+
+// clientIP resolves the client from the nearest proxy hop toward the leftmost
+// address, honoring forwarding headers only when the immediate peer is trusted.
+func (s *Server) clientIP(r *http.Request) string {
+	if identity, ok := r.Context().Value(torRequestContextKey{}).(torRequestIdentity); ok {
+		return "tor:" + identity.circuitID
+	}
+	peer, peerValid := normalizeProxyIP(r.RemoteAddr)
+	if !peerValid {
+		return ""
+	}
+	if !s.isTrustedAddress(peer) {
+		return peer.String()
+	}
+	configured := "auto"
+	if s.config != nil && s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Server.TrustedProxies.ClientIPHeader) != "" {
+		configured = strings.ToLower(strings.TrimSpace(s.currentConfig().Server.TrustedProxies.ClientIPHeader))
+	}
+	headerNames := []string{configured}
+	if configured == "auto" {
+		headerNames = []string{"X-Forwarded-For", "Forwarded", "CF-Connecting-IP", "True-Client-IP", "X-Real-IP", "X-Client-IP"}
+	}
+	for _, name := range headerNames {
+		values := r.Header.Values(name)
+		if len(values) == 0 {
+			continue
+		}
+		allEmpty := true
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
+		canonicalName := http.CanonicalHeaderKey(name)
+		if canonicalName == "X-Forwarded-For" || canonicalName == "Forwarded" {
+			chain := forwardedHops(canonicalName, values)
+			if len(chain) == 0 {
+				continue
+			}
+			return s.walkProxyChain(chain, peer).String()
+		}
+		if len(values) != 1 {
+			continue
+		}
+		if addr, ok := normalizeProxyIP(values[0]); ok {
+			return addr.String()
+		}
+	}
+	return peer.String()
+}
+
+func (s *Server) walkProxyChain(chain []string, peer netip.Addr) netip.Addr {
+	if len(chain) > 32 {
+		chain = chain[len(chain)-32:]
+	}
+	nearest := peer
+	for index := len(chain) - 1; index >= 0; index-- {
+		addr, ok := normalizeProxyIP(chain[index])
+		if !ok {
+			return nearest
+		}
+		nearest = addr
+		if !s.isTrustedAddress(addr) {
+			return addr
+		}
+	}
+	return nearest
+}
+
+func forwardedHops(header string, values []string) []string {
+	joined := strings.Join(values, ",")
+	parts := strings.Split(joined, ",")
+	hops := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if header == "Forwarded" {
+			var forValue string
+			for _, parameter := range strings.Split(part, ";") {
+				key, value, found := strings.Cut(strings.TrimSpace(parameter), "=")
+				if found && strings.EqualFold(strings.TrimSpace(key), "for") {
+					forValue = strings.TrimSpace(value)
+					break
+				}
+			}
+			hops = append(hops, forValue)
+			continue
+		}
+		hops = append(hops, strings.TrimSpace(part))
+	}
+	return hops
 }
 
 // remoteHost strips the ephemeral source port from a "host:port" address so
@@ -58,17 +270,11 @@ func remoteHost(addr string) string {
 // firstIP validates and normalizes a single forwarded IP value, returning ""
 // when the value is empty or not a parseable IP address.
 func firstIP(v string) string {
-	v = strings.TrimSpace(v)
-	if v == "" {
+	addr, ok := normalizeProxyIP(v)
+	if !ok {
 		return ""
 	}
-	if host, _, err := net.SplitHostPort(v); err == nil {
-		v = host
-	}
-	if net.ParseIP(v) == nil {
-		return ""
-	}
-	return v
+	return addr.String()
 }
 
 // permissionsPolicyDefault is the spec default Permissions-Policy header
@@ -92,6 +298,10 @@ const permissionsPolicyDefault = "accelerometer=(), ambient-light-sensor=(), bat
 // to https and break the page (documented deviation, matches HSTS gating).
 // {learned_origins} is omitted — the domain-learning subsystem is absent.
 func cspDirectives(tlsActive bool, api string) string {
+	return cspDirectivesForCaptcha(tlsActive, api, "simple")
+}
+
+func cspDirectivesForCaptcha(tlsActive bool, api, provider string) string {
 	directives := []string{
 		"default-src 'self'",
 		"script-src 'self'",
@@ -115,7 +325,27 @@ func cspDirectives(tlsActive bool, api string) string {
 		"report-to default",
 		"report-uri "+api+"/server/reports/csp",
 	)
+	switch provider {
+	case "recaptcha":
+		directives = replaceDirective(directives, "script-src", "'self' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/")
+		directives = replaceDirective(directives, "frame-src", "'self' https://www.google.com/recaptcha/")
+		directives = replaceDirective(directives, "connect-src", "'self' https://www.google.com/recaptcha/")
+	case "hcaptcha":
+		directives = replaceDirective(directives, "script-src", "'self' https://js.hcaptcha.com https://newassets.hcaptcha.com")
+		directives = replaceDirective(directives, "frame-src", "'self' https://newassets.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com")
+		directives = replaceDirective(directives, "connect-src", "'self' https://hcaptcha.com https://*.hcaptcha.com")
+	}
 	return strings.Join(directives, "; ")
+}
+
+func replaceDirective(directives []string, name, value string) []string {
+	for index, directive := range directives {
+		if strings.HasPrefix(directive, name+" ") {
+			directives[index] = name + " " + value
+			return directives
+		}
+	}
+	return append(directives, name+" "+value)
 }
 
 // securityHeaders sets the always-on security response headers mandated by
@@ -136,10 +366,13 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Resource-Policy", "cross-origin")
 		h.Set("Permissions-Policy", permissionsPolicyDefault)
 
-		sslEnabled := s.config.Cfg != nil && s.config.Cfg.Server.SSL.Enabled
+		sslEnabled := s.currentConfig() != nil && s.currentConfig().Server.SSL.Enabled
 		tlsActive := r.TLS != nil || sslEnabled
+		if s.isTorRequest(r) || isI2PHost(r.Host) {
+			tlsActive = false
+		}
 
-		csp := cspDirectives(tlsActive, apiBasePath())
+		csp := s.trackingCSP(r, s.apiBasePath())
 		if mode.IsAppModeDev() {
 			h.Set("Content-Security-Policy-Report-Only", csp)
 		} else {
@@ -147,12 +380,12 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		}
 
 		base := s.detectServerURL(r)
-		reportURL := base + apiBasePath() + "/server/reports/default"
+		reportURL := base + s.apiBasePath() + "/server/reports/default"
 		h.Set("Reporting-Endpoints", `default="`+reportURL+`"`)
 		h.Set("Report-To", `{"group":"default","max_age":10886400,"endpoints":[{"url":"`+reportURL+`"}]}`)
 		h.Set("NEL", `{"report_to":"default","max_age":2592000,"include_subdomains":true}`)
 
-		if tlsActive {
+		if tlsActive && !s.isTorRequest(r) {
 			h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
 		}
 
@@ -220,9 +453,20 @@ func (rl *rateLimiter) allow(ip string) bool {
 // with the spec's RATE_LIMITED envelope.
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.limiter != nil && !s.limiter.allow(s.clientIP(r)) {
-			sendAPIResponseError(w, "RATE_LIMITED", "too many requests")
-			return
+		if s.limiter != nil && !requestIsAllowlisted(r) {
+			allowed := s.limiter.allow(s.clientIP(r))
+			if s.metrics != nil {
+				status := "allowed"
+				if !allowed {
+					status = "limited"
+					s.metrics.RateLimitBlockedTotal.WithLabelValues("per_ip").Inc()
+				}
+				s.metrics.RateLimitRequestsTotal.WithLabelValues("per_ip", status).Inc()
+			}
+			if !allowed {
+				sendAPIResponseError(w, "RATE_LIMITED", "too many requests")
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -236,7 +480,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 // with the IP redacted (country data is PII under GDPR).
 func (s *Server) geoipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.geoip != nil && s.geoip.Enabled() {
+		if s.geoip != nil && s.geoip.Enabled() && !s.isTorRequest(r) && !requestIsAllowlisted(r) {
 			if ip := net.ParseIP(s.clientIP(r)); ip != nil {
 				if allowed, country := s.geoip.CountryAllowed(ip); !allowed {
 					log.Printf("geoip_block: ip=[redacted] country=%s", country)

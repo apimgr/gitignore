@@ -1,0 +1,241 @@
+stages:
+  - build
+  - test
+  - security
+  - release
+
+variables:
+  CGO_ENABLED: "0"
+  GOFLAGS: "-buildvcs=false"
+  GOTOOLCHAIN: auto
+  GOTELEMETRY: "off"
+  GO_IMAGE: "casjaysdev/go@sha256:0db19a251249c5aca053d4c25a7b832cdc66422bdb10067a8b072f15a785330a"
+  GIT_DEPTH: "0"
+  GOMODCACHE: "$CI_PROJECT_DIR/.go/pkg/mod"
+  GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
+
+cache:
+  key:
+    files:
+      - go.sum
+  paths:
+    - .go/pkg/mod/
+    - .go/build-cache/
+
+build:
+  stage: build
+  image: "$GO_IMAGE"
+  parallel:
+    matrix:
+      - GOOS: [linux, darwin, windows, freebsd]
+        GOARCH: [amd64, arm64]
+  script:
+    - mkdir -p "dist/$GOOS-$GOARCH"
+    - EXT=""
+    - if [ "$GOOS" = windows ]; then EXT=.exe; fi
+    - VERSION="$(printf '%s' "$CI_COMMIT_TAG" | sed 's/^v//')"
+    - if [ -z "$VERSION" ]; then VERSION="$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-7)"; fi
+    - COMMIT_ID="$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-7)"
+    - BUILD_EPOCH="$(date -u +%s)"
+    - LDFLAGS="-s -w -X main.Version=$VERSION -X main.CommitID=$COMMIT_ID -X main.BuildEpoch=$BUILD_EPOCH"
+    - GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/$GOOS-$GOARCH/gitignore-$GOOS-$GOARCH$EXT" ./src
+    - GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags "$LDFLAGS" -o "dist/$GOOS-$GOARCH/gitignore-cli-$GOOS-$GOARCH$EXT" ./src/client
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+unit-test:
+  stage: test
+  image: "$GO_IMAGE"
+  script:
+    - mkdir -p "/tmp/$CI_PROJECT_NAMESPACE"
+    - TEST_TMP="$(mktemp -d "/tmp/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME-XXXXXX")"
+    - trap 'case "$TEST_TMP" in "/tmp/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME-"*) rm -rf -- "$TEST_TMP" ;; esac' EXIT
+    - export TMPDIR="$TEST_TMP"
+    - go test -run 'TestKeyConsistency|TestLocalesFS' ./src/common/i18n/...
+    - go test -cover -coverprofile="$TEST_TMP/coverage.out" ./...
+    - PCT="$(go tool cover -func="$TEST_TMP/coverage.out" | awk '/^total:/ {gsub("%", "", $3); print int($3)}')"
+    - test "$PCT" -ge 60
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+lint:
+  stage: test
+  image: "$GO_IMAGE"
+  script:
+    - go vet ./...
+    - staticcheck ./...
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+secret-scan:
+  stage: security
+  image:
+    name: trufflesecurity/trufflehog@sha256:8fd07ea46a3f59583c4d50f006d8cf150530141b28969c3c34cc455cb9165a6b
+    entrypoint: [""]
+  script:
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+        RESULTS=verified,unknown
+      elif [ -n "$CI_COMMIT_BEFORE_SHA" ] && [ "$CI_COMMIT_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+        BASE="$CI_COMMIT_BEFORE_SHA"
+        RESULTS=verified,unknown
+      else
+        BASE=""
+        RESULTS=verified
+      fi
+      if [ -n "$BASE" ]; then
+        trufflehog git file://. --since-commit "$BASE" --results="$RESULTS" --exclude-paths=.github/trufflehog-exclude.txt --fail
+      else
+        trufflehog git file://. --results=verified --exclude-paths=.github/trufflehog-exclude.txt --fail
+      fi
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+vuln-scan:
+  stage: security
+  image: "$GO_IMAGE"
+  script:
+    - govulncheck ./...
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - exists:
+        - go.sum
+
+workflow-policy:
+  stage: security
+  image: "$GO_IMAGE"
+  script:
+    - |
+      set -eu
+      if grep -nE '^[[:space:]]*image:[[:space:]]*[^[:space:]#]+:[^@[:space:]]+' .gitlab-ci.yml; then
+        echo "ERROR: GitLab container images must be pinned by digest" >&2
+        exit 1
+      fi
+      if grep -nE 'casjaysdev/go:latest' Jenkinsfile; then
+        echo "ERROR: Jenkins Go image must be pinned by digest" >&2
+        exit 1
+      fi
+      if grep -RnE '^[[:space:]]*uses:' .github/workflows .gitea/workflows .forgejo/workflows 2>/dev/null | grep -vE '@[0-9a-f]{40}([[:space:]]|$)'; then
+        echo "ERROR: CI actions must be pinned to full commit SHAs" >&2
+        exit 1
+      fi
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+build-scan-image:
+  stage: build
+  image: docker@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c
+  services:
+    - name: docker@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
+  script:
+    - docker build -t local/scan-target:ci -f docker/Dockerfile .
+    - docker save local/scan-target:ci -o scan-image.tar
+  artifacts:
+    paths:
+      - scan-image.tar
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+      exists:
+        - docker/Dockerfile
+    - if: '$CI_COMMIT_TAG'
+      exists:
+        - docker/Dockerfile
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      exists:
+        - docker/Dockerfile
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      exists:
+        - docker/Dockerfile
+
+image-scan:
+  stage: security
+  image: aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+  needs:
+    - job: build-scan-image
+      artifacts: true
+  script:
+    - trivy image --input scan-image.tar --exit-code 1 --severity CRITICAL,HIGH
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+      exists:
+        - docker/Dockerfile
+    - if: '$CI_COMMIT_TAG'
+      exists:
+        - docker/Dockerfile
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      exists:
+        - docker/Dockerfile
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      exists:
+        - docker/Dockerfile
+
+release:
+  stage: release
+  image: "$GO_IMAGE"
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - mkdir -p releases
+    - cp dist/*/* releases/
+    - VERSION="$(printf '%s' "$CI_COMMIT_TAG" | sed 's/^v//')"
+    - test -n "$VERSION"
+    - printf '%s\n' "$VERSION" > releases/version.txt
+    - tar --exclude=.git --exclude=.github --exclude=.gitea --exclude=.forgejo --exclude=dist --exclude=releases --exclude='*.tar.gz' -czf "releases/gitignore-$VERSION-source.tar.gz" .
+    - cyclonedx-gomod mod -json -output "releases/gitignore-$VERSION-sbom.cdx.json"
+    - cd releases
+    - find . -maxdepth 1 -type f ! -name sha256.txt ! -name sha512.txt -printf '%f\n' | sort | xargs sha256sum > sha256.txt
+    - find . -maxdepth 1 -type f ! -name sha256.txt ! -name sha512.txt -printf '%f\n' | sort | xargs sha512sum > sha512.txt
+    - cd ..
+    - |
+      PREVIOUS_TAG="$(git tag --sort=-version:refname | grep -Fvx "$CI_COMMIT_TAG" | head -n 1 || true)"
+      {
+        printf "Release %s\n\nChanges:\n" "$VERSION"
+        if [ -n "$PREVIOUS_TAG" ]; then
+          git log --pretty=format:"- %h %s" "$PREVIOUS_TAG..$CI_COMMIT_TAG"
+          git log --format=%B "$PREVIOUS_TAG..$CI_COMMIT_TAG" | grep -qi "BREAKING CHANGE" && printf "\n\nBreaking changes are declared in the commits above.\n" || printf "\n\nBreaking changes: none declared in commit messages.\n"
+        else
+          git log -n 50 --pretty=format:"- %h %s" "$CI_COMMIT_TAG"
+          git log -n 50 --format=%B "$CI_COMMIT_TAG" | grep -qi "BREAKING CHANGE" && printf "\n\nBreaking changes are declared in the commits above.\n" || printf "\n\nBreaking changes: none declared in commit messages.\n"
+        fi
+      } > release-notes.md
+      if grep -Fq "$" release-notes.md; then echo "ERROR: release notes contain unexpanded values" >&2; exit 1; fi
+  artifacts:
+    paths:
+      - releases/
+      - release-notes.md
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "gitignore $CI_COMMIT_TAG"
+    description: release-notes.md
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'

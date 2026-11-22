@@ -13,13 +13,16 @@ import (
 // handleDebugRoutes lists all registered routes
 func (s *Server) handleDebugRoutes(w http.ResponseWriter, r *http.Request) {
 	routes := []string{}
-	chi.Walk(s.router, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+	if err := chi.Walk(s.router, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
 		routes = append(routes, fmt.Sprintf("%s %s", method, route))
 		return nil
-	})
+	}); err != nil {
+		http.Error(w, "failed to enumerate routes", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data":    routes,
 		"count":   len(routes),
@@ -29,7 +32,7 @@ func (s *Server) handleDebugRoutes(w http.ResponseWriter, r *http.Request) {
 // handleDebugConfig shows current configuration
 func (s *Server) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
 			"version":    s.config.Version,
@@ -50,7 +53,7 @@ func (s *Server) handleDebugTemplates(w http.ResponseWriter, r *http.Request) {
 	stats := s.config.Templates.Stats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data":    stats,
 	})

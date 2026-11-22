@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -42,10 +43,10 @@ func newFixture(t *testing.T, latestTag string, releases []Release) *fixture {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/bin", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(binaryData)
+		_, _ = w.Write(binaryData)
 	})
 	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(checksums))
+		_, _ = w.Write([]byte(checksums))
 	})
 
 	// Attach asset URLs pointing at this server.
@@ -74,7 +75,7 @@ func newFixture(t *testing.T, latestTag string, releases []Release) *fixture {
 			return
 		}
 		attach(latest)
-		json.NewEncoder(w).Encode(latest)
+		_ = json.NewEncoder(w).Encode(latest)
 	})
 	mux.HandleFunc("/repos/apimgr/gitignore/releases", func(w http.ResponseWriter, r *http.Request) {
 		out := make([]Release, len(releases))
@@ -82,7 +83,7 @@ func newFixture(t *testing.T, latestTag string, releases []Release) *fixture {
 		for i := range out {
 			attach(&out[i])
 		}
-		json.NewEncoder(w).Encode(out)
+		_ = json.NewEncoder(w).Encode(out)
 	})
 
 	fx.server = httptest.NewServer(mux)
@@ -248,7 +249,7 @@ func TestDownloadVerifiedChecksumMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("downloadVerified: %v", err)
 	}
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.RemoveAll(filepath.Dir(tmpPath)) }()
 	got, err := os.ReadFile(tmpPath)
 	if err != nil {
 		t.Fatalf("read downloaded: %v", err)

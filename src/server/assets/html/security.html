@@ -1,0 +1,20 @@
+{{define "content"}}
+<div class="container container-md">
+<header class="page-header"><h1 class="page-title">{{t .Lang "security_page.title"}}</h1><p class="page-lead">{{t .Lang "security_page.description"}}</p></header>
+<section class="section-card" aria-labelledby="report-vulnerability">
+<h2 id="report-vulnerability">Report a vulnerability</h2>
+<ol>
+<li>Use <a href="https://github.com/apimgr/gitignore/security/advisories/new" rel="noopener noreferrer">GitHub private vulnerability reporting</a>.</li>
+<li>To report a vulnerability in this deployed instance, use the <a href="{{.Data.reportURL}}">security report form</a>.</li>
+<li>If private reporting is unavailable, email <a href="mailto:{{.Data.email}}">{{.Data.email}}</a> with a description, impact, affected version, and reproduction steps.</li>
+</ol>
+<p>Please do not open a public issue for a security vulnerability. See the <a href="{{path "/server/security/policy"}}">security policy</a> for the response process.</p>
+</section>
+<section class="section-card" aria-labelledby="security-contact">
+<h2 id="security-contact">Security contact</h2>
+<p>The machine-readable contact file is available at <a href="{{path "/.well-known/security.txt"}}">/.well-known/security.txt</a>; it expires at {{.Data.expires}}.</p>
+{{if .Data.pgpAvailable}}<p>Public encryption key: <a href="{{path "/.well-known/pgp-key.asc"}}">PGP key</a> (fingerprint {{.Data.pgpFingerprint}}).</p>{{end}}
+<p><a href="{{path "/server/security/thanks"}}">Researcher acknowledgments</a>.</p>
+</section>
+</div>
+{{end}}

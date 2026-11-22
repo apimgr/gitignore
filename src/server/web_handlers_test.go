@@ -221,4 +221,22 @@ func TestHandleGraphiQLPage(t *testing.T) {
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control = %q, want no-store", cc)
 	}
+	if !strings.Contains(rec.Body.String(), `data-graphql-url="/api/v1/server/graphql"`) {
+		t.Errorf("GraphiQL is not bound to the canonical API route: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "<style") {
+		t.Error("GraphiQL page contains inline CSS")
+	}
+}
+
+func TestHandleAPIHelpMCPShape(t *testing.T) {
+	s := newTestPageServer()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/server/help/mcp", nil)
+	rec := httptest.NewRecorder()
+	s.handleAPIHelpMCP(rec, req)
+	for _, expected := range []string{`"enabled":true`, `"url":"http://example.com/api/v1/server/mcp"`, `"aliases"`, `"scheme":"Bearer"`, `"tools"`, `"project"`} {
+		if !strings.Contains(rec.Body.String(), expected) {
+			t.Errorf("MCP help response missing %s: %s", expected, rec.Body.String())
+		}
+	}
 }

@@ -1,17 +1,24 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"html/template"
+	htmltemplate "html/template"
 	"net/http"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/blocklist"
+	displayformat "github.com/apimgr/gitignore/src/common/format"
 	"github.com/apimgr/gitignore/src/common/httputil"
+	"github.com/apimgr/gitignore/src/common/i18n"
+	"github.com/apimgr/gitignore/src/cve"
 	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/template"
 	"github.com/apimgr/gitignore/src/tor"
 )
 
@@ -30,13 +37,19 @@ type HealthResponse struct {
 	GoVersion string    `json:"go_version"`
 	Build     BuildInfo `json:"build"`
 
-	Uptime    string    `json:"uptime"`
-	Mode      string    `json:"mode"`
-	Timestamp time.Time `json:"timestamp"`
+	Uptime    string      `json:"uptime"`
+	Mode      string      `json:"mode"`
+	Timestamp time.Time   `json:"timestamp"`
+	Cluster   ClusterInfo `json:"cluster"`
 
 	Features FeaturesInfo `json:"features"`
 	Checks   ChecksInfo   `json:"checks"`
 	Stats    StatsInfo    `json:"stats"`
+}
+
+// ClusterInfo reports the cluster mode, which is disabled for this single-instance application.
+type ClusterInfo struct {
+	Enabled bool `json:"enabled"`
 }
 
 // ProjectInfo carries branding identity (AI.md PART 16).
@@ -55,6 +68,7 @@ type BuildInfo struct {
 // FeaturesInfo reports non-negotiable public features (AI.md PARTS 19, 31).
 type FeaturesInfo struct {
 	Tor   TorInfo `json:"tor"`
+	I2P   I2PInfo `json:"i2p"`
 	GeoIP bool    `json:"geoip"`
 }
 
@@ -66,14 +80,166 @@ type TorInfo struct {
 	Hostname string `json:"hostname"`
 }
 
+// I2PInfo reports the public-safe state of the optional eepsite.
+type I2PInfo struct {
+	Enabled  bool   `json:"enabled"`
+	Running  bool   `json:"running"`
+	Status   string `json:"status"`
+	Hostname string `json:"hostname"`
+	Provider string `json:"provider"`
+}
+
 // ChecksInfo reports component health as "ok"/"error" only — never details
 // (AI.md PART 13 "Database/cache checks MUST be vague").
 type ChecksInfo struct {
-	Database  string `json:"database"`
-	Cache     string `json:"cache"`
-	Disk      string `json:"disk"`
-	Scheduler string `json:"scheduler"`
-	Tor       string `json:"tor,omitempty"`
+	Database         string            `json:"database"`
+	Cache            string            `json:"cache"`
+	Disk             string            `json:"disk"`
+	Scheduler        string            `json:"scheduler"`
+	Tor              string            `json:"tor,omitempty"`
+	I2P              string            `json:"i2p,omitempty"`
+	Datasets         map[string]string `json:"-"`
+	DatasetOrder     []string          `json:"-"`
+	CriticalDatasets map[string]bool   `json:"-"`
+}
+
+func (c ChecksInfo) MarshalJSON() ([]byte, error) {
+	var out bytes.Buffer
+	out.WriteByte('{')
+	first := true
+	write := func(key, value string) error {
+		if !first {
+			out.WriteByte(',')
+		}
+		first = false
+		keyJSON, err := json.Marshal(key)
+		if err != nil {
+			return err
+		}
+		valueJSON, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		out.Write(keyJSON)
+		out.WriteByte(':')
+		out.Write(valueJSON)
+		return nil
+	}
+	for _, item := range []struct{ key, value string }{{"database", c.Database}, {"cache", c.Cache}, {"disk", c.Disk}, {"scheduler", c.Scheduler}} {
+		if err := write(item.key, item.value); err != nil {
+			return nil, err
+		}
+	}
+	if c.Tor != "" {
+		if err := write("tor", c.Tor); err != nil {
+			return nil, err
+		}
+	}
+	if c.I2P != "" {
+		if err := write("i2p", c.I2P); err != nil {
+			return nil, err
+		}
+	}
+	keys := append([]string(nil), c.DatasetOrder...)
+	if len(keys) == 0 {
+		for key := range c.Datasets {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+	}
+	for _, key := range keys {
+		if err := write(key, c.Datasets[key]); err != nil {
+			return nil, err
+		}
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
+func (s *Server) registerHealthChecks() {
+	if s.healthRegistry == nil {
+		return
+	}
+	if s.geoip != nil && s.geoip.Enabled() {
+		for _, id := range []string{"asn", "country", "city"} {
+			key := "geoip_" + id
+			name := key
+			manager := s.geoip
+			_ = s.healthRegistry.Register(name, false, func() string {
+				return manager.HealthStatuses(time.Now().UTC())[name]
+			})
+		}
+	}
+	if s.blocklist != nil {
+		ids := []string{blocklist.FireHOLID}
+		if s.config != nil && s.currentConfig() != nil {
+			for _, source := range s.currentConfig().Server.Security.Blocklists.ExtraSources {
+				if source.Enabled == nil || *source.Enabled {
+					ids = append(ids, source.ID)
+				}
+			}
+		}
+		for _, id := range ids {
+			key := "blocklist_" + id
+			sourceID := id
+			matcher := s.blocklist
+			_ = s.healthRegistry.Register(key, false, func() string {
+				for _, source := range matcher.Status(time.Now().UTC()) {
+					if source.ID == sourceID {
+						return source.State
+					}
+				}
+				return "error"
+			})
+		}
+	}
+	templates := (*template.Manager)(nil)
+	if s.config != nil {
+		templates = s.config.Templates
+	}
+	_ = s.healthRegistry.Register("data_templates", true, func() string {
+		if templates == nil || templates.Count() == 0 {
+			return "error"
+		}
+		return "ok"
+	})
+	if s.securityDir != "" {
+		securityDir := s.securityDir
+		_ = s.healthRegistry.Register("data_cve_nvd", false, func() string {
+			return cve.HealthStatus(securityDir, "nvd", time.Now().UTC())
+		})
+		if s.config != nil && s.currentConfig() != nil && s.currentConfig().Data.Trivy.Enabled {
+			_ = s.healthRegistry.Register("data_trivy_db", false, func() string {
+				return cve.HealthStatus(securityDir, "trivy", time.Now().UTC())
+			})
+		}
+	}
+	s.refreshHealthCore()
+	s.healthRegistry.RefreshNow()
+}
+
+// RefreshHealth refreshes cached dataset checks after an update or reload.
+func (s *Server) RefreshHealth() error {
+	s.refreshHealthCore()
+	if s.healthRegistry != nil {
+		s.healthRegistry.RefreshNow()
+	}
+	return nil
+}
+
+// refreshHealthCore performs the potentially blocking core probes outside the
+// request path. The scheduler and data reload hooks refresh these cached values.
+func (s *Server) refreshHealthCore() {
+	checks := ChecksInfo{
+		Database:  okError(db.Ping() == nil),
+		Cache:     "ok",
+		Disk:      okError(s.diskWritable()),
+		Scheduler: okError(s.schedulerHealthy()),
+	}
+	s.healthCoreMu.Lock()
+	s.healthCore = checks
+	s.healthCoreRefreshed = time.Now().UTC()
+	s.healthCoreMu.Unlock()
 }
 
 // StatsInfo reports public-safe aggregate counters (AI.md PART 13).
@@ -92,11 +258,15 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 	switch httputil.DetectResponseFormat(r) {
 	case "text/plain":
-		s.writeHealthText(w, resp)
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			s.writeHealthText(w, resp)
+		} else {
+			s.writeHealthFrontendText(w, r, resp)
+		}
 	case "application/json":
 		s.writeHealthJSON(w, resp)
 	default:
-		s.writeHealthHTML(w, resp)
+		s.writeHealthHTML(w, r, resp)
 	}
 }
 
@@ -104,13 +274,13 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) buildHealthResponse() HealthResponse {
 	var resp HealthResponse
 
-	if s.config != nil && s.config.Cfg != nil {
+	if s.config != nil && s.currentConfig() != nil {
 		resp.Project = ProjectInfo{
-			Name:        s.config.Cfg.Server.Branding.Title,
-			Tagline:     s.config.Cfg.Server.Branding.Tagline,
-			Description: s.config.Cfg.Server.Branding.Description,
+			Name:        s.currentConfig().Server.Branding.Title,
+			Tagline:     s.currentConfig().Server.Branding.Tagline,
+			Description: s.currentConfig().Server.Branding.Description,
 		}
-		resp.Mode = s.config.Cfg.Server.Mode
+		resp.Mode = s.currentConfig().Server.Mode
 	}
 	if resp.Project.Name == "" {
 		resp.Project.Name = "gitignore"
@@ -124,10 +294,15 @@ func (s *Server) buildHealthResponse() HealthResponse {
 	resp.Build = BuildInfo{Commit: s.config.Commit, Date: s.config.BuildDate}
 	resp.Uptime = formatUptime(time.Since(s.startTime))
 	resp.Timestamp = time.Now().UTC()
+	resp.Cluster = ClusterInfo{Enabled: false}
 
 	resp.Features = s.healthFeatures()
-	resp.Checks = s.healthChecks(resp.Features.Tor)
+	resp.Checks = s.healthChecks(resp.Features.Tor, resp.Features.I2P)
 	resp.Status = overallStatus(resp.Checks)
+	if s.config != nil && s.config.ConfigManager != nil && s.config.ConfigManager.PendingRestart() {
+		resp.PendingRestart = true
+		resp.RestartReason = s.config.ConfigManager.RestartSettings()
+	}
 
 	if s.stats != nil {
 		total, last24h, active := s.stats.snapshot(time.Now())
@@ -140,15 +315,15 @@ func (s *Server) buildHealthResponse() HealthResponse {
 // healthFeatures reports Tor and GeoIP feature state (AI.md PARTS 19, 31).
 func (s *Server) healthFeatures() FeaturesInfo {
 	var f FeaturesInfo
-	if s.config != nil && s.config.Cfg != nil {
-		f.GeoIP = s.config.Cfg.Server.GeoIP.Enabled
+	if s.config != nil && s.currentConfig() != nil {
+		f.GeoIP = s.currentConfig().Server.GeoIP.Enabled
 	}
 
 	configuredBinary := ""
 	dataDir := ""
 	if s.config != nil {
-		if s.config.Cfg != nil {
-			configuredBinary = s.config.Cfg.Server.Tor.Binary
+		if s.currentConfig() != nil {
+			configuredBinary = s.currentConfig().Server.Tor.Binary
 		}
 		if s.config.Paths != nil {
 			dataDir = s.config.Paths.GetDataDir()
@@ -175,20 +350,48 @@ func (s *Server) healthFeatures() FeaturesInfo {
 	default:
 		f.Tor.Status = "disabled"
 	}
+	if s.config != nil && s.config.I2PStatus != nil {
+		f.I2P = s.config.I2PStatus()
+	} else {
+		f.I2P = I2PInfo{Status: "disabled", Provider: "none"}
+	}
 	return f
 }
 
 // healthChecks probes each subsystem and returns "ok"/"error" only. Details are
 // deliberately withheld — the endpoint is public (AI.md PART 13 security rules).
-func (s *Server) healthChecks(torInfo TorInfo) ChecksInfo {
-	c := ChecksInfo{
-		Database:  okError(db.Ping() == nil),
-		Cache:     "ok",
-		Disk:      okError(s.diskWritable()),
-		Scheduler: okError(s.schedulerHealthy()),
+func (s *Server) healthChecks(torInfo TorInfo, i2pInfos ...I2PInfo) ChecksInfo {
+	s.healthCoreMu.RLock()
+	c := s.healthCore
+	refreshed := s.healthCoreRefreshed
+	s.healthCoreMu.RUnlock()
+	if refreshed.IsZero() {
+		s.refreshHealthCore()
+		s.healthCoreMu.RLock()
+		c = s.healthCore
+		s.healthCoreMu.RUnlock()
+	}
+	if s.healthRegistry != nil {
+		c.Datasets = make(map[string]string)
+		c.CriticalDatasets = make(map[string]bool)
+		for _, item := range s.healthRegistry.Snapshot() {
+			c.DatasetOrder = append(c.DatasetOrder, item.Key)
+			c.Datasets[item.Key] = item.State
+			c.CriticalDatasets[item.Key] = item.Critical
+		}
 	}
 	if torInfo.Enabled {
-		c.Tor = okError(torInfo.Running)
+		c.Tor = "ok"
+		if torInfo.Status == "unavailable" {
+			c.Tor = "degraded"
+		}
+	}
+	if len(i2pInfos) > 0 && i2pInfos[0].Enabled {
+		if i2pInfos[0].Status == "unavailable" {
+			c.I2P = "degraded"
+		} else {
+			c.I2P = "ok"
+		}
 	}
 	return c
 }
@@ -217,7 +420,7 @@ func (s *Server) diskWritable() bool {
 // newline (AI.md PART 13 JSON format).
 func (s *Server) writeHealthJSON(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if resp.Status != "healthy" {
+	if resp.Status == "unhealthy" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	data, err := json.MarshalIndent(resp, "", "  ")
@@ -232,7 +435,7 @@ func (s *Server) writeHealthJSON(w http.ResponseWriter, resp HealthResponse) {
 // numbered section comments in canonical order (AI.md PART 13 plain text).
 func (s *Server) writeHealthText(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	if resp.Status != "healthy" {
+	if resp.Status == "unhealthy" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	var b strings.Builder
@@ -255,12 +458,23 @@ func (s *Server) writeHealthText(w http.ResponseWriter, resp HealthResponse) {
 	fmt.Fprintf(&b, "uptime: %s\n", resp.Uptime)
 	fmt.Fprintf(&b, "mode: %s\n", resp.Mode)
 	fmt.Fprintf(&b, "timestamp: %s\n\n", resp.Timestamp.Format(time.RFC3339))
+	fmt.Fprintf(&b, "cluster.enabled: %t\n\n", resp.Cluster.Enabled)
 
 	b.WriteString("# 5. Features - NON-NEGOTIABLE only (show actual status)\n")
 	fmt.Fprintf(&b, "features.tor.enabled: %t\n", resp.Features.Tor.Enabled)
 	fmt.Fprintf(&b, "features.tor.running: %t\n", resp.Features.Tor.Running)
 	fmt.Fprintf(&b, "features.tor.status: %s\n", resp.Features.Tor.Status)
 	fmt.Fprintf(&b, "features.tor.hostname: %s\n", resp.Features.Tor.Hostname)
+	fmt.Fprintf(&b, "features.i2p.enabled: %t\n", resp.Features.I2P.Enabled)
+	fmt.Fprintf(&b, "features.i2p.running: %t\n", resp.Features.I2P.Running)
+	fmt.Fprintf(&b, "features.i2p.status: %s\n", resp.Features.I2P.Status)
+	fmt.Fprintf(&b, "features.i2p.hostname: %s\n", resp.Features.I2P.Hostname)
+	fmt.Fprintf(&b, "features.i2p.provider: %s\n", resp.Features.I2P.Provider)
+	b.WriteString("features.i2p: " + resp.Features.I2P.Status)
+	if resp.Features.I2P.Hostname != "" {
+		b.WriteString(" " + resp.Features.I2P.Hostname)
+	}
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "features.geoip: %t\n\n", resp.Features.GeoIP)
 
 	b.WriteString("# 6. Checks\n")
@@ -270,6 +484,19 @@ func (s *Server) writeHealthText(w http.ResponseWriter, resp HealthResponse) {
 	fmt.Fprintf(&b, "checks.scheduler: %s\n", resp.Checks.Scheduler)
 	if resp.Checks.Tor != "" {
 		fmt.Fprintf(&b, "checks.tor: %s\n", resp.Checks.Tor)
+	}
+	if resp.Checks.I2P != "" {
+		fmt.Fprintf(&b, "checks.i2p: %s\n", resp.Checks.I2P)
+	}
+	datasetKeys := append([]string(nil), resp.Checks.DatasetOrder...)
+	if len(datasetKeys) == 0 {
+		for key := range resp.Checks.Datasets {
+			datasetKeys = append(datasetKeys, key)
+		}
+		sort.Strings(datasetKeys)
+	}
+	for _, key := range datasetKeys {
+		fmt.Fprintf(&b, "checks.%s: %s\n", key, resp.Checks.Datasets[key])
 	}
 	b.WriteString("\n")
 
@@ -281,140 +508,199 @@ func (s *Server) writeHealthText(w http.ResponseWriter, resp HealthResponse) {
 	_, _ = w.Write([]byte(b.String()))
 }
 
-// healthPageTemplate renders the public health page (AI.md PART 13 HTML format).
-// It is self-contained so the endpoint always renders regardless of the site
-// layout templates. All values are public-safe.
-var healthTemplateFuncs = template.FuncMap{
-	"statusClass": func(v string) string {
-		if v == "ok" {
-			return "status-ok-text"
+func (s *Server) writeHealthFrontendText(w http.ResponseWriter, r *http.Request, resp HealthResponse) {
+	lang := i18n.LangFromContext(r.Context())
+	t := func(key string) string { return i18n.Translate(lang, "health."+key) }
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if resp.Status == "unhealthy" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	var b strings.Builder
+	title := resp.Project.Name
+	if resp.Project.Tagline != "" {
+		title += " - " + resp.Project.Tagline
+	}
+	fmt.Fprintf(&b, "%s\n\n", title)
+	fmt.Fprintf(&b, "%s:    %s\n", t("field.status"), t("status."+resp.Status))
+	fmt.Fprintf(&b, "%s:   %s\n", t("field.version"), resp.Version)
+	fmt.Fprintf(&b, "%s:     %s (%s)\n", t("field.build"), resp.Build.Commit, humanTimestampString(resp.Build.Date))
+	fmt.Fprintf(&b, "%s:        %s\n", t("field.go_version"), resp.GoVersion)
+	fmt.Fprintf(&b, "%s:    %s\n", t("field.uptime"), displayformat.Duration(time.Since(s.startTime), lang))
+	fmt.Fprintf(&b, "%s:      %s\n", t("field.mode"), t("mode."+resp.Mode))
+	fmt.Fprintf(&b, "%s:    %s\n", t("field.checked"), humanTimestamp(resp.Timestamp))
+	fmt.Fprintf(&b, "%s:   %s\n\n", t("field.cluster"), translatedBool(lang, resp.Cluster.Enabled))
+
+	fmt.Fprintf(&b, "%s\n", t("section.features"))
+	fmt.Fprintf(&b, "  %s:     %s", t("feature.tor"), t("feature_status."+resp.Features.Tor.Status))
+	if resp.Features.Tor.Hostname != "" {
+		fmt.Fprintf(&b, " - %s", resp.Features.Tor.Hostname)
+	}
+	b.WriteByte('\n')
+	fmt.Fprintf(&b, "  %s:     %s", t("feature.i2p"), t("feature_status."+resp.Features.I2P.Status))
+	if resp.Features.I2P.Hostname != "" {
+		fmt.Fprintf(&b, " - %s", resp.Features.I2P.Hostname)
+	}
+	b.WriteByte('\n')
+	fmt.Fprintf(&b, "  %s:   %s\n\n", t("feature.geoip"), translatedBool(lang, resp.Features.GeoIP))
+
+	fmt.Fprintf(&b, "%s\n", t("section.checks"))
+	fmt.Fprintf(&b, "  %-19s %s\n", t("check.database"), translatedCheckState(lang, resp.Checks.Database))
+	fmt.Fprintf(&b, "  %-19s %s\n", t("check.cache"), translatedCheckState(lang, resp.Checks.Cache))
+	fmt.Fprintf(&b, "  %-19s %s\n", t("check.disk"), translatedCheckState(lang, resp.Checks.Disk))
+	fmt.Fprintf(&b, "  %-19s %s\n", t("check.scheduler"), translatedCheckState(lang, resp.Checks.Scheduler))
+	if resp.Checks.Tor != "" {
+		fmt.Fprintf(&b, "  %-19s %s\n", t("feature.tor"), translatedCheckState(lang, resp.Checks.Tor))
+	}
+	if resp.Checks.I2P != "" {
+		fmt.Fprintf(&b, "  %-19s %s\n", t("feature.i2p"), translatedCheckState(lang, resp.Checks.I2P))
+	}
+	for _, key := range resp.Checks.DatasetOrder {
+		fmt.Fprintf(&b, "  %-19s %s\n", healthCheckLabel(lang, key)+":", translatedCheckState(lang, resp.Checks.Datasets[key]))
+	}
+	fmt.Fprintf(&b, "\n%s\n", t("section.stats"))
+	fmt.Fprintf(&b, "  %s: %s\n", t("field.total_requests"), displayformat.Count(resp.Stats.RequestsTotal, lang))
+	fmt.Fprintf(&b, "  %s: %s\n", t("field.requests_24h"), displayformat.Count(resp.Stats.Requests24h, lang))
+	fmt.Fprintf(&b, "  %s: %s\n", t("field.active_connections"), displayformat.Count(int64(resp.Stats.ActiveConns), lang))
+	_, _ = w.Write([]byte(b.String()))
+}
+
+func healthCheckLabel(lang, key string) string {
+	if translated := i18n.Translate(lang, "health.check."+key); translated != "health.check."+key {
+		return translated
+	}
+	for _, prefix := range []struct{ key, kind string }{{"geoip_", "geoip"}, {"blocklist_", "blocklist"}, {"data_", "data"}} {
+		if strings.HasPrefix(key, prefix.key) {
+			label := i18n.Translate(lang, "health.check_kind."+prefix.kind)
+			if label == "health.check_kind."+prefix.kind {
+				switch prefix.kind {
+				case "geoip":
+					label = "GeoIP"
+				case "blocklist":
+					label = "Blocklist"
+				default:
+					label = "Data"
+				}
+			}
+			return label + ": " + strings.ReplaceAll(strings.TrimPrefix(key, prefix.key), "_", " ")
 		}
-		return "status-error-text"
+	}
+	label := strings.ReplaceAll(key, "_", " ")
+	if label != "" {
+		label = strings.ToUpper(label[:1]) + label[1:]
+	}
+	return label
+}
+
+func translatedBool(lang string, value bool) string {
+	key := "common.disabled"
+	if value {
+		key = "common.enabled"
+	}
+	return i18n.Translate(lang, key)
+}
+
+func translatedCheckState(lang, state string) string {
+	return i18n.Translate(lang, "health.check_state."+state)
+}
+
+func humanTimestamp(value time.Time) string {
+	return value.UTC().Format("January 2, 2006 at 15:04:05 MST")
+}
+
+func humanTimestampString(value string) string {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return value
+	}
+	return humanTimestamp(parsed)
+}
+
+type healthPageView struct {
+	HealthResponse
+	Lang           string
+	ModeLabel      string
+	BannerClass    string
+	StatusIcon     string
+	StatusText     string
+	TimestampISO   string
+	TimestampHuman string
+	BuildDateHuman string
+	UptimeHuman    string
+}
+
+var healthTemplateFuncs = htmltemplate.FuncMap{
+	"statusClass": func(value string) string {
+		switch value {
+		case "ok", "healthy", "running":
+			return "status-ok"
+		case "degraded", "starting", "restart_required":
+			return "status-warning"
+		default:
+			return "status-error"
+		}
+	},
+	"t":       func(lang, key string) string { return i18n.Translate(lang, key) },
+	"label":   healthCheckLabel,
+	"state":   translatedCheckState,
+	"enabled": translatedBool,
+	"number": func(lang string, value interface{}) string {
+		switch count := value.(type) {
+		case int:
+			return displayformat.Count(int64(count), lang)
+		case int64:
+			return displayformat.Count(count, lang)
+		default:
+			return fmt.Sprint(value)
+		}
 	},
 }
 
-var healthPageTemplate = template.Must(template.New("healthz").Funcs(healthTemplateFuncs).Parse(`<!DOCTYPE html>
-<html lang="en" class="theme-dark">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Project.Name}} - Health Status</title>
-<meta http-equiv="refresh" content="30">
-<style>
-:root{color-scheme:dark light}
-body{font-family:system-ui,sans-serif;max-width:60rem;margin:0 auto;padding:1.5rem;background:#0f172a;color:#e2e8f0}
-h1{margin:.25rem 0}
-.tagline{color:#94a3b8;margin:.25rem 0}
-.status-banner{padding:1rem;border-radius:8px;text-align:center;font-size:1.25rem;margin:1.5rem 0}
-.status-ok{background:#052e16;color:#4ade80}
-.status-error{background:#450a0a;color:#f87171}
-.status-warning{background:#451a03;color:#fbbf24}
-.section-card{background:#1e293b;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem}
-.info-list{display:grid;grid-template-columns:auto 1fr;gap:.35rem 1rem;margin:0}
-.info-list dt{color:#94a3b8}
-.info-list dd{margin:0}
-code{background:#0f172a;padding:.1rem .35rem;border-radius:4px}
-.data-table{width:100%;border-collapse:collapse}
-.data-table th,.data-table td{text-align:left;padding:.35rem .5rem;border-bottom:1px solid #334155}
-.status-ok-text{color:#4ade80}
-.status-error-text{color:#f87171}
-.code-block{overflow-x:auto;background:#0f172a;padding:.5rem;border-radius:4px;margin-top:.35rem}
-</style>
-</head>
-<body>
-<header class="health-header">
-<h1>📦 {{.Project.Name}}</h1>
-{{if .Project.Tagline}}<p class="tagline">{{.Project.Tagline}}</p>{{end}}
-{{if .Project.Description}}<p>{{.Project.Description}}</p>{{end}}
-</header>
-
-<div class="status-banner {{.BannerClass}}">
-<span class="status-icon">{{.StatusIcon}}</span>
-<span class="status-text">{{.StatusText}}</span>
-</div>
-
-<section class="section-card">
-<h2>ℹ️ Version</h2>
-<dl class="info-list">
-<dt>🏷️ Version</dt><dd><code>{{.Version}}</code></dd>
-<dt>🐹 Go Version</dt><dd><code>{{.GoVersion}}</code></dd>
-<dt>🔨 Build</dt><dd><code>{{.Build.Commit}}</code> ({{.Build.Date}})</dd>
-<dt>⏱️ Uptime</dt><dd>{{.Uptime}}</dd>
-<dt>🚀 Mode</dt><dd><span class="badge">{{.Mode}}</span></dd>
-</dl>
-</section>
-
-<section class="section-card">
-<h2>🎛️ Features</h2>
-<ul class="feature-list">
-<li>🧅 Tor: <span class="{{if .Features.Tor.Running}}status-ok-text{{else}}status-error-text{{end}}">{{.Features.Tor.Status}}</span>
-{{if .Features.Tor.Hostname}}<div class="code-block"><code>{{.Features.Tor.Hostname}}</code></div>{{end}}
-</li>
-<li>🌍 GeoIP: {{if .Features.GeoIP}}enabled{{else}}disabled{{end}}</li>
-</ul>
-</section>
-
-<section class="section-card">
-<h2>🔧 Component Status</h2>
-<table class="data-table">
-<thead><tr><th>Component</th><th>Status</th></tr></thead>
-<tbody>
-<tr><td>🗄️ Database</td><td class="{{statusClass .Checks.Database}}">{{.Checks.Database}}</td></tr>
-<tr><td>💾 Cache</td><td class="{{statusClass .Checks.Cache}}">{{.Checks.Cache}}</td></tr>
-<tr><td>💿 Disk</td><td class="{{statusClass .Checks.Disk}}">{{.Checks.Disk}}</td></tr>
-<tr><td>⏰ Scheduler</td><td class="{{statusClass .Checks.Scheduler}}">{{.Checks.Scheduler}}</td></tr>
-{{if .Checks.Tor}}<tr><td>🧅 Tor</td><td class="{{statusClass .Checks.Tor}}">{{.Checks.Tor}}</td></tr>{{end}}
-</tbody>
-</table>
-</section>
-
-<section class="section-card">
-<h2>📈 Server Statistics</h2>
-<dl class="info-list">
-<dt>📥 Total Requests</dt><dd>{{.Stats.RequestsTotal}}</dd>
-<dt>📅 Requests (24h)</dt><dd>{{.Stats.Requests24h}}</dd>
-<dt>🔌 Active Connections</dt><dd>{{.Stats.ActiveConns}}</dd>
-</dl>
-</section>
-
-<footer class="health-footer">
-<p>Last checked: <time datetime="{{.TimestampISO}}">{{.TimestampISO}}</time></p>
-</footer>
-</body>
-</html>
-`))
-
-// writeHealthHTML renders the public HTML health page (AI.md PART 13 HTML).
-func (s *Server) writeHealthHTML(w http.ResponseWriter, resp HealthResponse) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if resp.Status != "healthy" {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}
-
-	view := struct {
-		HealthResponse
-		BannerClass  string
-		StatusIcon   string
-		StatusText   string
-		TimestampISO string
-	}{
+// writeHealthHTML renders the public HTML health page inside the shared site shell.
+func (s *Server) writeHealthHTML(w http.ResponseWriter, r *http.Request, resp HealthResponse) {
+	lang := i18n.LangFromContext(r.Context())
+	view := &healthPageView{
 		HealthResponse: resp,
+		Lang:           lang,
+		ModeLabel:      i18n.Translate(lang, "health.mode."+resp.Mode),
 		BannerClass:    bannerClass(resp.Status),
 		StatusIcon:     statusIcon(resp.Status),
-		StatusText:     statusText(resp.Status),
+		StatusText:     i18n.Translate(lang, "health.status."+resp.Status),
 		TimestampISO:   resp.Timestamp.Format(time.RFC3339),
+		TimestampHuman: humanTimestamp(resp.Timestamp),
+		BuildDateHuman: humanTimestampString(resp.Build.Date),
+		UptimeHuman:    displayformat.Duration(time.Since(s.startTime), lang),
 	}
-	_ = healthPageTemplate.Execute(w, view)
+	status := http.StatusOK
+	if resp.Status == "unhealthy" {
+		status = http.StatusServiceUnavailable
+	}
+	documentTitle := resp.Project.Name + " - " + i18n.Translate(lang, "health.title")
+	s.renderPageStatus(w, r, "healthz", status, PageData{
+		Title:         resp.Project.Name,
+		DocumentTitle: documentTitle,
+		Description:   resp.Project.Description,
+		Health:        view,
+	})
 }
 
 // overallStatus derives the aggregate status from component checks. A failed
 // database is fatal (unhealthy); any other failed check is degraded.
 func overallStatus(c ChecksInfo) string {
-	if c.Database == "error" {
+	if c.Database == "error" || c.Disk == "error" {
 		return "unhealthy"
 	}
-	if c.Cache == "error" || c.Disk == "error" || c.Scheduler == "error" || c.Tor == "error" {
+	if c.Cache == "error" || c.Scheduler == "error" || c.Tor == "degraded" || c.I2P == "degraded" {
 		return "degraded"
+	}
+	for key, value := range c.Datasets {
+		if value != "ok" && c.CriticalDatasets[key] {
+			return "unhealthy"
+		}
+	}
+	for _, value := range c.Datasets {
+		if value != "ok" {
+			return "degraded"
+		}
 	}
 	return "healthy"
 }

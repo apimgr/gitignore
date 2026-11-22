@@ -15,6 +15,22 @@ BINARY_NAME="gitignore"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_NAME="gitignore"
 VERSION="${VERSION:-latest}"
+REPOSITORY_URL="${REPOSITORY_URL:-https://github.com/apimgr/gitignore}"
+PROJECT_ORG="${PROJECT_ORG:-$(printf '%s\n' "$REPOSITORY_URL" | sed -E 's|https?://[^/]+/([^/]+)/.*|\1|')}"
+INTERNAL_NAME="${INTERNAL_NAME:-$(basename "${REPOSITORY_URL%.git}")}"
+case "$PROJECT_ORG:$INTERNAL_NAME" in
+    *[!A-Za-z0-9_:-]*|:*|*:) echo "Invalid project temp directory identity" >&2; exit 1 ;;
+esac
+TEMP_PARENT="${TMPDIR:-/tmp}/${PROJECT_ORG}"
+mkdir -p "$TEMP_PARENT"
+TEMP_DIR=$(mktemp -d "$TEMP_PARENT/${INTERNAL_NAME}-XXXXXX")
+TEMP_FILE="$TEMP_DIR/$BINARY_NAME.new"
+cleanup_temp() {
+    case "$TEMP_DIR" in
+        "$TEMP_PARENT/${INTERNAL_NAME}-"*) rm -rf -- "$TEMP_DIR" ;;
+    esac
+}
+trap cleanup_temp EXIT
 
 echo -e "${BLUE}🔄 GitIgnore API Server - Update${NC}"
 echo ""
@@ -72,8 +88,7 @@ stop_service() {
 # Download new binary
 echo -e "${BLUE}📦 Downloading update...${NC}"
 
-DOWNLOAD_URL="https://github.com/apimgr/gitignore/releases/${VERSION}/download/${BINARY_NAME}-${OS}-${ARCH}"
-TEMP_FILE="/tmp/${BINARY_NAME}.new"
+DOWNLOAD_URL="${REPOSITORY_URL}/releases/${VERSION}/download/${BINARY_NAME}-${OS}-${ARCH}"
 
 if command -v curl &> /dev/null; then
     curl -LSs "$DOWNLOAD_URL" -o "$TEMP_FILE"

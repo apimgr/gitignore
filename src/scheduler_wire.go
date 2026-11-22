@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	displayformat "github.com/apimgr/gitignore/src/common/format"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/geoip"
@@ -18,12 +19,16 @@ import (
 // buildScheduler constructs the scheduler from config and registers every
 // built-in task (AI.md PART 18). Backup handlers are injected here because
 // backup logic lives in package main.
-func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *geoip.Manager) (*scheduler.Scheduler, error) {
+func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *geoip.Manager, runtimeDeps ...scheduler.Deps) (*scheduler.Scheduler, error) {
 	catchUp := time.Hour
 	if cfg.Server.Schedule.CatchUpWindow != "" {
 		if d, err := time.ParseDuration(cfg.Server.Schedule.CatchUpWindow); err == nil && d > 0 {
 			catchUp = d
 		}
+	}
+	var taskState func(string, bool, string, time.Duration, time.Time)
+	if len(runtimeDeps) > 0 {
+		taskState = runtimeDeps[0].TaskState
 	}
 
 	s := scheduler.New(scheduler.Config{
@@ -34,6 +39,7 @@ func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *
 		OnError: func(id, name string, err error, nextRun time.Time) {
 			emitSchedulerError(id, name, err.Error(), fmtTime(nextRun))
 		},
+		OnState: taskState,
 	})
 
 	retention := cfg.Server.Maintenance.Cleanup.LogRetentionDays
@@ -42,18 +48,61 @@ func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *
 	}
 
 	deps := scheduler.Deps{
-		LogsDir:          logsDir,
-		LogRetentionDays: retention,
-		SSLEnabled:       cfg.Server.SSL.Enabled,
-		BackupEnabled:    true,
-		BackupDaily:      backupTaskHandler(cfg, configDir, dataDir, "daily"),
-		BackupHourly:     backupTaskHandler(cfg, configDir, dataDir, "hourly"),
-		UpdateCheck:      updateCheckHandler(cfg, dataDir),
-		TorInstalled:     torBinaryInstalled(cfg),
+		LogsDir:               logsDir,
+		ConfigDir:             configDir,
+		LogRetentionDays:      retention,
+		SecurityRetentionDays: cfg.Server.Security.Reports.RetentionDays,
+		SSLEnabled:            cfg.Server.SSL.Enabled,
+		BackupEnabled:         true,
+		BackupDaily:           backupTaskHandler(cfg, configDir, dataDir, "daily"),
+		BackupHourly:          backupTaskHandler(cfg, configDir, dataDir, "hourly"),
+		UpdateCheck:           updateCheckHandler(cfg, dataDir),
+		TorInstalled:          torBinaryInstalled(cfg),
+		I2PEnabled:            cfg.Server.I2P.Enabled,
+	}
+	if len(cfg.Web.Security.Keyservers) > 0 {
+		securityDir := filepath.Join(configDir, "security")
+		deps.PGPKeyserverPublish = func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			current, err := config.Load(filepath.Join(configDir, "server.yml"))
+			if err != nil {
+				return err
+			}
+			if !current.Web.Security.PublishPGPKey {
+				return nil
+			}
+			if _, err := os.Stat(filepath.Join(securityDir, pgpPublicFilename)); os.IsNotExist(err) {
+				return nil
+			}
+			return publishProjectPGPContext(ctx, current, securityDir)
+		}
+	}
+	if len(runtimeDeps) > 0 {
+		runtime := runtimeDeps[0]
+		deps.BlocklistUpdate = runtime.BlocklistUpdate
+		deps.CVEUpdate = runtime.CVEUpdate
+		deps.DiskCheck = runtime.DiskCheck
+		deps.DiskCheckInterval = runtime.DiskCheckInterval
+		deps.TorHealth = runtime.TorHealth
+		deps.I2PHealth = runtime.I2PHealth
+		deps.OwnerIdlePurgeDays = runtime.OwnerIdlePurgeDays
+		deps.PurgeIdleOwners = runtime.PurgeIdleOwners
+		deps.HealthRefresh = runtime.HealthRefresh
 	}
 
 	if gm != nil {
-		deps.GeoIPUpdate = geoipUpdateHandler(gm)
+		deps.GeoIPUpdate = func(ctx context.Context) error {
+			updateErr := geoipUpdateHandler(gm)(ctx)
+			if deps.HealthRefresh != nil {
+				refreshErr := deps.HealthRefresh(ctx)
+				if updateErr == nil {
+					return refreshErr
+				}
+			}
+			return updateErr
+		}
 	}
 
 	if err := scheduler.RegisterBuiltins(s, deps); err != nil {
@@ -78,33 +127,24 @@ func backupTaskHandler(cfg *config.Config, configDir, dataDir, kind string) sche
 			emitBackupFailed(name, err.Error())
 			return err
 		}
-		emitBackupComplete(name, backupFileSize(dest))
+		emitBackupComplete(name, backupFileSize(dest, cfg.Server.I18n.DefaultLanguage))
 		return nil
 	}
 }
 
 // backupFileSize returns a human-readable size for the finished backup file, or
 // "unknown" when it cannot be stat'd.
-func backupFileSize(path string) string {
+func backupFileSize(path, lang string) string {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return "unknown"
 	}
-	return humanizeBytes(fi.Size())
+	return displayformat.Size(fi.Size(), lang)
 }
 
 // humanizeBytes formats a byte count with a binary unit suffix.
 func humanizeBytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+	return displayformat.Size(n, "en")
 }
 
 // handleSchedulerCommand dispatches the `scheduler` CLI subcommands
@@ -120,7 +160,7 @@ func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDi
 		fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
 		os.Exit(exUnavailable)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	gm := newGeoIP(cfg, dataDir)
 	sched, err := buildScheduler(cfg, configDir, dataDir, logsDir, gm)
@@ -138,13 +178,13 @@ func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDi
 
 	switch sub {
 	case "list":
-		schedulerList(sched)
+		schedulerList(sched, cfg.Server.I18n.DefaultLanguage)
 	case "show":
 		if id == "" {
 			fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler show <id>")
 			os.Exit(exUsage)
 		}
-		schedulerShow(sched, id)
+		schedulerShow(sched, id, cfg.Server.I18n.DefaultLanguage)
 	case "run":
 		if id == "" {
 			fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler run <id>")
@@ -175,7 +215,7 @@ func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDi
 			fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler history <id>")
 			os.Exit(exUsage)
 		}
-		schedulerHistory(sched, id)
+		schedulerHistory(sched, id, cfg.Server.I18n.DefaultLanguage)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown scheduler command: %s\n", sub)
 		os.Exit(exUsage)
@@ -206,24 +246,24 @@ func fmtTime(t time.Time) string {
 	return t.Local().Format("2006-01-02 15:04")
 }
 
-func schedulerList(s *scheduler.Scheduler) {
+func schedulerList(s *scheduler.Scheduler, lang string) {
 	tasks := s.Tasks()
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "  \tTASK\tSCHEDULE\tLAST RUN\tNEXT RUN\tSTATUS")
+	_, _ = fmt.Fprintln(w, "  \tTASK\tSCHEDULE\tLAST RUN\tNEXT RUN\tSTATUS")
 	for _, t := range tasks {
 		state := "enabled"
 		if !t.Enabled {
 			state = "disabled"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			schedulerStatusGlyph(t), t.Name, t.Schedule,
 			fmtTime(t.LastRun), fmtTime(t.NextRun), state)
 	}
-	w.Flush()
+	_ = w.Flush()
 	fmt.Println("\nLegend: ✓ Success  ● Running  ✗ Failed  ○ Pending  ◐ Skipped")
 }
 
-func schedulerShow(s *scheduler.Scheduler, id string) {
+func schedulerShow(s *scheduler.Scheduler, id, lang string) {
 	t, ok := s.Task(id)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Unknown task: %s\n", id)
@@ -242,7 +282,7 @@ func schedulerShow(s *scheduler.Scheduler, id string) {
 	if t.LastError != "" {
 		fmt.Printf("  Last Error: %s\n", t.LastError)
 	}
-	fmt.Printf("  Run Count:  %d successful, %d failed\n", t.RunCount, t.FailCount)
+	fmt.Printf("  Run Count:  %s successful, %s failed\n", displayformat.Count(t.RunCount, lang), displayformat.Count(t.FailCount, lang))
 	fmt.Printf("  Skippable:  %v\n", t.Skippable)
 }
 
@@ -250,7 +290,7 @@ func schedulerShow(s *scheduler.Scheduler, id string) {
 // persistent schema (AI.md PART 18 "Scheduler State") stores only the latest
 // run plus cumulative counts, not a per-execution log, so history reflects the
 // last recorded run.
-func schedulerHistory(s *scheduler.Scheduler, id string) {
+func schedulerHistory(s *scheduler.Scheduler, id, lang string) {
 	t, ok := s.Task(id)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Unknown task: %s\n", id)
@@ -263,7 +303,7 @@ func schedulerHistory(s *scheduler.Scheduler, id string) {
 	}
 	fmt.Printf("  %s  %-8s  %s\n", fmtTime(t.LastRun),
 		nonEmpty(t.LastStatus, "pending"), t.LastError)
-	fmt.Printf("  Totals: %d successful, %d failed\n", t.RunCount, t.FailCount)
+	fmt.Printf("  Totals: %s successful, %s failed\n", displayformat.Count(t.RunCount, lang), displayformat.Count(t.FailCount, lang))
 }
 
 func nonEmpty(s, fallback string) string {

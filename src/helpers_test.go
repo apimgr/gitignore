@@ -22,7 +22,7 @@ func TestResolveColor(t *testing.T) {
 	})
 
 	t.Run("no disables color regardless of NO_COLOR", func(t *testing.T) {
-		os.Unsetenv("NO_COLOR")
+		_ = os.Unsetenv("NO_COLOR")
 		if resolveColor("no") {
 			t.Error("resolveColor(\"no\") = true, want false")
 		}
@@ -36,7 +36,7 @@ func TestResolveColor(t *testing.T) {
 	})
 
 	t.Run("case and whitespace insensitive", func(t *testing.T) {
-		os.Unsetenv("NO_COLOR")
+		_ = os.Unsetenv("NO_COLOR")
 		if !resolveColor("  YES ") {
 			t.Error("resolveColor(\"  YES \") = false, want true")
 		}
@@ -114,7 +114,7 @@ func TestResolveMode(t *testing.T) {
 
 func TestDetectShell(t *testing.T) {
 	t.Run("defaults to bash when unset", func(t *testing.T) {
-		os.Unsetenv("SHELL")
+		_ = os.Unsetenv("SHELL")
 		if got := detectShell(); got != "bash" {
 			t.Errorf("detectShell() = %q, want bash", got)
 		}
@@ -220,11 +220,11 @@ func TestHumanizeBytes(t *testing.T) {
 		in   int64
 		want string
 	}{
-		{0, "0 B"},
-		{1023, "1023 B"},
-		{1024, "1.0 KiB"},
-		{1536, "1.5 KiB"},
-		{1024 * 1024, "1.0 MiB"},
+		{0, "0 bytes"},
+		{1023, "1,023 bytes"},
+		{1024, "1 kilobyte"},
+		{1536, "1.5 kilobytes"},
+		{1024 * 1024, "1 megabyte"},
 	}
 	for _, tc := range cases {
 		if got := humanizeBytes(tc.in); got != tc.want {
@@ -235,7 +235,7 @@ func TestHumanizeBytes(t *testing.T) {
 
 func TestBackupFileSize(t *testing.T) {
 	t.Run("missing file returns unknown", func(t *testing.T) {
-		if got := backupFileSize(filepath.Join(t.TempDir(), "missing")); got != "unknown" {
+		if got := backupFileSize(filepath.Join(t.TempDir(), "missing"), "en"); got != "unknown" {
 			t.Errorf("backupFileSize(missing) = %q, want unknown", got)
 		}
 	})
@@ -245,8 +245,8 @@ func TestBackupFileSize(t *testing.T) {
 		if err := os.WriteFile(p, make([]byte, 2048), 0644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
-		if got := backupFileSize(p); got != "2.0 KiB" {
-			t.Errorf("backupFileSize = %q, want 2.0 KiB", got)
+		if got := backupFileSize(p, "en"); got != "2 kilobytes" {
+			t.Errorf("backupFileSize = %q, want 2 kilobytes", got)
 		}
 	})
 }

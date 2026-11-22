@@ -1,0 +1,6 @@
+{{define "content"}}
+<div class="container container-lg">
+<header class="page-header"><h1 class="page-title">{{t .Lang "help.graphql_description"}}</h1><p class="page-lead">{{t .Lang "graphql.description"}}</p></header>
+<section class="section-card" aria-labelledby="graphql-explorer"><h2 id="graphql-explorer">{{t .Lang "graphql.docs"}}</h2><div id="graphiql" data-graphql-url="{{.Data.endpoint}}"></div></section>
+</div>
+{{end}}

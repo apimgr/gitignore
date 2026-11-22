@@ -6,7 +6,6 @@
     "direction": "ltr",
     "version": "1.0.0"
   },
-
   "common": {
     "select_language": "选择语言",
     "save": "保存",
@@ -28,6 +27,7 @@
     "refresh": "刷新",
     "download": "下载",
     "upload": "上传",
+    "aliases": "别名",
     "copy": "复制",
     "copy_to_clipboard": "复制到剪贴板",
     "copied": "已复制",
@@ -65,13 +65,12 @@
     "last_updated": "最后更新：{datetime}",
     "made_with": "使用以下技术构建"
   },
-
   "theme": {
     "light": "浅色",
     "dark": "深色",
-    "auto": "自动"
+    "auto": "自动",
+    "change": "更改主题"
   },
-
   "nav": {
     "home": "首页",
     "about": "关于",
@@ -81,13 +80,74 @@
     "terms": "服务条款",
     "docs": "文档",
     "api_docs": "API 文档",
+    "security": "安全",
     "status": "状态",
+    "all_templates": "所有模板",
+    "categories": "分类",
+    "combine": "合并",
+    "stats": "统计",
+    "cli": "CLI",
     "skip_to_content": "跳转到主要内容",
     "skip_to_navigation": "跳转到导航",
     "main_navigation": "主导航"
   },
-
   "health": {
+    "section": {
+      "version": "版本",
+      "runtime": "运行状态",
+      "cluster": "集群",
+      "features": "功能",
+      "checks": "组件状态",
+      "stats": "服务器统计"
+    },
+    "field": {
+      "status": "状态",
+      "version": "版本",
+      "go_version": "Go 版本",
+      "build": "构建",
+      "uptime": "运行时间",
+      "mode": "模式",
+      "checked": "检查时间",
+      "cluster": "集群",
+      "enabled": "已启用",
+      "component": "组件",
+      "total_requests": "请求总数",
+      "requests_24h": "请求数（24 小时）",
+      "active_connections": "活动连接数",
+      "last_checked": "上次检查："
+    },
+    "feature": {
+      "tor": "Tor",
+      "i2p": "I2P",
+      "geoip": "GeoIP"
+    },
+    "feature_status": {
+      "disabled": "已禁用",
+      "starting": "正在启动",
+      "healthy": "正常",
+      "unavailable": "不可用"
+    },
+    "check_state": {
+      "ok": "正常",
+      "degraded": "降级",
+      "error": "错误"
+    },
+    "check_kind": {
+      "geoip": "GeoIP",
+      "blocklist": "拦截列表",
+      "data": "数据"
+    },
+    "check": {
+      "database": "数据库",
+      "cache": "缓存",
+      "disk": "磁盘",
+      "scheduler": "调度器",
+      "geoip_asn": "GeoIP：ASN",
+      "geoip_country": "GeoIP：国家",
+      "geoip_city": "GeoIP：城市",
+      "blocklist_firehol_level1": "拦截列表：FireHOL 级别 1",
+      "data_templates": "数据：模板"
+    },
     "title": "系统状态",
     "all_operational": "所有系统运行正常",
     "degraded": "性能下降",
@@ -113,7 +173,6 @@
     "production": "生产环境",
     "development": "开发环境"
   },
-
   "status_values": {
     "online": "在线",
     "offline": "离线",
@@ -124,7 +183,6 @@
     "good": "良好",
     "warn": "警告"
   },
-
   "contact": {
     "title": "联系我们",
     "name": "姓名",
@@ -134,9 +192,13 @@
     "send": "发送消息",
     "success": "感谢您的留言，我们会尽快回复。"
   },
-
   "help": {
     "title": "帮助",
+    "back": "← 帮助",
+    "more": "更多帮助",
+    "description": "查找使用目录及其 API 的指南。",
+    "mcp_title": "MCP 服务器",
+    "mcp_description": "使用关联的所有者令牌将 AI 工具连接到目录。",
     "getting_started": "快速入门",
     "features": "功能",
     "api_documentation": "API 文档",
@@ -152,8 +214,8 @@
     "faq": "常见问题",
     "troubleshooting": "故障排除"
   },
-
   "privacy": {
+    "description": "了解此实例如何处理报告、元数据和浏览器偏好设置。",
     "title": "隐私政策",
     "last_updated": "最后更新：",
     "summary": "摘要",
@@ -172,6 +234,8 @@
     "data_security": "数据安全",
     "data_storage": "数据存储与第三方",
     "all_data_stored": "您的所有数据都存储在我们的服务器上。",
+    "data_not_stored": "数据可能存储在此服务器之外。",
+    "additional_information": "补充信息",
     "when_shared": "何时可能共享数据",
     "data_retention": "数据保留",
     "your_rights": "您的权利",
@@ -193,8 +257,8 @@
     "ccpa_opted_out": "您已选择拒绝出售数据。",
     "ccpa_opt_back_in": "重新加入"
   },
-
   "terms": {
+    "description": "查看使用此 GitIgnore 实例的规则。",
     "title": "服务条款",
     "acceptance": "接受条款",
     "account_terms": "账户条款",
@@ -205,7 +269,29 @@
     "changes": "变更",
     "governing_law": "适用法律"
   },
-
+  "preferences_page": {
+    "description": "管理此浏览器的语言、外观和隐私设置。",
+    "token_management": "令牌管理",
+    "sync_title": "同步偏好设置",
+    "sync_description": "使用专属链接或代码在设备之间转移浏览器偏好设置。",
+    "more": "更多偏好设置",
+    "sync_back": "← 偏好设置",
+    "export_url": "导出链接",
+    "export_code": "导出代码",
+    "export_title": "导出",
+    "import_prompt": "粘贴 URL、查询字符串或代码",
+    "import_action": "导入",
+    "appearance": "外观",
+    "theme": "主题",
+    "language": "语言",
+    "automatic": "自动",
+    "essential_always": "必要 Cookie（始终开启）",
+    "reset": "重置",
+    "forget_title": "清除我的数据？",
+    "reset_warning": "这会清除主题、语言、应用偏好、Cookie 同意、CCPA 选择、构建标记以及此网站的浏览器存储。登录凭据会保留。此操作无法撤销。",
+    "keep": "保留",
+    "erase": "清除所有内容"
+  },
   "cookie_consent": {
     "message": "根据欧盟 GDPR 法律，显示此消息。",
     "accept": "我接受",
@@ -216,14 +302,26 @@
     "preference_description": "记住您的设置，例如主题（浅色/深色）、语言和界面偏好。禁用后每次访问都会重置为默认值。",
     "analytics_description": "帮助我们了解网站的使用情况。"
   },
-
+  "security_page": {
+    "title": "安全",
+    "description": "请私下报告漏洞，以便进行负责任的审查。",
+    "back": "← 安全",
+    "policy_title": "安全披露政策",
+    "policy_description": "如何报告漏洞并协调披露。",
+    "thanks_title": "安全研究人员致谢",
+    "thanks_description": "选择公开署名的研究人员将在披露后列于此处。",
+    "dpo_title": "数据保护官",
+    "dpo_description": "有关此实例隐私问题的联系信息。",
+    "report_status_title": "安全报告状态",
+    "report_status_description": "已提交漏洞报告的状态。"
+  },
   "about": {
+    "description": "了解 GitIgnore 目录、工具和 API。",
     "title": "关于",
     "features": "功能",
     "version": "版本",
     "links": "链接"
   },
-
   "announcements": {
     "warning": "警告",
     "info": "信息",
@@ -231,13 +329,11 @@
     "success": "成功",
     "scheduled_maintenance": "计划维护"
   },
-
   "pwa": {
     "install": "安装应用",
     "installed": "应用已安装",
     "offline_message": "无网络连接。正在显示缓存内容。"
   },
-
   "errors": {
     "required": "此字段为必填项",
     "invalid_email": "电子邮箱无效",
@@ -260,37 +356,56 @@
     "server_error": "服务器内部错误",
     "maintenance_mode": "服务不可用"
   },
-
   "plurals": {
+    "format_seconds": {
+      "other": "{count}秒"
+    },
+    "format_minutes": {
+      "other": "{count}分钟"
+    },
+    "format_hours": {
+      "other": "{count}小时"
+    },
+    "format_days": {
+      "other": "{count}天"
+    },
+    "format_bytes": {
+      "other": "{count}字节"
+    },
+    "format_kilobytes": {
+      "other": "{count}千字节"
+    },
+    "format_megabytes": {
+      "other": "{count}兆字节"
+    },
+    "format_gigabytes": {
+      "other": "{count}吉字节"
+    },
+    "format_terabytes": {
+      "other": "{count}太字节"
+    },
     "items": {
       "zero": "没有项目",
-      "one": "{count} 个项目",
       "other": "{count} 个项目"
     },
     "results": {
       "zero": "没有结果",
-      "one": "{count} 个结果",
       "other": "{count} 个结果"
     },
     "users": {
       "zero": "没有用户",
-      "one": "{count} 个用户",
       "other": "{count} 个用户"
     },
     "days": {
-      "one": "{count} 天",
       "other": "{count} 天"
     },
     "hours": {
-      "one": "{count} 小时",
       "other": "{count} 小时"
     },
     "minutes": {
-      "one": "{count} 分钟",
       "other": "{count} 分钟"
     }
   },
-
   "notifications": {
     "title": "通知",
     "mark_all_read": "全部标记为已读",
@@ -321,7 +436,6 @@
       "other_admins": "其他管理员"
     }
   },
-
   "email": {
     "subjects": {
       "security_alert": "安全警报 - {app_name}",
@@ -340,7 +454,6 @@
       "from": "来自：{app_name}（{fqdn}）"
     }
   },
-
   "swagger": {
     "title": "API 文档 - {app_name}",
     "description": "交互式 REST API 浏览器",
@@ -384,7 +497,6 @@
       "500": "Server Error - 内部错误"
     }
   },
-
   "graphql": {
     "title": "GraphQL 浏览器 - {app_name}",
     "description": "交互式 GraphQL 浏览器",
@@ -397,10 +509,36 @@
     "type_descriptions": {
       "query": "用于获取数据的可用查询",
       "mutation": "用于修改数据的可用变更",
-      "subscription": "用于实时数据的订阅"
+      "subscription": "用于实时数据的订阅",
+      "template": "目录中的模板",
+      "stats": "模板目录的汇总统计信息"
+    },
+    "field_descriptions": {
+      "template": {
+        "name": "模板名称",
+        "fileName": "模板文件名",
+        "category": "模板类别",
+        "content": "模板内容",
+        "description": "模板的简短说明",
+        "tags": "与模板相关的搜索标签",
+        "size": "模板内容的字节大小"
+      },
+      "stats": {
+        "totalTemplates": "目录中的模板数量",
+        "categories": "目录中的类别数量",
+        "totalSizeBytes": "所有模板内容的总字节数"
+      },
+      "query": {
+        "template": "按名称获取单个模板",
+        "list": "列出所有可用模板",
+        "search": "搜索模板名称和内容",
+        "categories": "列出所有可用类别名称",
+        "category": "列出指定类别中的模板",
+        "combine": "合并所选模板的内容",
+        "stats": "获取模板目录的汇总统计信息"
+      }
     }
   },
-
   "users": {
     "registration": {
       "title": "注册",
@@ -451,7 +589,6 @@
       "disabled": "已禁用"
     }
   },
-
   "cli": {
     "description": "{project_name} {project_version} - {project_description}",
     "usage": "用法：",
@@ -495,27 +632,71 @@
     "update_branch_usage": "设置更新通道：stable、beta 或 devel（别名：daily、rolling、dev、development）",
     "invalid_update_branch": "更新通道无效。有效通道：stable、beta、devel。"
   },
-
   "version": {
     "name_version": "{project_name} {project_version}",
     "built": "构建时间：{build_date}",
     "go": "Go：{go_version}",
     "os_arch": "操作系统/架构：{goos}/{goarch}"
   },
-
   "confirm": {
     "delete_title": "确认删除",
     "delete_message": "确定要删除此项目吗？",
     "action_irreversible": "此操作无法撤销。"
   },
-
   "form": {
     "required_field": "（必填）",
     "optional_field": "（可选）",
     "hint_email": "我们绝不会分享您的电子邮箱。",
     "errors_count": "表单有 {count} 个错误"
   },
-
+  "owner_tokens_page": {
+    "back": "← 偏好设置",
+    "title": "所有者令牌",
+    "description": "查看和管理此浏览器的主令牌，并为工具创建关联令牌。",
+    "new_token": "新令牌",
+    "create_desc": "创建匿名所有者令牌以使用 MCP 并管理关联令牌。",
+    "create": "创建令牌",
+    "use_existing": "使用现有令牌",
+    "primary": "主令牌",
+    "restore_hint": "粘贴主令牌以恢复此浏览器。",
+    "restore": "恢复身份",
+    "active": "有效",
+    "primary_help": "可完全访问你的{resources}。请妥善保管。",
+    "reveal": "显示",
+    "copy": "复制",
+    "rotate": "轮换",
+    "rotate_prompt": "要轮换此令牌吗？当前值将立即失效。",
+    "confirm_rotate": "确认轮换",
+    "linked": "关联令牌",
+    "created": "创建时间",
+    "last_used": "上次使用",
+    "expires": "到期时间",
+    "edit": "编辑",
+    "save": "保存",
+    "revoke": "撤销",
+    "revoke_prompt": "要撤销此关联令牌吗？此操作无法撤销。",
+    "confirm_revoke": "确认撤销",
+    "empty": "尚无关联令牌。",
+    "empty_hint": "为每个应用创建一个，例如 MCP 客户端。",
+    "create_linked": "创建关联令牌",
+    "name": "名称",
+    "name_hint": "例如：MCP 客户端",
+    "expiry": "有效期",
+    "never": "永不过期",
+    "days_7": "7 天",
+    "days_30": "30 天",
+    "days_90": "90 天",
+    "year": "1 年",
+    "custom_date": "自定义日期",
+    "expires_on": "到期日期",
+    "this_browser": "此浏览器",
+    "browser_saved": "主令牌已保存在此浏览器中。",
+    "forget": "忘记已保存的令牌",
+    "forget_prompt": "要忘记此浏览器保存的令牌吗？令牌仍然有效。",
+    "confirm_forget": "确认",
+    "resources_remain": "不会删除你的{resources}。",
+    "shown_once": "仅在本次页面加载中显示一次"
+  },
   "a11y": {
     "skip_to_content": "跳转到主要内容",
     "skip_to_navigation": "跳转到导航",

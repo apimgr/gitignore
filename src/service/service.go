@@ -210,23 +210,37 @@ func removeSystemUser() {
 		if err := exec.Command("userdel", "-r", appName).Run(); err != nil {
 			fmt.Printf("%s Failed to remove user %s: %v\n", warnMark(), appName, err)
 		}
-		exec.Command("groupdel", appName).Run()
+		if err := exec.Command("groupdel", appName).Run(); err != nil {
+			fmt.Printf("%s Failed to remove group %s: %v\n", warnMark(), appName, err)
+		}
 		fmt.Printf("%s System user '%s' removed\n", okMark(), appName)
 
 	case "darwin":
 		if exec.Command("dscl", ".", "-read", "/Users/"+appName).Run() != nil {
 			return
 		}
-		exec.Command("dscl", ".", "-delete", "/Users/"+appName).Run()
-		exec.Command("dscl", ".", "-delete", "/Groups/"+appName).Run()
+		if err := exec.Command("dscl", ".", "-delete", "/Users/"+appName).Run(); err != nil {
+			fmt.Printf("%s Failed to remove user %s: %v\n", warnMark(), appName, err)
+			return
+		}
+		if err := exec.Command("dscl", ".", "-delete", "/Groups/"+appName).Run(); err != nil {
+			fmt.Printf("%s Failed to remove group %s: %v\n", warnMark(), appName, err)
+			return
+		}
 		fmt.Printf("%s System account '%s' removed\n", okMark(), appName)
 
 	case "freebsd", "openbsd", "netbsd":
 		if exec.Command("id", appName).Run() != nil {
 			return
 		}
-		exec.Command("pw", "userdel", "-n", appName).Run()
-		exec.Command("pw", "groupdel", "-n", appName).Run()
+		if err := exec.Command("pw", "userdel", "-n", appName).Run(); err != nil {
+			fmt.Printf("%s Failed to remove user %s: %v\n", warnMark(), appName, err)
+			return
+		}
+		if err := exec.Command("pw", "groupdel", "-n", appName).Run(); err != nil {
+			fmt.Printf("%s Failed to remove group %s: %v\n", warnMark(), appName, err)
+			return
+		}
 		fmt.Printf("%s System user '%s' removed\n", okMark(), appName)
 	}
 	// Windows Virtual Service Accounts are managed automatically by the
@@ -670,7 +684,7 @@ func installSystemd() error {
 
 	for _, dir := range dirs {
 		// Set ownership if user exists
-		exec.Command("chown", appName+":"+appName, dir).Run()
+		_ = exec.Command("chown", appName+":"+appName, dir).Run()
 	}
 
 	serviceContent := fmt.Sprintf(`[Unit]
@@ -728,12 +742,12 @@ WantedBy=multi-user.target
 
 func uninstallSystemd() error {
 	servicePath := fmt.Sprintf("/etc/systemd/system/%s.service", appName)
-	exec.Command("systemctl", "stop", appName).Run()
-	exec.Command("systemctl", "disable", appName).Run()
+	_ = exec.Command("systemctl", "stop", appName).Run()
+	_ = exec.Command("systemctl", "disable", appName).Run()
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove service file: %w", err)
 	}
-	exec.Command("systemctl", "daemon-reload").Run()
+	_ = exec.Command("systemctl", "daemon-reload").Run()
 	fmt.Printf("%s Service uninstalled: %s\n", okMark(), servicePath)
 	return nil
 }
@@ -770,15 +784,21 @@ func installRunit() error {
 		}
 	}
 
-	os.Symlink(svDir, fmt.Sprintf("/var/service/%s", appName))
+	if err := os.Symlink(svDir, fmt.Sprintf("/var/service/%s", appName)); err != nil {
+		return fmt.Errorf("failed to link runit service: %w", err)
+	}
 	fmt.Printf("%s Runit service installed at: %s\n", okMark(), svDir)
 	return nil
 }
 
 func uninstallRunit() error {
-	exec.Command("sv", "stop", appName).Run()
-	os.Remove(fmt.Sprintf("/var/service/%s", appName))
-	os.RemoveAll(fmt.Sprintf("/etc/sv/%s", appName))
+	_ = exec.Command("sv", "stop", appName).Run()
+	if err := os.Remove(fmt.Sprintf("/var/service/%s", appName)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove runit service link: %w", err)
+	}
+	if err := os.RemoveAll(fmt.Sprintf("/etc/sv/%s", appName)); err != nil {
+		return fmt.Errorf("failed to remove runit service directory: %w", err)
+	}
 	fmt.Printf("%s Runit service uninstalled\n", okMark())
 	return nil
 }
@@ -844,8 +864,8 @@ start_pre() {
 }
 
 func uninstallOpenRC() error {
-	exec.Command("rc-service", appName, "stop").Run()
-	exec.Command("rc-update", "del", appName, "default").Run()
+	_ = exec.Command("rc-service", appName, "stop").Run()
+	_ = exec.Command("rc-update", "del", appName, "default").Run()
 	scriptPath := fmt.Sprintf("/etc/init.d/%s", appName)
 	if err := os.Remove(scriptPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove OpenRC script: %w", err)
@@ -930,10 +950,10 @@ exit 0
 	}
 
 	if hasExecutable("update-rc.d") {
-		exec.Command("update-rc.d", appName, "defaults").Run()
+		_ = exec.Command("update-rc.d", appName, "defaults").Run()
 	} else if hasExecutable("chkconfig") {
-		exec.Command("chkconfig", "--add", appName).Run()
-		exec.Command("chkconfig", appName, "on").Run()
+		_ = exec.Command("chkconfig", "--add", appName).Run()
+		_ = exec.Command("chkconfig", appName, "on").Run()
 	}
 
 	fmt.Printf("%s SysVinit script installed at: %s\n", okMark(), scriptPath)
@@ -942,11 +962,11 @@ exit 0
 }
 
 func uninstallSysVinit() error {
-	exec.Command("/etc/init.d/"+appName, "stop").Run()
+	_ = exec.Command("/etc/init.d/"+appName, "stop").Run()
 	if hasExecutable("update-rc.d") {
-		exec.Command("update-rc.d", "-f", appName, "remove").Run()
+		_ = exec.Command("update-rc.d", "-f", appName, "remove").Run()
 	} else if hasExecutable("chkconfig") {
-		exec.Command("chkconfig", "--del", appName).Run()
+		_ = exec.Command("chkconfig", "--del", appName).Run()
 	}
 	scriptPath := fmt.Sprintf("/etc/init.d/%s", appName)
 	if err := os.Remove(scriptPath); err != nil && !os.IsNotExist(err) {
@@ -978,8 +998,8 @@ func installLaunchd() error {
 	if err := ensureMacOSServiceUser(dataDir); err != nil {
 		fmt.Printf("%s Could not create service account (continuing): %v\n", warnMark(), err)
 	} else {
-		exec.Command("chown", "-R", appName+":"+appName, dataDir).Run()
-		exec.Command("chown", "-R", appName+":"+appName, logDir).Run()
+		_ = exec.Command("chown", "-R", appName+":"+appName, dataDir).Run()
+		_ = exec.Command("chown", "-R", appName+":"+appName, logDir).Run()
 	}
 
 	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -1030,7 +1050,7 @@ func installLaunchd() error {
 }
 
 func uninstallLaunchd() error {
-	exec.Command("launchctl", "unload", launchdPlist).Run()
+	_ = exec.Command("launchctl", "unload", launchdPlist).Run()
 	if err := os.Remove(launchdPlist); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove plist file: %w", err)
 	}
@@ -1074,7 +1094,7 @@ func installWindows() error {
 }
 
 func uninstallWindows() error {
-	exec.Command("sc.exe", "stop", appName).Run()
+	_ = exec.Command("sc.exe", "stop", appName).Run()
 	if err := exec.Command("sc.exe", "delete", appName).Run(); err != nil {
 		return fmt.Errorf("failed to delete Windows service: %w", err)
 	}
@@ -1099,7 +1119,7 @@ func installBSDRC() error {
 	if err := ensureBSDServiceUser(dataDir); err != nil {
 		fmt.Printf("%s Could not create service user (continuing): %v\n", warnMark(), err)
 	} else {
-		exec.Command("chown", "-R", appName+":"+appName, dataDir).Run()
+		_ = exec.Command("chown", "-R", appName+":"+appName, dataDir).Run()
 	}
 
 	rcContent := fmt.Sprintf(`#!/bin/sh
@@ -1139,7 +1159,7 @@ run_rc_command "$1"
 }
 
 func uninstallBSDRC() error {
-	exec.Command("service", appName, "stop").Run()
+	_ = exec.Command("service", appName, "stop").Run()
 	rcPath := fmt.Sprintf("/usr/local/etc/rc.d/%s", appName)
 	if err := os.Remove(rcPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove rc.d script: %w", err)
@@ -1205,10 +1225,14 @@ func Restart() error {
 	case ServiceSysVinit:
 		return exec.Command("/etc/init.d/"+appName, "restart").Run()
 	case ServiceLaunchd:
-		Stop()
+		if err := Stop(); err != nil {
+			return err
+		}
 		return Start()
 	case ServiceWindows:
-		exec.Command("sc.exe", "stop", appName).Run()
+		if err := exec.Command("sc.exe", "stop", appName).Run(); err != nil {
+			return err
+		}
 		return exec.Command("sc.exe", "start", appName).Run()
 	case ServiceBSDRC:
 		return exec.Command("service", appName, "restart").Run()

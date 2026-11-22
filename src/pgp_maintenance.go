@@ -1,0 +1,667 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/apimgr/gitignore/src/common/audit"
+	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/pgp"
+	"github.com/apimgr/gitignore/src/service"
+	"golang.org/x/term"
+)
+
+const (
+	pgpPublicFilename  = "pgp.pub.asc"
+	pgpPrivateFilename = "pgp.priv.asc.enc"
+)
+
+type pgpPublishRecord struct {
+	Fingerprint string    `json:"fingerprint"`
+	PublishedAt string    `json:"published_at,omitempty"`
+	RetryAt     string    `json:"retry_at,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
+	Attempts    int       `json:"attempts,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func handlePGPMaintenance(configDir, configPath, dataDir, logsDir string, args []string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load operator credentials: %w", err)
+	}
+	if !service.IsElevated() && !authenticateSecurityMaintenance(cfg.Server.Token) {
+		return errors.New("PGP maintenance requires the operator token or root privileges")
+	}
+	if err := db.Init(dataDir); err != nil {
+		return fmt.Errorf("initialize PGP database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	if len(args) == 0 {
+		return errors.New("usage: --maintenance pgp {generate|rotate|publish|export|import|delete}")
+	}
+	dir := filepath.Join(configDir, "security")
+	switch args[0] {
+	case "generate":
+		if len(args) != 1 {
+			return errors.New("usage: --maintenance pgp generate")
+		}
+		return generateProjectPGP(cfg, dir, logsDir)
+	case "rotate":
+		if len(args) != 1 {
+			return errors.New("usage: --maintenance pgp rotate")
+		}
+		return rotateProjectPGP(cfg, dir, logsDir)
+	case "publish":
+		if len(args) != 1 {
+			return errors.New("usage: --maintenance pgp publish")
+		}
+		return publishProjectPGP(cfg, dir)
+	case "export":
+		return exportProjectPGP(cfg, dir, logsDir, args[1:])
+	case "import":
+		if len(args) != 2 {
+			return errors.New("usage: --maintenance pgp import <file>")
+		}
+		return importProjectPGP(cfg, dir, logsDir, args[1])
+	case "delete":
+		if len(args) != 1 {
+			return errors.New("usage: --maintenance pgp delete")
+		}
+		return deleteProjectPGP(cfg, dir, logsDir)
+	default:
+		return errors.New("usage: --maintenance pgp {generate|rotate|publish|export|import|delete}")
+	}
+}
+
+func generateProjectPGP(cfg *config.Config, dir, logsDir string) error {
+	if _, err := os.Stat(filepath.Join(dir, pgpPublicFilename)); err == nil {
+		return errors.New("PGP keypair already exists; use --maintenance pgp rotate")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	secret, err := db.InstallationSecret()
+	if err != nil {
+		return err
+	}
+	pair, err := pgp.Generate(projectPGPIdentity(cfg), secret)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := pgp.Fingerprint(pair.PublicKey)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	metadata := db.PGPKeyMetadata{Fingerprint: fingerprint, CreatedAt: now.Format(time.RFC3339), ExpiresAt: now.AddDate(2, 0, 0).Format(time.RFC3339), KeyserversPublished: "[]"}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	rollback, err := installPGPFiles(dir, []byte(pair.PublicKey), pair.EncryptedPrivateKey)
+	if err != nil {
+		return err
+	}
+	if err := db.SavePGPKeyMetadata(metadata); err != nil {
+		rollback()
+		return err
+	}
+	if err := config.Update(func(current *config.Config) { current.Web.Security.PublishPGPKey = true }); err != nil {
+		rollback()
+		return err
+	}
+	if err := publishProjectPGP(cfg, dir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: PGP keypair generated; keyserver publication is pending: %v\n", err)
+	}
+	if err := appendPGPAudit(logsDir, "security.pgp_generated", fingerprint, ""); err != nil {
+		return fmt.Errorf("keypair generated but audit event failed: %w", err)
+	}
+	fmt.Printf("OpenPGP keypair generated: %s\n", fingerprint)
+	return nil
+}
+
+func rotateProjectPGP(cfg *config.Config, dir, logsDir string) error {
+	oldEncrypted, err := os.ReadFile(filepath.Join(dir, pgpPrivateFilename))
+	if err != nil {
+		return fmt.Errorf("load current private key: %w", err)
+	}
+	secret, err := db.InstallationSecret()
+	if err != nil {
+		return err
+	}
+	_, err = pgp.UnprotectPrivateKey(oldEncrypted, secret)
+	if err != nil {
+		return err
+	}
+	pair, err := pgp.Generate(projectPGPIdentity(cfg), secret)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := pgp.Fingerprint(pair.PublicKey)
+	if err != nil {
+		return err
+	}
+	signature, err := pgp.SignRotation(oldEncrypted, secret, pair.PublicKey)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	metadata := db.PGPKeyMetadata{
+		Fingerprint: fingerprint, CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt:           now.AddDate(2, 0, 0).Format(time.RFC3339),
+		LastRotatedAt:       sql.NullString{String: now.Format(time.RFC3339), Valid: true},
+		KeyserversPublished: "[]",
+	}
+	oldPrivatePath := filepath.Join(dir, "pgp.priv.old.asc.enc")
+	if err := atomicPGPWrite(oldPrivatePath, oldEncrypted, 0600); err != nil {
+		return err
+	}
+	if err := db.RotatePGPReportBodies(metadata, func(body []byte) ([]byte, error) {
+		plaintext, err := pgp.Decrypt(body, oldEncrypted, secret)
+		if err != nil {
+			return nil, err
+		}
+		return pgp.Encrypt(plaintext, pair.PublicKey)
+	}, func() (func(), error) {
+		rollback, err := installPGPFiles(dir, []byte(pair.PublicKey), pair.EncryptedPrivateKey)
+		if err != nil {
+			return nil, err
+		}
+		if err := atomicPGPWrite(filepath.Join(dir, "pgp.rotation.asc.sig"), signature, 0600); err != nil {
+			rollback()
+			return nil, err
+		}
+		return rollback, nil
+	}); err != nil {
+		_ = os.Remove(oldPrivatePath)
+		return fmt.Errorf("PGP rotation failed: %w", err)
+	}
+	if err := config.Update(func(current *config.Config) { current.Web.Security.PublishPGPKey = true }); err != nil {
+		return err
+	}
+	if err := publishProjectPGP(cfg, dir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: PGP rotation succeeded; keyserver publication is pending: %v\n", err)
+	}
+	if err := appendPGPAudit(logsDir, "security.pgp_rotated", fingerprint, ""); err != nil {
+		return fmt.Errorf("keypair rotated but audit event failed: %w", err)
+	}
+	fmt.Printf("OpenPGP keypair rotated: %s\n", fingerprint)
+	return nil
+}
+
+func exportProjectPGP(cfg *config.Config, dir, logsDir string, args []string) error {
+	if len(args) == 0 || args[0] == "public" {
+		if len(args) > 2 || len(args) == 2 && args[0] != "public" {
+			return errors.New("usage: --maintenance pgp export public [path] | private <path>")
+		}
+		key, err := os.ReadFile(filepath.Join(dir, pgpPublicFilename))
+		if err != nil {
+			return err
+		}
+		if len(args) == 2 {
+			return atomicPGPWrite(args[1], key, 0644)
+		}
+		_, err = os.Stdout.Write(key)
+		return err
+	}
+	if args[0] != "private" || len(args) != 2 {
+		return errors.New("usage: --maintenance pgp export public [path] | private <path>")
+	}
+	reason, err := confirmPGPSensitive(cfg, "export private key", true)
+	if err != nil {
+		return err
+	}
+	if err := enforcePGPExportRate(dir, cfg); err != nil {
+		return err
+	}
+	encrypted, err := os.ReadFile(filepath.Join(dir, pgpPrivateFilename))
+	if err != nil {
+		return err
+	}
+	secret, err := db.InstallationSecret()
+	if err != nil {
+		return err
+	}
+	plaintext, err := pgp.UnprotectPrivateKey(encrypted, secret)
+	if err != nil {
+		return err
+	}
+	if err := atomicPGPWrite(args[1], plaintext, 0600); err != nil {
+		return err
+	}
+	return appendPGPAudit(logsDir, "security.private_key_exported", "local", reason)
+}
+
+func importProjectPGP(cfg *config.Config, dir, logsDir, source string) error {
+	reason, err := confirmPGPSensitive(cfg, "import private key", true)
+	if err != nil {
+		return err
+	}
+	armored, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	entity, err := pgp.ParsePrivateKey(armored)
+	if err != nil {
+		return err
+	}
+	_, identity := entity.PrimaryIdentity(time.Now(), nil)
+	if identity == nil || identity.UserId == nil {
+		return errors.New("private key has no valid identity")
+	}
+	expectedIdentity := projectPGPIdentity(cfg)
+	identitySeparator := strings.LastIndex(expectedIdentity, " <")
+	expectedName := strings.TrimSpace(expectedIdentity[:identitySeparator])
+	expectedEmail := strings.TrimSuffix(expectedIdentity[identitySeparator+2:], ">")
+	if !strings.EqualFold(identity.UserId.Name, expectedName) || !strings.EqualFold(identity.UserId.Email, expectedEmail) {
+		fmt.Fprintf(os.Stderr, "warning: imported key identity %q <%s> differs from expected %q <%s>\n", identity.UserId.Name, identity.UserId.Email, expectedName, expectedEmail)
+		if _, err := readPGPConfirmation("Type IMPORT to accept the identity mismatch: ", "IMPORT"); err != nil {
+			return err
+		}
+	}
+	publicKey, err := pgp.PublicFromPrivate(armored)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := pgp.Fingerprint(publicKey)
+	if err != nil {
+		return err
+	}
+	secret, err := db.InstallationSecret()
+	if err != nil {
+		return err
+	}
+	encrypted, err := pgp.ProtectPrivateKey(armored, secret)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	metadata := db.PGPKeyMetadata{
+		Fingerprint: fingerprint, CreatedAt: now.Format(time.RFC3339),
+		ExpiresAt:           entity.PrimaryKey.CreationTime.AddDate(2, 0, 0).Format(time.RFC3339),
+		KeyserversPublished: "[]",
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	rollback, err := installPGPFiles(dir, []byte(publicKey), encrypted)
+	if err != nil {
+		return err
+	}
+	if err := db.SavePGPKeyMetadata(metadata); err != nil {
+		rollback()
+		return err
+	}
+	if err := config.Update(func(current *config.Config) { current.Web.Security.PublishPGPKey = true }); err != nil {
+		rollback()
+		return err
+	}
+	if err := publishProjectPGP(cfg, dir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: imported PGP key; keyserver publication is pending: %v\n", err)
+	}
+	return appendPGPAudit(logsDir, "security.pgp_imported", fingerprint, reason)
+}
+
+func deleteProjectPGP(cfg *config.Config, dir, logsDir string) error {
+	fmt.Fprintln(os.Stderr, "WARNING: deleting the PGP keys makes all PGP-encrypted reports and pending notifications unreadable.")
+	if _, err := confirmPGPSensitive(cfg, "delete keypair", false); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := db.RevokePGPKeyMetadata(); err != nil {
+		return err
+	}
+	for _, name := range []string{pgpPublicFilename, pgpPrivateFilename, "pgp.priv.old.asc.enc", "pgp.rotation.asc.sig"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if err := config.Update(func(current *config.Config) { current.Web.Security.PublishPGPKey = false }); err != nil {
+		return err
+	}
+	return appendPGPAudit(logsDir, "security.pgp_deleted", "", "")
+}
+
+func publishProjectPGP(cfg *config.Config, dir string) error {
+	return publishProjectPGPContext(context.Background(), cfg, dir)
+}
+
+func publishProjectPGPContext(ctx context.Context, cfg *config.Config, dir string) error {
+	return publishProjectPGPWithForce(ctx, cfg, dir, false)
+}
+
+func publishRestoredProjectPGP(cfg *config.Config, dir string) error {
+	return publishProjectPGPWithForce(context.Background(), cfg, dir, true)
+}
+
+func publishProjectPGPWithForce(ctx context.Context, cfg *config.Config, dir string, force bool) error {
+	publicKey, err := os.ReadFile(filepath.Join(dir, pgpPublicFilename))
+	if err != nil {
+		return err
+	}
+	fingerprint, err := pgp.Fingerprint(string(publicKey))
+	if err != nil {
+		return err
+	}
+	statePath := filepath.Join(dir, "keyservers.state")
+	state := map[string]pgpPublishRecord{}
+	if data, err := os.ReadFile(statePath); err == nil {
+		_ = json.Unmarshal(data, &state)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	var failures []string
+	for _, configured := range cfg.Web.Security.Keyservers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		endpoint, err := pgpKeyserverEndpoint(configured)
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		if record, ok := state[endpoint]; ok && record.Fingerprint == fingerprint {
+			if record.PublishedAt != "" && !force {
+				continue
+			}
+			if retryAt, parseErr := time.Parse(time.RFC3339, record.RetryAt); !force && parseErr == nil && time.Now().Before(retryAt) {
+				continue
+			}
+		}
+		record := state[endpoint]
+		if record.Fingerprint != fingerprint {
+			record = pgpPublishRecord{}
+		}
+		record.Fingerprint = fingerprint
+		record.UpdatedAt = time.Now().UTC()
+		if err := submitPGPKey(ctx, endpoint, string(publicKey)); err != nil {
+			record.LastError = err.Error()
+			record.Attempts++
+			backoff := time.Duration(1 << min(record.Attempts-1, 8))
+			record.RetryAt = time.Now().UTC().Add(backoff * time.Minute).Format(time.RFC3339)
+			state[endpoint] = record
+			failures = append(failures, endpoint+": "+err.Error())
+			continue
+		}
+		record.PublishedAt = time.Now().UTC().Format(time.RFC3339)
+		record.RetryAt = ""
+		record.LastError = ""
+		state[endpoint] = record
+	}
+	encoded, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := atomicPGPWrite(statePath, append(encoded, '\n'), 0600); err != nil {
+		return err
+	}
+	if err := db.SetPGPKeyserversPublished(string(encoded)); err != nil {
+		return err
+	}
+	if len(failures) != 0 {
+		return fmt.Errorf("keyserver publication failed: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func pgpKeyserverEndpoint(configured string) (string, error) {
+	value := strings.TrimSpace(configured)
+	if value == "" {
+		return "", errors.New("empty PGP keyserver")
+	}
+	if !strings.Contains(value, "://") {
+		switch strings.ToLower(value) {
+		case "keys.openpgp.org":
+			value = "https://keys.openpgp.org/vks/v1/upload"
+		case "keyserver.ubuntu.com":
+			value = "https://keyserver.ubuntu.com/pks/add"
+		default:
+			value = "https://" + value
+		}
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return "", fmt.Errorf("PGP keyserver must be an HTTPS URL: %q", configured)
+	}
+	if parsed.Path == "" || parsed.Path == "/" {
+		switch strings.ToLower(parsed.Hostname()) {
+		case "keys.openpgp.org":
+			parsed.Path = "/vks/v1/upload"
+		case "keyserver.ubuntu.com":
+			parsed.Path = "/pks/add"
+		default:
+			return "", fmt.Errorf("PGP keyserver URL needs an upload path: %q", configured)
+		}
+	}
+	return parsed.String(), nil
+}
+
+func submitPGPKey(ctx context.Context, endpoint, publicKey string) error {
+	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(request *http.Request, via []*http.Request) error {
+		if request.URL.Scheme != "https" || len(via) >= 3 {
+			return errors.New("unsafe PGP keyserver redirect")
+		}
+		return nil
+	}}
+	values := url.Values{"keytext": {publicKey}}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()))
+		if err != nil {
+			return err
+		}
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Accept", "application/json, text/plain")
+		response, err := client.Do(request)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+			closeErr := response.Body.Close()
+			if response.StatusCode >= 200 && response.StatusCode < 300 && closeErr == nil {
+				return nil
+			}
+			if closeErr != nil {
+				lastErr = closeErr
+			} else {
+				lastErr = fmt.Errorf("HTTP %d", response.StatusCode)
+			}
+		} else {
+			lastErr = err
+		}
+		if attempt < 2 {
+			timer := time.NewTimer(time.Duration(1<<attempt) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return lastErr
+}
+
+func confirmPGPSensitive(cfg *config.Config, action string, requireReason bool) (string, error) {
+	if (requireReason || !service.IsElevated()) && !authenticateSecurityMaintenance(cfg.Server.Token) {
+		return "", errors.New("operator token confirmation failed")
+	}
+	if _, err := readPGPConfirmation("Type CONFIRM to "+action+": ", "CONFIRM"); err != nil {
+		return "", err
+	}
+	if !requireReason {
+		return "", nil
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", errors.New("a terminal is required to enter the sensitive-operation reason")
+	}
+	fmt.Fprint(os.Stderr, "Reason: ")
+	reason, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	reason = strings.Join(strings.Fields(reason), " ")
+	if reason == "" || len(reason) > 500 {
+		return "", errors.New("reason must contain 1 to 500 characters")
+	}
+	return reason, nil
+}
+
+func readPGPConfirmation(prompt, expected string) (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return "", errors.New("a terminal is required to confirm this sensitive operation")
+	}
+	fmt.Fprint(os.Stderr, prompt)
+	value, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil || string(value) != expected {
+		return "", errors.New("confirmation did not match")
+	}
+	return string(value), nil
+}
+
+func enforcePGPExportRate(dir string, cfg *config.Config) error {
+	operator := "root"
+	if !service.IsElevated() {
+		digest := sha256.Sum256([]byte(cfg.Server.Token))
+		operator = hex.EncodeToString(digest[:8])
+	}
+	path := filepath.Join(dir, "private-export-rate.json")
+	previous := map[string]string{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &previous)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if timestamp, ok := previous[operator]; ok {
+		last, err := time.Parse(time.RFC3339, timestamp)
+		if err == nil && time.Since(last) < time.Hour {
+			return errors.New("private-key export is limited to one per hour per operator")
+		}
+	}
+	previous[operator] = time.Now().UTC().Format(time.RFC3339)
+	encoded, err := json.Marshal(previous)
+	if err != nil {
+		return err
+	}
+	return atomicPGPWrite(path, encoded, 0600)
+}
+
+func appendPGPAudit(logsDir, event, fingerprint, reason string) error {
+	var target *audit.Target
+	if fingerprint != "" {
+		target = &audit.Target{Type: "pgp_key", ID: fingerprint}
+	}
+	return audit.Append(logsDir, audit.Entry{
+		Event: event, Category: "security", Severity: "info",
+		Actor:  audit.Actor{Type: "operator", IP: localOperatorIP()},
+		Target: target, Result: "success", Source: "cli", Reason: reason,
+	})
+}
+
+func localOperatorIP() string {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return "127.0.0.1"
+	}
+	for _, address := range addresses {
+		ipNet, ok := address.(*net.IPNet)
+		if !ok || ipNet.IP.IsLoopback() || ipNet.IP.To4() == nil {
+			continue
+		}
+		return ipNet.IP.String()
+	}
+	return "127.0.0.1"
+}
+
+func projectPGPIdentity(cfg *config.Config) string {
+	name := strings.TrimSpace(cfg.Server.Branding.Title)
+	if name == "" {
+		name = projectName
+	}
+	address := strings.TrimSpace(cfg.Server.Contact.Security.Email)
+	if address == "" {
+		address = strings.TrimSpace(cfg.Web.Security.Contact)
+	}
+	if address == "" {
+		address = "security@" + cfg.Server.FQDN
+	}
+	return name + " Security <" + address + ">"
+}
+
+func installPGPFiles(dir string, publicKey, privateKey []byte) (func(), error) {
+	publicPath := filepath.Join(dir, pgpPublicFilename)
+	privatePath := filepath.Join(dir, pgpPrivateFilename)
+	oldPublic, publicErr := os.ReadFile(publicPath)
+	oldPrivate, privateErr := os.ReadFile(privatePath)
+	hadPublic := publicErr == nil
+	hadPrivate := privateErr == nil
+	if publicErr != nil && !errors.Is(publicErr, os.ErrNotExist) {
+		return nil, publicErr
+	}
+	if privateErr != nil && !errors.Is(privateErr, os.ErrNotExist) {
+		return nil, privateErr
+	}
+	rollback := func() {
+		if hadPublic {
+			_ = atomicPGPWrite(publicPath, oldPublic, 0644)
+		} else {
+			_ = os.Remove(publicPath)
+		}
+		if hadPrivate {
+			_ = atomicPGPWrite(privatePath, oldPrivate, 0600)
+		} else {
+			_ = os.Remove(privatePath)
+		}
+	}
+	if err := atomicPGPWrite(publicPath, publicKey, 0644); err != nil {
+		return nil, err
+	}
+	if err := atomicPGPWrite(privatePath, privateKey, 0600); err != nil {
+		rollback()
+		return nil, err
+	}
+	return rollback, nil
+}
+
+func atomicPGPWrite(path string, contents []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".pgp-update-*")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer func() { _ = os.Remove(temporary) }()
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if _, err := file.Write(contents); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}

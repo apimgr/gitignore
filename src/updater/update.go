@@ -19,6 +19,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	apppath "github.com/apimgr/gitignore/src/path"
 )
 
 // defaultAPIBase is the GitHub REST API host; overridable via Config.APIBaseURL
@@ -120,7 +122,7 @@ func (u *Updater) check(ctx context.Context, deferDays int) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 404 means no updates available (already current) per AI.md PART 22.
 	if resp.StatusCode == http.StatusNotFound {
@@ -177,7 +179,7 @@ func (u *Updater) Install(ctx context.Context, release *Release) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.RemoveAll(filepath.Dir(tmpPath)) }()
 
 	currentPath, err := os.Executable()
 	if err != nil {
@@ -212,8 +214,13 @@ func (u *Updater) downloadVerified(ctx context.Context, release *Release) (strin
 		return "", fmt.Errorf("no binary found for %s/%s (asset %q)", runtime.GOOS, runtime.GOARCH, assetName)
 	}
 
-	tmpFile, err := os.CreateTemp("", u.cfg.BinaryName+"-update-*")
+	tempDir, err := apppath.TempDir()
 	if err != nil {
+		return "", fmt.Errorf("failed to create project temp directory: %w", err)
+	}
+	tmpFile, err := os.CreateTemp(tempDir, u.cfg.BinaryName+"-update-*")
+	if err != nil {
+		_ = os.RemoveAll(tempDir)
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -221,30 +228,30 @@ func (u *Updater) downloadVerified(ctx context.Context, release *Release) (strin
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = os.Remove(tmpPath)
+			_ = os.RemoveAll(tempDir)
 		}
 	}()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return "", err
 	}
 	req.Header.Set("User-Agent", u.cfg.UserAgent)
 
 	resp, err := u.cfg.Client.Do(req)
 	if err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return "", fmt.Errorf("binary download failed: %d", resp.StatusCode)
 	}
 
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return "", fmt.Errorf("failed to download: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
@@ -302,7 +309,7 @@ func (u *Updater) fetchExpectedChecksum(ctx context.Context, release *Release, a
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("checksum download failed: %d", resp.StatusCode)
 	}
@@ -326,7 +333,7 @@ func verifyChecksum(filePath, expectedHash string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

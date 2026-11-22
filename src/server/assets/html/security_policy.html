@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="container container-md">
+<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/security"}}">{{t .Lang "security_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "security_page.policy_title"}}</h1><p class="page-lead">{{t .Lang "security_page.policy_description"}}</p></header>
+<section class="section-card" aria-labelledby="reporting">
+<h2 id="reporting">Reporting a vulnerability</h2>
+<p>If that is unavailable, email <a href="mailto:{{.Data.email}}">{{.Data.email}}</a>.</p>
+<p>Please include the affected version, a description of the issue and its impact, and steps to reproduce it. Do not publish vulnerability details before coordinating with the maintainers.</p>
+</section>
+<section class="section-card" aria-labelledby="response-process">
+<h2 id="response-process">Response process</h2>
+<ul>
+<li>Receipt is acknowledged within 48 hours.</li>
+<li>Critical vulnerabilities are targeted for a fix within 14 days.</li>
+<li>The disclosure timeline is coordinated after a fix is available.</li>
+</ul>
+<p>Only the latest release receives security updates. See the <a href="{{path "/server/security"}}">security overview</a> for reporting links.</p>
+</section>
+</div>
+{{end}}

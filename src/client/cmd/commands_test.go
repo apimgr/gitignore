@@ -26,7 +26,7 @@ func TestCmdListSuccessAndError(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Node", "Go"}})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Node", "Go"}})
 		})
 		if got := CmdList(c, p, "text"); got != output.ExitSuccess {
 			t.Errorf("CmdList() = %d, want ExitSuccess", got)
@@ -36,7 +36,7 @@ func TestCmdListSuccessAndError(t *testing.T) {
 	t.Run("server error maps to general exit", func(t *testing.T) {
 		c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "boom"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "boom"})
 		})
 		if got := CmdList(c, p, "text"); got != output.ExitGeneral {
 			t.Errorf("CmdList() with 500 = %d, want ExitGeneral", got)
@@ -55,7 +55,7 @@ func TestCmdSearchEmptyQueryReturnsUsage(t *testing.T) {
 func TestCmdSearchSuccess(t *testing.T) {
 	p := output.New(false)
 	c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Go"}})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Go"}})
 	})
 	if got := CmdSearch(c, p, "json", "go"); got != output.ExitSuccess {
 		t.Errorf("CmdSearch() = %d, want ExitSuccess", got)
@@ -65,7 +65,7 @@ func TestCmdSearchSuccess(t *testing.T) {
 func TestCmdCategoriesSuccess(t *testing.T) {
 	p := output.New(false)
 	c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Root", "Global"}})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{"Root", "Global"}})
 	})
 	if got := CmdCategories(c, p, "table"); got != output.ExitSuccess {
 		t.Errorf("CmdCategories() = %d, want ExitSuccess", got)
@@ -84,7 +84,7 @@ func TestCmdCategoryNotFound(t *testing.T) {
 	p := output.New(false)
 	c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no such category"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no such category"})
 	})
 	if got := CmdCategory(c, p, "text", "Bogus"); got != output.ExitNotFound {
 		t.Errorf("CmdCategory(not found) = %d, want ExitNotFound", got)
@@ -93,7 +93,7 @@ func TestCmdCategoryNotFound(t *testing.T) {
 
 func TestCmdStatsTextAndJSON(t *testing.T) {
 	c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":   true,
 			"data": map[string]interface{}{"total_templates": float64(10)},
 		})
@@ -117,7 +117,7 @@ func TestCmdGetTemplateEmptyNameReturnsUsage(t *testing.T) {
 
 func TestCmdGetTemplateSuccess(t *testing.T) {
 	c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":   true,
 			"data": api.Template{Name: "Go", Content: "*.o"},
 		})
@@ -141,7 +141,7 @@ func TestCmdCombineEmptyNamesReturnsUsage(t *testing.T) {
 
 func TestCmdCombineSuccess(t *testing.T) {
 	c := newTestClientAndPrinter(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": "*.o\n"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": "*.o\n"})
 	})
 	p := output.New(false)
 	if got := CmdCombine(c, p, "text", []string{"Go"}); got != output.ExitSuccess {

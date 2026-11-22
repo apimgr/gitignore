@@ -45,7 +45,7 @@ func TestArchiveRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
-	defer os.RemoveAll(staging)
+	defer func() { _ = os.RemoveAll(staging) }()
 
 	m, err := loadAndVerifyManifest(staging)
 	if err != nil {

@@ -70,6 +70,11 @@ func (s *Sender) resolveTLSMode() string {
 // error if SMTP is not usable or delivery fails. It never queues or retries —
 // AI.md PART 17 forbids queuing.
 func (s *Sender) Send(to, subject, body string) error {
+	return s.SendWithReplyTo(to, s.ReplyTo, subject, body)
+}
+
+// SendWithReplyTo delivers one message using a caller-specific reply address.
+func (s *Sender) SendWithReplyTo(to, replyTo, subject, body string) error {
 	if !s.CanSend() {
 		return errors.New("email: SMTP not configured")
 	}
@@ -81,7 +86,7 @@ func (s *Sender) Send(to, subject, body string) error {
 	if err != nil {
 		return fmt.Errorf("email: connect: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if s.Username != "" {
 		auth := smtp.PlainAuth("", s.Username, s.Password, s.Host)
@@ -101,7 +106,7 @@ func (s *Sender) Send(to, subject, body string) error {
 	if err != nil {
 		return fmt.Errorf("email: DATA: %w", err)
 	}
-	if _, err := w.Write(s.buildMessage(to, subject, body)); err != nil {
+	if _, err := w.Write(s.buildMessage(to, replyTo, subject, body)); err != nil {
 		return fmt.Errorf("email: write body: %w", err)
 	}
 	if err := w.Close(); err != nil {
@@ -111,12 +116,12 @@ func (s *Sender) Send(to, subject, body string) error {
 }
 
 // buildMessage assembles the RFC 5322 message with CRLF line endings.
-func (s *Sender) buildMessage(to, subject, body string) []byte {
+func (s *Sender) buildMessage(to, replyTo, subject, body string) []byte {
 	var b strings.Builder
 	b.WriteString("From: " + s.fromHeader() + "\r\n")
 	b.WriteString("To: " + to + "\r\n")
-	if s.ReplyTo != "" {
-		b.WriteString("Reply-To: " + s.ReplyTo + "\r\n")
+	if replyTo != "" {
+		b.WriteString("Reply-To: " + replyTo + "\r\n")
 	}
 	b.WriteString("Subject: " + subject + "\r\n")
 	b.WriteString("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n")
@@ -138,11 +143,11 @@ func (s *Sender) dial() (*smtp.Client, error) {
 		}
 		client, err := smtp.NewClient(conn, s.Host)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil, err
 		}
 		if err := client.Hello(localName()); err != nil {
-			client.Close()
+			_ = client.Close()
 			return nil, err
 		}
 		return client, nil
@@ -163,17 +168,17 @@ func (s *Sender) dialPlain(useSTARTTLS bool) (*smtp.Client, error) {
 	}
 	client, err := smtp.NewClient(conn, s.Host)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	if err := client.Hello(localName()); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, err
 	}
 	if useSTARTTLS {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err := client.StartTLS(&tls.Config{ServerName: s.Host}); err != nil {
-				client.Close()
+				_ = client.Close()
 				return nil, err
 			}
 		}
@@ -190,7 +195,7 @@ func TestConnection(host string, port int, tlsMode string) error {
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	return client.Quit()
 }
 

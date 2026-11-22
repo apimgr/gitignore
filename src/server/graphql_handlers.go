@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	graphapi "github.com/apimgr/gitignore/src/graphql"
 )
 
@@ -16,11 +17,21 @@ type graphQLRequest struct {
 	Variables     map[string]any `json:"variables"`
 }
 
-func (s *Server) graphQLSchema() (*graphapi.Schema, error) {
-	s.graphQLOnce.Do(func() {
-		s.graphQL, s.graphQLError = graphapi.New(s.config.Templates)
-	})
-	return s.graphQL, s.graphQLError
+func (s *Server) graphQLSchema(lang string) (*graphapi.Schema, error) {
+	s.graphQLMu.Lock()
+	defer s.graphQLMu.Unlock()
+	if s.graphQL == nil {
+		s.graphQL = make(map[string]*graphapi.Schema)
+	}
+	if schema := s.graphQL[lang]; schema != nil {
+		return schema, nil
+	}
+	schema, err := graphapi.NewForLanguage(s.config.Templates, lang)
+	if err != nil {
+		return nil, err
+	}
+	s.graphQL[lang] = schema
+	return schema, nil
 }
 
 // handleGraphQL executes a read-only GraphQL query against the template catalog.
@@ -36,13 +47,16 @@ func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	schema, err := s.graphQLSchema()
+	lang := i18n.LangFromContext(r.Context())
+	schema, err := s.graphQLSchema(lang)
 	if err != nil {
 		writeGraphQLError(w, http.StatusInternalServerError, "GraphQL schema is unavailable")
 		return
 	}
 
 	setCacheHeaders(w, "api")
+	w.Header().Add("Vary", "Accept-Language")
+	w.Header().Add("Vary", "Cookie")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	response := schema.Execute(r.Context(), request.Query, request.OperationName, request.Variables)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -51,14 +65,16 @@ func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGraphQLSchema serves the SDL used to build the executable schema.
-func (s *Server) handleGraphQLSchema(w http.ResponseWriter, _ *http.Request) {
-	sdl, err := graphapi.SDL()
+func (s *Server) handleGraphQLSchema(w http.ResponseWriter, r *http.Request) {
+	sdl, err := graphapi.SDLForLanguage(i18n.LangFromContext(r.Context()))
 	if err != nil {
 		writeGraphQLError(w, http.StatusInternalServerError, "GraphQL schema is unavailable")
 		return
 	}
 
 	setCacheHeaders(w, "api")
+	w.Header().Add("Vary", "Accept-Language")
+	w.Header().Add("Vary", "Cookie")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = io.WriteString(w, sdl)
 }

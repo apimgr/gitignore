@@ -44,7 +44,7 @@ func TestCheckHealthSuccessfulServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
+		if r.URL.Path != "/server/healthz" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)

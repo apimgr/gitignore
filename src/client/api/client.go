@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	displayformat "github.com/apimgr/gitignore/src/common/format"
 	"github.com/apimgr/gitignore/src/common/urlutil"
 )
 
@@ -104,7 +106,7 @@ func (c *Client) get(path string, pathParams, queryParams map[string]string) (*e
 	if err != nil {
 		return nil, fmt.Errorf("connecting to %s: %w", c.BaseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -223,16 +225,32 @@ func (c *Client) Stats() (map[string]interface{}, error) {
 
 // Healthz checks server reachability; used by --status.
 func (c *Client) Healthz() error {
-	_, err := c.get("/api/v1/healthz", nil, nil)
+	_, err := c.get("/api/v1/server/healthz", nil, nil)
 	return err
 }
 
 // StatsCount is a small helper for formatting numeric stats fields that may
 // arrive as json.Number/float64.
-func StatsCount(v interface{}) string {
+func StatsCount(v interface{}, langs ...string) string {
+	lang := ""
+	if len(langs) > 0 {
+		lang = langs[0]
+	}
 	switch n := v.(type) {
 	case float64:
+		if n == math.Trunc(n) {
+			return displayformat.Count(int64(n), lang)
+		}
 		return strconv.FormatFloat(n, 'f', -1, 64)
+	case json.Number:
+		if integer, err := n.Int64(); err == nil {
+			return displayformat.Count(integer, lang)
+		}
+		return n.String()
+	case int:
+		return displayformat.Count(int64(n), lang)
+	case int64:
+		return displayformat.Count(n, lang)
 	default:
 		return fmt.Sprintf("%v", v)
 	}

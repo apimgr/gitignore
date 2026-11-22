@@ -25,9 +25,9 @@ type Template struct {
 
 // Manager manages .gitignore templates
 type Manager struct {
-	templates map[string]*Template // key: lowercase name
+	templates  map[string]*Template // key: lowercase name
 	categories map[string][]*Template
-	mu        sync.RWMutex
+	mu         sync.RWMutex
 }
 
 // New creates a new template manager and loads all templates
@@ -117,12 +117,12 @@ func extractTags(name, category string) []string {
 
 	// Add common aliases
 	aliases := map[string][]string{
-		"go":         {"golang"},
-		"node":       {"nodejs", "npm"},
-		"python":     {"py"},
-		"javascript": {"js"},
-		"typescript": {"ts"},
-		"visualstudio": {"vs"},
+		"go":               {"golang"},
+		"node":             {"nodejs", "npm"},
+		"python":           {"py"},
+		"javascript":       {"js"},
+		"typescript":       {"ts"},
+		"visualstudio":     {"vs"},
 		"visualstudiocode": {"vscode"},
 	}
 
@@ -240,9 +240,9 @@ func (m *Manager) Combine(names []string) (string, error) {
 	seen := make(map[string]bool)
 
 	// Add header
-	combined.WriteString(fmt.Sprintf("# Combined .gitignore\n# Generated: %s\n# Templates: %s\n\n",
+	fmt.Fprintf(&combined, "# Combined .gitignore\n# Generated: %s\n# Templates: %s\n\n",
 		filepath.Base(strings.Join(names, ", ")),
-		strings.Join(names, ", ")))
+		strings.Join(names, ", "))
 
 	for _, name := range names {
 		key := strings.ToLower(name)
@@ -252,7 +252,7 @@ func (m *Manager) Combine(names []string) (string, error) {
 		}
 
 		// Add template header
-		combined.WriteString(fmt.Sprintf("### %s ###\n", tmpl.Name))
+		fmt.Fprintf(&combined, "### %s ###\n", tmpl.Name)
 
 		// Add content with deduplication
 		lines := strings.Split(tmpl.Content, "\n")
@@ -299,9 +299,9 @@ func (m *Manager) Stats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_templates": len(m.templates),
-		"categories":      len(m.categories),
+		"total_templates":    len(m.templates),
+		"categories":         len(m.categories),
 		"category_breakdown": categoryCount,
-		"total_size_bytes": totalSize,
+		"total_size_bytes":   totalSize,
 	}
 }

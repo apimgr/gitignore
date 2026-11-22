@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestRegisterBuiltinsRegistersAllTasks(t *testing.T) {
 	wantIDs := []string{
 		"ssl_renewal", "geoip_update", "blocklist_update", "cve_update",
 		"update_check", "token_cleanup", "log_rotation", "backup_daily",
-		"backup_hourly", "healthcheck_self", "tor_health",
+		"backup_hourly", "disk_check", "healthcheck_self", "health_registry_refresh", "security_cleanup",
 	}
 	if len(tasks) != len(wantIDs) {
 		t.Fatalf("got %d tasks, want %d", len(tasks), len(wantIDs))
@@ -66,10 +67,56 @@ func TestRegisterBuiltinsDefaultsLogRetention(t *testing.T) {
 	}
 }
 
-func TestNotWiredHandlerSkips(t *testing.T) {
-	h := notWired("Test Subsystem")
-	if err := h(context.Background()); !errors.Is(err, ErrSkipped) {
-		t.Errorf("notWired error = %v, want ErrSkipped", err)
+func TestRequiredHandlerFailsWhenMissing(t *testing.T) {
+	err := requiredHandler("blocklist_update", nil)(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "blocklist_update") {
+		t.Errorf("error = %v, want a missing-handler error", err)
+	}
+}
+
+func TestRequiredHandlerDelegates(t *testing.T) {
+	want := errors.New("update failed")
+	called := false
+	err := requiredHandler("cve_update", func(context.Context) error {
+		called = true
+		return want
+	})(context.Background())
+	if !errors.Is(err, want) || !called {
+		t.Errorf("handler error=%v called=%v, want delegated error and call", err, called)
+	}
+}
+
+func TestModeBoundHealthTasks(t *testing.T) {
+	s, _ := newTestScheduler()
+	if err := RegisterBuiltins(s, Deps{TorInstalled: true, I2PEnabled: true,
+		TorHealth: func(context.Context) error { return nil },
+		I2PHealth: func(context.Context) error { return nil },
+	}); err != nil {
+		t.Fatalf("RegisterBuiltins: %v", err)
+	}
+	for _, id := range []string{"tor_health", "i2p_health"} {
+		if _, ok := s.Task(id); !ok {
+			t.Errorf("enabled mode task %q is not registered", id)
+		}
+	}
+	s, _ = newTestScheduler()
+	if err := RegisterBuiltins(s, Deps{}); err != nil {
+		t.Fatalf("RegisterBuiltins: %v", err)
+	}
+	for _, id := range []string{"tor_health", "i2p_health"} {
+		if _, ok := s.Task(id); ok {
+			t.Errorf("inactive mode task %q must not be registered", id)
+		}
+	}
+}
+
+func TestPGPKeyserverRetryTaskRegistration(t *testing.T) {
+	s, _ := newTestScheduler()
+	if err := RegisterBuiltins(s, Deps{PGPKeyserverPublish: func(context.Context) error { return nil }}); err != nil {
+		t.Fatalf("RegisterBuiltins: %v", err)
+	}
+	if _, ok := s.Task("pgp_keyserver_publish"); !ok {
+		t.Fatal("PGP keyserver retry task was not registered")
 	}
 }
 
@@ -165,22 +212,6 @@ func TestBackupHandlerRunsWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestTorHealthHandlerSkipsWhenNotInstalled(t *testing.T) {
-	h := torHealthHandler(Deps{TorInstalled: false})
-	if err := h(context.Background()); !errors.Is(err, ErrSkipped) {
-		t.Errorf("error = %v, want ErrSkipped", err)
-	}
-}
-
-func TestTorHealthHandlerSkipsEvenWhenInstalled(t *testing.T) {
-	// Real Tor connectivity checking is not wired up yet (AI.md PART 24), so
-	// the handler must still skip rather than error or panic.
-	h := torHealthHandler(Deps{TorInstalled: true})
-	if err := h(context.Background()); !errors.Is(err, ErrSkipped) {
-		t.Errorf("error = %v, want ErrSkipped", err)
-	}
-}
-
 func TestLogRotationHandlerSkipsWhenNoLogsDir(t *testing.T) {
 	h := logRotationHandler(Deps{})
 	if err := h(context.Background()); !errors.Is(err, ErrSkipped) {
@@ -267,8 +298,27 @@ func TestTokenCleanupHandlerRunsAgainstRealDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if err := tokenCleanupHandler(context.Background()); err != nil {
+	if err := tokenCleanupHandler(Deps{})(context.Background()); err != nil {
 		t.Errorf("tokenCleanupHandler: %v", err)
+	}
+}
+
+func TestTokenCleanupHandlerRequiresAndRunsIdlePurge(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := db.Init(dataDir); err != nil {
+		t.Fatalf("db.Init: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	called := false
+	h := tokenCleanupHandler(Deps{OwnerIdlePurgeDays: 30, PurgeIdleOwners: func(context.Context) error {
+		called = true
+		return nil
+	}})
+	if err := h(context.Background()); err != nil {
+		t.Fatalf("tokenCleanupHandler: %v", err)
+	}
+	if !called {
+		t.Error("idle owner purge handler was not called")
 	}
 }
 

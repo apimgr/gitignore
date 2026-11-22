@@ -1,24 +1,37 @@
 {{define "content"}}
-<h1>Server</h1>
-<p>Information and public documentation for this GitIgnore instance.</p>
+<div class="container container-md">
+<header class="page-header"><h1 class="page-title">Server</h1><p class="page-lead">Information and public documentation for this GitIgnore instance.</p></header>
+<section class="section-card" aria-labelledby="server-information">
+<h2 id="server-information">Server information</h2>
 <ul>
 <li><strong>Version:</strong> v{{.Version}}</li>
 <li><strong>Base URL:</strong> <code>{{.BaseURL}}</code></li>
-<li><strong>API:</strong> <a href="/api/v1">/api/v1</a></li>
-<li><strong>Health:</strong> <a href="/healthz">/healthz</a></li>
+<li><strong>API:</strong> <a href="{{.APIBase}}">{{.APIBase}}</a></li>
+<li><strong>Health:</strong> <a href="{{path "/server/healthz"}}">/server/healthz</a></li>
 </ul>
-<h2>Documentation</h2>
+<p>Server administration is performed through the configuration file and CLI. There is no web management interface.</p>
+</section>
+<section class="section-card" aria-labelledby="server-documentation">
+<h2 id="server-documentation">Documentation</h2>
 <ul>
-<li><a href="/server/about">About</a></li>
-<li><a href="/server/help">Help</a></li>
-<li><a href="/server/privacy">Privacy</a></li>
-<li><a href="/server/terms">Terms</a></li>
-<li><a href="/server/contact">Contact</a></li>
+<li><a href="{{path "/server/about"}}">About</a></li>
+<li><a href="{{path "/server/help"}}">Help</a></li>
+<li><a href="{{path "/server/privacy"}}">Privacy</a></li>
+<li><a href="{{path "/server/terms"}}">Terms</a></li>
+<li><a href="{{path "/server/security"}}">Security</a></li>
+<li><a href="{{path "/server/dpo"}}">Data Protection Officer</a></li>
+<li><a href="{{path "/server/preferences"}}">Preferences</a></li>
+<li><a href="{{path "/server/help/mcp"}}">MCP help</a></li>
+<li><a href="{{path "/server/security/policy"}}">Security disclosure policy</a></li>
+<li><a href="{{path "/server/security/thanks"}}">Security researcher acknowledgments</a></li>
 </ul>
-<h2>Developer tools</h2>
+</section>
+<section class="section-card" aria-labelledby="server-tools">
+<h2 id="server-tools">Developer tools</h2>
 <ul>
-<li><a href="/server/docs/swagger">Swagger UI</a></li>
-<li><a href="/server/docs/graphql">GraphQL playground</a></li>
+<li><a href="{{path "/server/docs/swagger"}}">Swagger UI</a></li>
+<li><a href="{{path "/server/docs/graphql"}}">GraphQL playground</a></li>
 </ul>
-<p>Server administration is performed via the configuration file only — there is no web management interface.</p>
+</section>
+</div>
 {{end}}

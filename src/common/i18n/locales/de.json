@@ -6,7 +6,6 @@
     "direction": "ltr",
     "version": "1.0.0"
   },
-
   "common": {
     "select_language": "Sprache auswählen",
     "save": "Speichern",
@@ -28,6 +27,7 @@
     "refresh": "Aktualisieren",
     "download": "Herunterladen",
     "upload": "Hochladen",
+    "aliases": "Aliase",
     "copy": "Kopieren",
     "copy_to_clipboard": "In die Zwischenablage kopieren",
     "copied": "Kopiert",
@@ -65,13 +65,12 @@
     "last_updated": "Zuletzt aktualisiert: {datetime}",
     "made_with": "Erstellt mit"
   },
-
   "theme": {
     "light": "Hell",
     "dark": "Dunkel",
-    "auto": "Automatisch"
+    "auto": "Automatisch",
+    "change": "Design ändern"
   },
-
   "nav": {
     "home": "Startseite",
     "about": "Über",
@@ -81,13 +80,74 @@
     "terms": "Nutzungsbedingungen",
     "docs": "Dokumentation",
     "api_docs": "API-Dokumentation",
+    "security": "Sicherheit",
     "status": "Status",
+    "all_templates": "Alle Vorlagen",
+    "categories": "Kategorien",
+    "combine": "Kombinieren",
+    "stats": "Statistiken",
+    "cli": "CLI",
     "skip_to_content": "Zum Hauptinhalt springen",
     "skip_to_navigation": "Zur Navigation springen",
     "main_navigation": "Hauptnavigation"
   },
-
   "health": {
+    "section": {
+      "version": "Version",
+      "runtime": "Laufzeit",
+      "cluster": "Cluster",
+      "features": "Funktionen",
+      "checks": "Komponentenstatus",
+      "stats": "Serverstatistiken"
+    },
+    "field": {
+      "status": "Status",
+      "version": "Version",
+      "go_version": "Go-Version",
+      "build": "Build",
+      "uptime": "Betriebszeit",
+      "mode": "Modus",
+      "checked": "Geprüft",
+      "cluster": "Cluster",
+      "enabled": "Aktiviert",
+      "component": "Komponente",
+      "total_requests": "Anfragen insgesamt",
+      "requests_24h": "Anfragen (24 Stunden)",
+      "active_connections": "Aktive Verbindungen",
+      "last_checked": "Zuletzt geprüft:"
+    },
+    "feature": {
+      "tor": "Tor",
+      "i2p": "I2P",
+      "geoip": "GeoIP"
+    },
+    "feature_status": {
+      "disabled": "Deaktiviert",
+      "starting": "Startet",
+      "healthy": "Betriebsbereit",
+      "unavailable": "Nicht verfügbar"
+    },
+    "check_state": {
+      "ok": "OK",
+      "degraded": "Beeinträchtigt",
+      "error": "Fehler"
+    },
+    "check_kind": {
+      "geoip": "GeoIP",
+      "blocklist": "Sperrliste",
+      "data": "Daten"
+    },
+    "check": {
+      "database": "Datenbank",
+      "cache": "Cache",
+      "disk": "Datenträger",
+      "scheduler": "Zeitplaner",
+      "geoip_asn": "GeoIP: ASN",
+      "geoip_country": "GeoIP: Land",
+      "geoip_city": "GeoIP: Stadt",
+      "blocklist_firehol_level1": "Sperrliste: FireHOL Stufe 1",
+      "data_templates": "Daten: Vorlagen"
+    },
     "title": "Systemstatus",
     "all_operational": "Alle Systeme betriebsbereit",
     "degraded": "Beeinträchtigt",
@@ -113,7 +173,6 @@
     "production": "Produktion",
     "development": "Entwicklung"
   },
-
   "status_values": {
     "online": "Online",
     "offline": "Offline",
@@ -124,7 +183,6 @@
     "good": "Gut",
     "warn": "Warnung"
   },
-
   "contact": {
     "title": "Kontakt",
     "name": "Name",
@@ -134,9 +192,13 @@
     "send": "Nachricht senden",
     "success": "Vielen Dank für Ihre Nachricht. Wir werden bald antworten."
   },
-
   "help": {
     "title": "Hilfe",
+    "back": "← Hilfe",
+    "more": "Weitere Hilfe",
+    "description": "Hier finden Sie Hilfe zur Verwendung des Katalogs und seiner APIs.",
+    "mcp_title": "MCP-Server",
+    "mcp_description": "Verbinden Sie KI-Tools mit einem verknüpften Besitzertoken mit dem Katalog.",
     "getting_started": "Erste Schritte",
     "features": "Funktionen",
     "api_documentation": "API-Dokumentation",
@@ -152,8 +214,8 @@
     "faq": "Häufig gestellte Fragen",
     "troubleshooting": "Fehlerbehebung"
   },
-
   "privacy": {
+    "description": "Erfahren Sie, wie diese Instanz Meldungen, Metadaten und Browsereinstellungen verarbeitet.",
     "title": "Datenschutzerklärung",
     "last_updated": "Zuletzt aktualisiert:",
     "summary": "Zusammenfassung",
@@ -172,6 +234,8 @@
     "data_security": "Datensicherheit",
     "data_storage": "Datenspeicherung und Dritte",
     "all_data_stored": "Alle Ihre Daten werden auf unseren Servern gespeichert.",
+    "data_not_stored": "Daten können außerhalb dieses Servers gespeichert werden.",
+    "additional_information": "Zusätzliche Informationen",
     "when_shared": "Wann Daten geteilt werden können",
     "data_retention": "Datenaufbewahrung",
     "your_rights": "Ihre Rechte",
@@ -193,8 +257,8 @@
     "ccpa_opted_out": "Sie haben dem Verkauf von Daten widersprochen.",
     "ccpa_opt_back_in": "Wieder zustimmen"
   },
-
   "terms": {
+    "description": "Lesen Sie die Regeln zur Nutzung dieser GitIgnore-Instanz.",
     "title": "Nutzungsbedingungen",
     "acceptance": "Annahme",
     "account_terms": "Kontobedingungen",
@@ -205,7 +269,29 @@
     "changes": "Änderungen",
     "governing_law": "Anwendbares Recht"
   },
-
+  "preferences_page": {
+    "description": "Verwalten Sie Sprache, Darstellung und Datenschutzeinstellungen dieses Browsers.",
+    "token_management": "Tokenverwaltung",
+    "sync_title": "Einstellungen synchronisieren",
+    "sync_description": "Übertragen Sie Ihre Browsereinstellungen mit einem privaten Link oder Code zwischen Geräten.",
+    "more": "Weitere Einstellungen",
+    "sync_back": "← Einstellungen",
+    "export_url": "Exportlink",
+    "export_code": "Exportcode",
+    "export_title": "Export",
+    "import_prompt": "URL, Abfragezeichenfolge oder Code einfügen",
+    "import_action": "Importieren",
+    "appearance": "Darstellung",
+    "theme": "Design",
+    "language": "Sprache",
+    "automatic": "Automatisch",
+    "essential_always": "Unbedingt erforderliche Cookies (immer aktiv)",
+    "reset": "Zurücksetzen",
+    "forget_title": "Mich vergessen?",
+    "reset_warning": "Dadurch werden Design, Sprache, Anwendungseinstellungen, Cookie-Einwilligung, CCPA-Auswahl, Build-Kennung und der Browserspeicher dieser Website gelöscht. Ihre Anmeldedaten bleiben erhalten. Dieser Vorgang kann nicht rückgängig gemacht werden.",
+    "keep": "Behalten",
+    "erase": "Alles löschen"
+  },
   "cookie_consent": {
     "message": "Gemäß der EU-DSGVO wird diese Meldung angezeigt.",
     "accept": "Ich akzeptiere",
@@ -216,14 +302,26 @@
     "preference_description": "Speichern Ihre Einstellungen wie Design (hell/dunkel), Sprache und Oberflächenpräferenzen. Beim Deaktivieren werden die Standardwerte bei jedem Besuch zurückgesetzt.",
     "analytics_description": "Helfen uns zu verstehen, wie die Website genutzt wird."
   },
-
+  "security_page": {
+    "title": "Sicherheit",
+    "description": "Melden Sie Schwachstellen vertraulich zur verantwortungsvollen Prüfung.",
+    "back": "← Sicherheit",
+    "policy_title": "Richtlinie zur Offenlegung von Sicherheitslücken",
+    "policy_description": "So melden Sie eine Schwachstelle und stimmen die Offenlegung ab.",
+    "thanks_title": "Danksagungen an Sicherheitsforscher",
+    "thanks_description": "Forscher, die öffentliche Anerkennung wählen, erscheinen hier nach der Offenlegung.",
+    "dpo_title": "Datenschutzbeauftragte Person",
+    "dpo_description": "Kontaktdaten für Datenschutzfragen zu dieser Instanz.",
+    "report_status_title": "Status des Sicherheitsberichts",
+    "report_status_description": "Status des eingereichten Schwachstellenberichts."
+  },
   "about": {
+    "description": "Entdecken Sie den GitIgnore-Katalog, die Tools und die API.",
     "title": "Über",
     "features": "Funktionen",
     "version": "Version",
     "links": "Links"
   },
-
   "announcements": {
     "warning": "Warnung",
     "info": "Information",
@@ -231,13 +329,11 @@
     "success": "Erfolg",
     "scheduled_maintenance": "Geplante Wartung"
   },
-
   "pwa": {
     "install": "App installieren",
     "installed": "App installiert",
     "offline_message": "Keine Internetverbindung. Zwischengespeicherte Inhalte werden angezeigt."
   },
-
   "errors": {
     "required": "Dieses Feld ist erforderlich",
     "invalid_email": "Ungültige E-Mail-Adresse",
@@ -260,8 +356,43 @@
     "server_error": "Interner Serverfehler",
     "maintenance_mode": "Dienst nicht verfügbar"
   },
-
   "plurals": {
+    "format_seconds": {
+      "one": "{count} Sekunde",
+      "other": "{count} Sekunden"
+    },
+    "format_minutes": {
+      "one": "{count} Minute",
+      "other": "{count} Minuten"
+    },
+    "format_hours": {
+      "one": "{count} Stunde",
+      "other": "{count} Stunden"
+    },
+    "format_days": {
+      "one": "{count} Tag",
+      "other": "{count} Tage"
+    },
+    "format_bytes": {
+      "one": "{count} Byte",
+      "other": "{count} Bytes"
+    },
+    "format_kilobytes": {
+      "one": "{count} Kilobyte",
+      "other": "{count} Kilobytes"
+    },
+    "format_megabytes": {
+      "one": "{count} Megabyte",
+      "other": "{count} Megabytes"
+    },
+    "format_gigabytes": {
+      "one": "{count} Gigabyte",
+      "other": "{count} Gigabytes"
+    },
+    "format_terabytes": {
+      "one": "{count} Terabyte",
+      "other": "{count} Terabytes"
+    },
     "items": {
       "zero": "Keine Elemente",
       "one": "{count} Element",
@@ -290,7 +421,6 @@
       "other": "{count} Minuten"
     }
   },
-
   "notifications": {
     "title": "Benachrichtigungen",
     "mark_all_read": "Alle als gelesen markieren",
@@ -321,7 +451,6 @@
       "other_admins": "Andere Administratoren"
     }
   },
-
   "email": {
     "subjects": {
       "security_alert": "Sicherheitswarnung - {app_name}",
@@ -340,7 +469,6 @@
       "from": "Von: {app_name} ({fqdn})"
     }
   },
-
   "swagger": {
     "title": "API-Dokumentation - {app_name}",
     "description": "Interaktiver REST-API-Explorer",
@@ -384,7 +512,6 @@
       "500": "Server Error - Interner Fehler"
     }
   },
-
   "graphql": {
     "title": "GraphQL-Explorer - {app_name}",
     "description": "Interaktiver GraphQL-Explorer",
@@ -397,10 +524,36 @@
     "type_descriptions": {
       "query": "Verfügbare Queries zum Abrufen von Daten",
       "mutation": "Verfügbare Mutations zum Ändern von Daten",
-      "subscription": "Subscriptions für Echtzeitdaten"
+      "subscription": "Subscriptions für Echtzeitdaten",
+      "template": "Eine Vorlage aus dem Katalog",
+      "stats": "Gesamtstatistiken zum Vorlagenkatalog"
+    },
+    "field_descriptions": {
+      "template": {
+        "name": "Der Name der Vorlage",
+        "fileName": "Der Dateiname der Vorlage",
+        "category": "Die Kategorie der Vorlage",
+        "content": "Der Inhalt der Vorlage",
+        "description": "Eine kurze Beschreibung der Vorlage",
+        "tags": "Suchbegriffe zur Vorlage",
+        "size": "Die Größe des Vorlageninhalts in Byte"
+      },
+      "stats": {
+        "totalTemplates": "Die Anzahl der Vorlagen im Katalog",
+        "categories": "Die Anzahl der Kategorien im Katalog",
+        "totalSizeBytes": "Die Gesamtgröße aller Vorlageninhalte in Byte"
+      },
+      "query": {
+        "template": "Eine Vorlage anhand ihres Namens abrufen",
+        "list": "Alle verfügbaren Vorlagen auflisten",
+        "search": "Vorlagennamen und -inhalte durchsuchen",
+        "categories": "Alle verfügbaren Kategorienamen auflisten",
+        "category": "Vorlagen einer Kategorie auflisten",
+        "combine": "Die Inhalte ausgewählter Vorlagen zusammenführen",
+        "stats": "Gesamtstatistiken zum Vorlagenkatalog abrufen"
+      }
     }
   },
-
   "users": {
     "registration": {
       "title": "Registrieren",
@@ -451,7 +604,6 @@
       "disabled": "Deaktiviert"
     }
   },
-
   "cli": {
     "description": "{project_name} {project_version} - {project_description}",
     "usage": "Verwendung:",
@@ -495,27 +647,71 @@
     "update_branch_usage": "Update-Kanal festlegen: stable, beta oder devel (Aliase: daily, rolling, dev, development)",
     "invalid_update_branch": "Ungültiger Update-Kanal. Gültige Kanäle: stable, beta, devel."
   },
-
   "version": {
     "name_version": "{project_name} {project_version}",
     "built": "Erstellt: {build_date}",
     "go": "Go: {go_version}",
     "os_arch": "OS/Arch: {goos}/{goarch}"
   },
-
   "confirm": {
     "delete_title": "Löschen bestätigen",
     "delete_message": "Möchten Sie dieses Element wirklich löschen?",
     "action_irreversible": "Diese Aktion kann nicht rückgängig gemacht werden."
   },
-
   "form": {
     "required_field": "(erforderlich)",
     "optional_field": "(optional)",
     "hint_email": "Wir geben Ihre E-Mail-Adresse niemals weiter.",
     "errors_count": "Das Formular enthält {count} Fehler"
   },
-
+  "owner_tokens_page": {
+    "back": "← Einstellungen",
+    "title": "Owner-Tokens",
+    "description": "Zeigen und verwalten Sie das primäre Token dieses Browsers und erstellen Sie verknüpfte Tokens für Ihre Werkzeuge.",
+    "new_token": "Neues Token",
+    "create_desc": "Erstelle ein anonymes Owner-Token für MCP und verwalte verknüpfte Tokens.",
+    "create": "Token erstellen",
+    "use_existing": "Vorhandenes Token verwenden",
+    "primary": "Primäres Token",
+    "restore_hint": "Füge dein primäres Token ein, um diesen Browser wiederherzustellen.",
+    "restore": "Identität wiederherstellen",
+    "active": "Aktiv",
+    "primary_help": "Voller Zugriff auf deine {resources}. Bewahre es sicher auf.",
+    "reveal": "Anzeigen",
+    "copy": "Kopieren",
+    "rotate": "Rotieren",
+    "rotate_prompt": "Dieses Token rotieren? Der aktuelle Wert wird sofort ungültig.",
+    "confirm_rotate": "Rotation bestätigen",
+    "linked": "Verknüpfte Tokens",
+    "created": "Erstellt",
+    "last_used": "Zuletzt verwendet",
+    "expires": "Läuft ab",
+    "edit": "Bearbeiten",
+    "save": "Speichern",
+    "revoke": "Widerrufen",
+    "revoke_prompt": "Dieses verknüpfte Token widerrufen? Das kann nicht rückgängig gemacht werden.",
+    "confirm_revoke": "Widerruf bestätigen",
+    "empty": "Noch keine verknüpften Tokens.",
+    "empty_hint": "Erstelle eines pro App, zum Beispiel für deinen MCP-Client.",
+    "create_linked": "Verknüpftes Token erstellen",
+    "name": "Name",
+    "name_hint": "Zum Beispiel: MCP-Client",
+    "expiry": "Ablauf",
+    "never": "Nie",
+    "days_7": "7 Tage",
+    "days_30": "30 Tage",
+    "days_90": "90 Tage",
+    "year": "1 Jahr",
+    "custom_date": "Eigenes Datum",
+    "expires_on": "Läuft ab am",
+    "this_browser": "Dieser Browser",
+    "browser_saved": "Primäres Token in diesem Browser gespeichert.",
+    "forget": "Gespeichertes Token vergessen",
+    "forget_prompt": "Gespeichertes Token dieses Browsers vergessen? Es bleibt gültig.",
+    "confirm_forget": "Vergessen bestätigen",
+    "resources_remain": "Deine {resources} werden nicht gelöscht.",
+    "shown_once": "Einmal auf dieser Seite angezeigt"
+  },
   "a11y": {
     "skip_to_content": "Zum Hauptinhalt springen",
     "skip_to_navigation": "Zur Navigation springen",

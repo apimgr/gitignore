@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,10 +17,15 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/apimgr/gitignore/src/blocklist"
+	"github.com/apimgr/gitignore/src/common/audit"
 	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/cve"
 	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/diskcheck"
 	"github.com/apimgr/gitignore/src/mode"
+	"github.com/apimgr/gitignore/src/notify"
 	apppath "github.com/apimgr/gitignore/src/path"
 	"github.com/apimgr/gitignore/src/scheduler"
 	"github.com/apimgr/gitignore/src/server"
@@ -40,6 +46,61 @@ var (
 )
 
 const projectName = "gitignore"
+
+func resolveSecurityDataDir(value, dataDir string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return filepath.Join(dataDir, "security")
+	}
+	value = strings.ReplaceAll(value, "${DATA_DIR}", dataDir)
+	value = strings.ReplaceAll(value, "$DATA_DIR", dataDir)
+	value = strings.ReplaceAll(value, "{data_dir}", dataDir)
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(dataDir, value)
+	}
+	return filepath.Clean(value)
+}
+
+func makeBlocklistConfig(cfg *config.Config, securityDir string) blocklist.Config {
+	sources := make([]blocklist.Source, 0, len(cfg.Server.Security.Blocklists.ExtraSources))
+	for _, source := range cfg.Server.Security.Blocklists.ExtraSources {
+		sources = append(sources, blocklist.Source{ID: source.ID, Type: source.Type, URL: source.URL, Enabled: source.Enabled})
+	}
+	trusted := make([]netip.Prefix, 0, len(cfg.Server.TrustedProxies.Additional))
+	for _, value := range cfg.Server.TrustedProxies.Additional {
+		if prefix, err := netip.ParsePrefix(value); err == nil {
+			trusted = append(trusted, prefix.Masked())
+			continue
+		}
+		if address, err := netip.ParseAddr(value); err == nil {
+			bits := 128
+			if address.Is4() {
+				bits = 32
+			}
+			trusted = append(trusted, netip.PrefixFrom(address, bits))
+		}
+	}
+	return blocklist.Config{SecurityDir: securityDir, Enabled: cfg.Server.Security.Blocklists.Enabled, ExtraSources: sources, TrustedPrefixes: trusted}
+}
+
+func writeWebhookAudit(logsDir, event string, fields map[string]string) {
+	details := make(map[string]any, len(fields))
+	for key, value := range fields {
+		details[key] = value
+	}
+	_ = audit.Append(logsDir, audit.Entry{
+		Event: event, Category: "system", Severity: "warn",
+		Actor:   audit.Actor{Type: "system", IP: "127.0.0.1"},
+		Details: details, Result: "failure",
+	})
+}
+
+func parseDurationOr(value string, fallback time.Duration) time.Duration {
+	if duration, err := time.ParseDuration(strings.TrimSpace(value)); err == nil && duration > 0 {
+		return duration
+	}
+	return fallback
+}
 
 // sysexits(3) exit codes — never invent custom schemes.
 const (
@@ -122,6 +183,7 @@ func main() {
 	backupDirFlag := flag.String("backup", "", "Backup directory")
 	pidFileFlag := flag.String("pid", "", "PID file path")
 	baseURLFlag := flag.String("baseurl", "", "URL path prefix (default: /)")
+	i2pFlag := flag.Bool("i2p", false, "Enable the I2P eepsite (default on in containers)")
 	daemonFlag := flag.Bool("daemon", false, "Run as daemon (detach from terminal)")
 	langFlag := flag.String("lang", "", "Language for output (default: auto, from LANG env)")
 	shellCmd := flag.String("shell", "", "Shell integration: completions, init, help [SHELL]")
@@ -149,7 +211,9 @@ func main() {
 	// yet routed through i18n, so this only exports LANG for locale-aware
 	// downstream code and the client; documented as a partial in AUDIT.AI.md.
 	if *langFlag != "" {
-		os.Setenv("LANG", *langFlag)
+		if err := os.Setenv("LANG", *langFlag); err != nil {
+			log.Printf("Warning: failed to set locale: %v", err)
+		}
 	}
 
 	colorEnabled := resolveColor(*colorFlag)
@@ -175,7 +239,10 @@ func main() {
 	dataDir := dirs.Data
 	if *dataDirFlag != "" {
 		dataDir = *dataDirFlag
-		os.Setenv("DATA_DIR", dataDir)
+		if err := os.Setenv("DATA_DIR", dataDir); err != nil {
+			log.Printf("Failed to set data directory: %v", err)
+			os.Exit(exOSErr)
+		}
 	} else if v := os.Getenv("DATA_DIR"); v != "" {
 		dataDir = v
 	}
@@ -184,7 +251,10 @@ func main() {
 	logsDir := dirs.Logs
 	if *logDirFlag != "" {
 		logsDir = *logDirFlag
-		os.Setenv("LOG_DIR", logsDir)
+		if err := os.Setenv("LOG_DIR", logsDir); err != nil {
+			log.Printf("Failed to set log directory: %v", err)
+			os.Exit(exOSErr)
+		}
 	} else if v := os.Getenv("LOG_DIR"); v != "" {
 		logsDir = v
 	}
@@ -192,10 +262,16 @@ func main() {
 	// --cache and --backup export their init-only env vars so GetCacheDir and
 	// GetBackupDir resolve the override wherever they are called.
 	if *cacheDirFlag != "" {
-		os.Setenv("CACHE_DIR", *cacheDirFlag)
+		if err := os.Setenv("CACHE_DIR", *cacheDirFlag); err != nil {
+			log.Printf("Failed to set cache directory: %v", err)
+			os.Exit(exOSErr)
+		}
 	}
 	if *backupDirFlag != "" {
-		os.Setenv("BACKUP_DIR", *backupDirFlag)
+		if err := os.Setenv("BACKUP_DIR", *backupDirFlag); err != nil {
+			log.Printf("Failed to set backup directory: %v", err)
+			os.Exit(exOSErr)
+		}
 	}
 
 	// Resolve PID file path (flag > OS default; empty on Windows/containers).
@@ -214,11 +290,18 @@ func main() {
 
 	// Load configuration (auto-creates with random 64xxx port on first run)
 	configPath := filepath.Join(configDir, "server.yml")
+	config.SetAuditLogDir(logsDir)
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Printf("Warning: failed to load config: %v, using defaults", err)
 		cfg = config.DefaultConfig()
 	}
+	flag.Visit(func(parsed *flag.Flag) {
+		if parsed.Name == "i2p" {
+			cfg.Server.I2P.Enabled = *i2pFlag
+		}
+	})
+	i2pRuntime := newI2PRuntime(cfg.Server.I2P.Enabled)
 
 	// --baseurl overrides the configured URL path prefix (AI.md PART 8).
 	if *baseURLFlag != "" {
@@ -233,7 +316,8 @@ func main() {
 		if checkPort == "" {
 			checkPort = "64580"
 		}
-		if err := checkHealth(checkPort); err != nil {
+		checkPort = strings.Split(checkPort, ",")[0]
+		if err := checkHealth(checkPort, cfg.Server.BaseURL); err != nil {
 			fmt.Fprintf(os.Stderr, "Health check failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -316,11 +400,15 @@ func main() {
 	}
 
 	// ── Initialize database ──────────────────────────────────────────────────
-	if err := db.Init(dataDir); err != nil {
+	if err := db.Init(dataDir, db.ConnectionConfig{
+		Driver: cfg.Server.Database.Driver,
+		URL:    cfg.Server.Database.URL,
+		Token:  cfg.Server.Database.Token,
+	}); err != nil {
 		log.Printf("Failed to initialize database: %v", err)
 		os.Exit(exUnavailable)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// ── Resolve server address & port ────────────────────────────────────────
 	serverAddress := cfg.Server.Address
@@ -339,6 +427,8 @@ func main() {
 	} else if envPort := os.Getenv("PORT"); envPort != "" {
 		serverPort = envPort
 	}
+	cfg.Server.Address = serverAddress
+	cfg.Server.Port = serverPort
 	portNum, _ := strconv.Atoi(serverPort)
 
 	// Apply mode from environment if set
@@ -391,18 +481,112 @@ func main() {
 
 	// ── Start server ─────────────────────────────────────────────────────────
 	pathMgr := apppath.New()
-	srv := server.New(&server.Config{
-		Address:   serverAddress,
-		Port:      portNum,
-		DevMode:   devMode,
-		Templates: templateMgr,
-		Paths:     pathMgr,
-		Version:   Version,
-		Commit:    CommitID,
-		BuildDate: BuildDate,
-		Cfg:       cfg,
-		GeoIP:     geoipMgr,
+	pathMgr.SetConfigDir(configDir)
+	pathMgr.SetDataDir(dataDir)
+	pathMgr.SetLogsDir(logsDir)
+	securityDir := resolveSecurityDataDir(cfg.Data.SecurityDir, dataDir)
+	blocklistCfg := makeBlocklistConfig(cfg, securityDir)
+	var blocklistMatcher *blocklist.Matcher
+	if cfg.Server.Security.Blocklists.Enabled {
+		blocklistMatcher = blocklist.NewMatcher(securityDir, blocklistCfg.ExtraSources)
+		if err := blocklistMatcher.Reload(time.Now().UTC()); err != nil {
+			log.Printf("blocklist_load: %v", err)
+		}
+	}
+	var srv *server.Server
+	cfgManager, managerErr := config.NewConfigManager(config.ConfigManagerOptions{
+		ConfigPath: configPath,
+		AssetsDir:  filepath.Join(configDir, "assets"),
+		Initial:    cfg,
+		Load: func() (*config.Config, error) {
+			next, err := config.Load(configPath)
+			if err != nil {
+				return nil, err
+			}
+			if *port != "" {
+				next.Server.Port = *port
+			} else if value := os.Getenv("PORT"); value != "" {
+				next.Server.Port = value
+			}
+			if *address != "" {
+				next.Server.Address = *address
+			} else if value := os.Getenv("LISTEN"); value != "" {
+				next.Server.Address = value
+			}
+			if *baseURLFlag != "" {
+				next.Server.BaseURL = normalizeBaseURL(*baseURLFlag)
+			} else {
+				next.Server.BaseURL = normalizeBaseURL(next.Server.BaseURL)
+			}
+			if envMode := os.Getenv("MODE"); envMode != "" && next.Server.Mode == "production" {
+				next.Server.Mode = resolveMode(envMode)
+			}
+			flag.Visit(func(parsed *flag.Flag) {
+				if parsed.Name == "i2p" {
+					next.Server.I2P.Enabled = *i2pFlag
+				}
+			})
+			return next, nil
+		},
+		Apply: func(next *config.Config, changes config.ConfigChanges) error {
+			if srv == nil {
+				return fmt.Errorf("server is not ready")
+			}
+			srv.ReplaceConfig(next)
+			if len(changes.GracefulReload) > 0 {
+				reopenLogs()
+			}
+			if len(changes.HotReload) > 0 || len(changes.GracefulReload) > 0 {
+				log.Printf("Configuration reloaded: %s", strings.Join(append(changes.HotReload, changes.GracefulReload...), ", "))
+			}
+			if len(changes.RestartRequired) > 0 {
+				log.Printf("Configuration changes require restart: %s", strings.Join(changes.RestartRequired, ", "))
+			}
+			return nil
+		},
+		OnError: func(error) { log.Printf("Configuration reload failed; retaining the last good configuration") },
 	})
+	if managerErr != nil {
+		log.Printf("Configuration watcher unavailable: %v", managerErr)
+	}
+	webhookDispatcher := notify.NewDispatcher(notify.Options{
+		UserAgent: projectName + "/" + Version,
+		Audit: func(event string, fields map[string]string) {
+			writeWebhookAudit(logsDir, event, fields)
+		},
+	})
+	srv = server.New(&server.Config{
+		Address:           serverAddress,
+		Port:              portNum,
+		DevMode:           devMode,
+		Templates:         templateMgr,
+		Paths:             pathMgr,
+		Version:           Version,
+		Commit:            CommitID,
+		BuildDate:         BuildDate,
+		Cfg:               cfg,
+		ConfigManager:     cfgManager,
+		GeoIP:             geoipMgr,
+		Blocklist:         blocklistMatcher,
+		SecurityDir:       securityDir,
+		I2PStatus:         i2pRuntime.healthInfo,
+		WebhookDispatcher: webhookDispatcher,
+		SendContact: func(to, subject, body string) error {
+			if notifier == nil || notifier.sender == nil || !notifier.sender.CanSend() {
+				return fmt.Errorf("email delivery is not configured")
+			}
+			return notifier.sender.Send(to, subject, body)
+		},
+		SendContactReply: func(to, replyTo, subject, body string) error {
+			if notifier == nil || notifier.sender == nil || !notifier.sender.CanSend() {
+				return fmt.Errorf("email delivery is not configured")
+			}
+			return notifier.sender.SendWithReplyTo(to, replyTo, subject, body)
+		},
+	})
+	if cfgManager != nil {
+		cfgManager.Start(context.Background())
+	}
 
 	log.Printf("gitignore %s (commit: %s, built: %s)", Version, CommitID, BuildDate)
 	log.Printf("Listening on %s:%d", serverAddress, portNum)
@@ -416,32 +600,117 @@ func main() {
 	// ── Initialize operator email notifications (AI.md PART 17) ───────────────
 	// Detects or tests SMTP and sets the process-wide notifier. Best-effort: no
 	// working SMTP simply leaves email disabled.
-	initEmail(cfg, configDir, dataDir)
-
-	// ── Start the always-running task scheduler (AI.md PART 18) ───────────────
-	var sched *scheduler.Scheduler
-	if s, err := buildScheduler(cfg, configDir, dataDir, logsDir, geoipMgr); err != nil {
-		log.Printf("Failed to build scheduler: %v", err)
-	} else {
-		sched = s
-		if err := sched.Start(context.Background()); err != nil {
-			log.Printf("Failed to start scheduler: %v", err)
-		}
-	}
+	initEmail(cfg, configDir, dataDir, i2pRuntime.healthInfo)
 
 	// First-run GeoIP download (AI.md PART 19): best-effort, non-blocking.
-	bootstrapGeoIP(context.Background(), geoipMgr)
+	bootstrapGeoIP(context.Background(), geoipMgr, srv.RefreshHealth)
 
 	// ── Start the Tor hidden service (AI.md PART 31) ──────────────────────────
 	// Best-effort and non-blocking: the server never fails to start because of
 	// Tor. The manager is nil when no tor binary is installed.
 	torCtx, torCancel := context.WithCancel(context.Background())
-	torMgr := startTor(torCtx, cfg, configDir, dataDir, portNum)
+	torMgr := startTor(torCtx, cfg, configDir, dataDir, portNum, srv)
+	i2pCtx, i2pCancel := context.WithCancel(context.Background())
+	go i2pRuntime.run(i2pCtx, cfg.Server.I2P, configDir, dataDir, logsDir, srv.HTTPHandler())
+
+	// Security databases download on first run and refresh on their scheduled
+	// cadence. These bootstrap updates never block the HTTP listener.
+	go func() {
+		if _, err := blocklist.Update(context.Background(), blocklistCfg); err != nil {
+			log.Printf("blocklist bootstrap update failed: %v", err)
+		}
+		if blocklistMatcher != nil {
+			if err := blocklistMatcher.Reload(time.Now().UTC()); err != nil {
+				log.Printf("blocklist bootstrap reload failed: %v", err)
+			}
+		}
+		_ = srv.RefreshHealth()
+	}()
+	go func() {
+		if err := cve.Update(context.Background(), cve.Config{
+			SecurityDir: securityDir, NVDSource: cfg.Data.CVE.Source, NVDAPIKey: cfg.Data.CVE.APIKey,
+			TrivyEnabled: cfg.Data.Trivy.Enabled, TrivySource: cfg.Data.Trivy.Source,
+		}); err != nil {
+			log.Printf("CVE bootstrap update failed: %v", err)
+		}
+		_ = srv.RefreshHealth()
+	}()
+
+	checker := diskcheck.New(diskcheck.Config{
+		DataDir: dataDir, LogDir: logsDir, BackupDir: apppath.GetBackupDir(),
+		Enabled:          cfg.Server.Notifications.DiskLow.Enabled,
+		ThresholdPercent: cfg.Server.Notifications.DiskLow.ThresholdPercent,
+		Repeat:           parseDurationOr(cfg.Server.Notifications.DiskLow.Repeat, 24*time.Hour),
+		Notify: func(event diskcheck.Event) {
+			emitDiskLow(event.Path, event.UsedPercent, event.FreeBytes, event.ThresholdPercent)
+		},
+		Log: func(level, message string, fields map[string]interface{}) {
+			log.Printf("%s %s fields=%v", level, message, fields)
+		},
+	})
+	runtimeDeps := scheduler.Deps{
+		BlocklistUpdate: func(ctx context.Context) error {
+			_, updateErr := blocklist.Update(ctx, blocklistCfg)
+			var reloadErr error
+			if blocklistMatcher != nil {
+				reloadErr = blocklistMatcher.Reload(time.Now().UTC())
+			}
+			refreshErr := srv.RefreshHealth()
+			if updateErr != nil {
+				return updateErr
+			}
+			if reloadErr != nil {
+				return reloadErr
+			}
+			return refreshErr
+		},
+		HealthRefresh: func(ctx context.Context) error { return srv.RefreshHealth() },
+		CVEUpdate: func(ctx context.Context) error {
+			if err := cve.Update(ctx, cve.Config{SecurityDir: securityDir, NVDSource: cfg.Data.CVE.Source, NVDAPIKey: cfg.Data.CVE.APIKey, TrivyEnabled: cfg.Data.Trivy.Enabled, TrivySource: cfg.Data.Trivy.Source}); err != nil {
+				return err
+			}
+			return srv.RefreshHealth()
+		},
+		DiskCheck: func(ctx context.Context) error {
+			_, err := checker.Check(ctx)
+			return err
+		},
+		DiskCheckInterval: cfg.Server.Notifications.DiskLow.CheckInterval,
+		TorHealth: func(ctx context.Context) error {
+			if torMgr == nil {
+				return fmt.Errorf("tor manager is unavailable")
+			}
+			return torMgr.HealthCheck(ctx)
+		},
+		I2PHealth:          i2pRuntime.healthCheck,
+		OwnerIdlePurgeDays: cfg.Server.Tokens.IdlePurgeDays,
+		PurgeIdleOwners: func(ctx context.Context) error {
+			if cfg.Server.Tokens.IdlePurgeDays <= 0 {
+				return nil
+			}
+			_, err := db.PurgeIdleOwners(ctx, time.Now().UTC().AddDate(0, 0, -cfg.Server.Tokens.IdlePurgeDays))
+			return err
+		},
+	}
+	runtimeDeps.TaskState = srv.SchedulerMetricsObserver()
+	// ── Start the always-running task scheduler (AI.md PART 18) ───────────────
+	var sched *scheduler.Scheduler
+	if built, err := buildScheduler(cfg, configDir, dataDir, logsDir, geoipMgr, runtimeDeps); err != nil {
+		log.Printf("Failed to build scheduler: %v", err)
+	} else {
+		sched = built
+		if err := sched.Start(context.Background()); err != nil {
+			log.Printf("Failed to start scheduler: %v", err)
+		}
+	}
 
 	for {
 		select {
 		case err := <-errChan:
 			log.Printf("Server error: %v", err)
+			if cfgManager != nil {
+				cfgManager.Stop()
+			}
 			removePIDFile(pidFile)
 			os.Exit(exUnavailable)
 		case sig := <-sigChan:
@@ -454,6 +723,10 @@ func main() {
 				dumpStatus()
 			default:
 				log.Printf("Received signal %v, shutting down...", sig)
+				if cfgManager != nil {
+					cfgManager.Stop()
+				}
+				i2pCancel()
 				// Stop Tor FIRST (server owns the Tor lifecycle, AI.md PART 31).
 				torCancel()
 				if torMgr != nil {
@@ -561,6 +834,7 @@ Server Configuration:
   --address ADDR                 Listen address (default: [::])
   --port PORT                    Listen port (default: random 64xxx, 80 in container)
   --baseurl PATH                 URL path prefix (default: /)
+  --i2p                          Enable the I2P eepsite
   --daemon                       Run as daemon (detach from terminal)
   --debug                        Enable debug mode
   --color {auto|yes|no}          Color output (default: auto)
@@ -577,8 +851,11 @@ Service Commands:
 
 Maintenance Commands:
   --maintenance backup [file]   Backup configuration and data
+  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring
   --maintenance restore [file]  Restore from backup
   --maintenance update          Check for and install updates
+  --maintenance pgp <action>    Manage the project security keypair
+  --maintenance security list|show|update  Manage disclosure report metadata (root)
 
 Update Commands:
   --update check               Check for updates
@@ -627,14 +904,18 @@ Configuration:
 `, binaryName, Version, i18n.Translate(i18n.ResolveCLILang("", ""), "cli.update_branch_usage"))
 }
 
-func checkHealth(port string) error {
-	url := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
+func checkHealth(port string, baseURLs ...string) error {
+	baseURL := ""
+	if len(baseURLs) > 0 && baseURLs[0] != "/" {
+		baseURL = "/" + strings.Trim(baseURLs[0], "/")
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%s%s/server/healthz", port, baseURL)
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned status %d", resp.StatusCode)
 	}
@@ -725,6 +1006,38 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 
 	switch cmd {
 	case "backup":
+		if len(args) > 0 && args[0] == "test" {
+			if len(args) > 2 {
+				fmt.Fprintln(os.Stderr, "Usage: gitignore --maintenance backup test [backup-file]")
+				os.Exit(2)
+			}
+			backupFile := ""
+			if len(args) == 2 {
+				backupFile = args[1]
+			} else {
+				var err error
+				backupFile, err = latestBackupFile(apppath.GetBackupDir())
+				if err != nil {
+					log.Printf("Backup test failed: %v", err)
+					os.Exit(exIOErr)
+				}
+			}
+			password := ""
+			if strings.HasSuffix(backupFile, ".enc") {
+				var err error
+				password, err = promptPassword("Enter backup password: ")
+				if err != nil {
+					log.Printf("Backup test failed: %v", err)
+					os.Exit(exIOErr)
+				}
+			}
+			if err := verifyBackupPGP(backupFile, password); err != nil {
+				log.Printf("Backup PGP verification failed: %v", err)
+				os.Exit(exIOErr)
+			}
+			fmt.Println("Backup PGP keypair verified; encrypted private key decrypts and matches the public key.")
+			return
+		}
 		cfg, _ := config.Load(configPath)
 		backupFile := ""
 		if len(args) > 0 {
@@ -803,11 +1116,49 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 		fmt.Println("Server configuration reset to defaults.")
 		fmt.Println("Setup complete.")
 
+	case "pgp":
+		if err := handlePGPMaintenance(configDir, configPath, dataDir, logsDir, args); err != nil {
+			fmt.Fprintf(os.Stderr, "PGP maintenance failed: %v\n", err)
+			os.Exit(exConfig)
+		}
+
+	case "security":
+		if err := handleSecurityMaintenance(configPath, dataDir, logsDir, args); err != nil {
+			fmt.Fprintf(os.Stderr, "Security maintenance failed: %v\n", err)
+			os.Exit(exConfig)
+		}
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown maintenance command: %s\n", cmd)
-		fmt.Fprintln(os.Stderr, "Available: backup, restore, update, mode, setup")
+		fmt.Fprintln(os.Stderr, "Available: backup, restore, update, mode, setup, pgp, security")
 		os.Exit(1)
 	}
+}
+
+func latestBackupFile(directory string) (string, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return "", err
+	}
+	var latest string
+	var latestTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".tar.gz") && !strings.HasSuffix(entry.Name(), ".tar.gz.enc")) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", err
+		}
+		if latest == "" || info.ModTime().After(latestTime) {
+			latest = filepath.Join(directory, entry.Name())
+			latestTime = info.ModTime()
+		}
+	}
+	if latest == "" {
+		return "", fmt.Errorf("no backup archives found in %s", directory)
+	}
+	return latest, nil
 }
 
 func serviceStatus() {

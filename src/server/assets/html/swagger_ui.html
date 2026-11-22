@@ -1,0 +1,6 @@
+{{define "content"}}
+<div class="container container-lg">
+<header class="page-header"><h1 class="page-title">{{t .Lang "nav.api_docs"}}</h1><p class="page-lead">{{t .Lang "swagger.description"}}</p></header>
+<section class="section-card" aria-labelledby="swagger-explorer"><h2 id="swagger-explorer">{{t .Lang "swagger.try_it_out"}}</h2><div id="swagger-ui" data-spec-url="{{.Data.specURL}}"></div></section>
+</div>
+{{end}}

@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="container container-sm">
+<header class="page-header"><h1 class="page-title">{{t .Lang "common.preferences"}}</h1><p class="page-lead">{{t .Lang "preferences_page.description"}}</p></header>
+<form method="post" action="{{path "/server/preferences"}}" class="preferences-form">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="consent_form" value="1">
+<input type="hidden" name="redirect" value="/server/preferences">
+<section class="section-card" aria-labelledby="appearance-title"><h2 id="appearance-title">{{t .Lang "preferences_page.appearance"}}</h2>
+<div class="form-group"><label for="theme">{{t .Lang "preferences_page.theme"}}</label><select class="form-input" id="theme" name="theme"><option value="dark"{{if eq .Theme "dark"}} selected{{end}}>{{t .Lang "theme.dark"}}</option><option value="light"{{if eq .Theme "light"}} selected{{end}}>{{t .Lang "theme.light"}}</option><option value="auto"{{if eq .Theme "auto"}} selected{{end}}>{{t .Lang "theme.auto"}}</option></select></div></section>
+<section class="section-card" aria-labelledby="language-title"><h2 id="language-title">{{t .Lang "preferences_page.language"}}</h2>
+<div class="form-group"><label for="lang">{{t .Lang "preferences_page.language"}}</label><select class="form-input" id="lang" name="lang"><option value="auto"{{if eq .LanguagePreference "auto"}} selected{{end}}>{{t .Lang "preferences_page.automatic"}} ({{.LanguageName}})</option>{{range .Languages}}<option value="{{.Code}}" lang="{{.Code}}"{{if eq $.LanguagePreference .Code}} selected{{end}}>{{.NativeName}}</option>{{end}}</select></div></section>
+<section class="section-card" aria-labelledby="privacy-preferences-title"><h2 id="privacy-preferences-title">{{t .Lang "privacy.title"}}</h2>
+<div class="form-group"><label><input type="checkbox" checked disabled> {{t .Lang "privacy.essential_cookies"}}</label></div>
+<div class="form-group"><label><input type="checkbox" name="consent_preferences"{{if .Data.consentPreferences}} checked{{end}}> {{t .Lang "privacy.preference_cookies"}}</label></div>
+<div class="form-group"><label><input type="checkbox" name="consent_analytics"{{if .Data.consentAnalytics}} checked{{end}}> {{t .Lang "privacy.analytics_cookies"}}</label></div>
+{{if .Data.showCCPA}}<div class="form-group"><label><input type="checkbox" name="ccpa_opt_out"{{if .Data.ccpaOptOut}} checked{{end}}> {{t .Lang "privacy.ccpa_do_not_sell"}}</label></div>{{end}}
+</section>
+<section class="section-card" aria-labelledby="preferences-actions"><h2 id="preferences-actions">{{t .Lang "common.actions"}}</h2><div class="form-actions"><a class="btn" href="{{.Data.cancelURL}}">{{t .Lang "common.cancel"}}</a><button class="btn" type="button" popovertarget="reset-preferences">{{t .Lang "preferences_page.reset"}}</button><button class="btn btn-primary" type="submit">{{t .Lang "common.save"}}</button></div></section>
+<div id="reset-preferences" popover><p><strong>{{t .Lang "preferences_page.forget_title"}}</strong></p><p>{{t .Lang "preferences_page.reset_warning"}}</p><button class="btn" type="button" popovertarget="reset-preferences" popovertargetaction="hide">{{t .Lang "preferences_page.keep"}}</button><button class="btn btn-danger" type="submit" name="action" value="reset" formaction="{{path "/server/preferences"}}">{{t .Lang "preferences_page.erase"}}</button></div>
+</form>
+<section class="section-card" aria-labelledby="more-preferences"><h2 id="more-preferences">{{t .Lang "preferences_page.more"}}</h2><ul class="hub-list">{{range .Data.registeredPages}}<li class="hub-item"><a class="hub-link" href="{{.Path}}"><span class="hub-title">{{.Title}}</span><span class="hub-desc">{{.Description}}</span></a></li>{{end}}</ul></section>
+</div>
+{{end}}

@@ -39,6 +39,21 @@ document.querySelectorAll('[data-action="theme-toggle"]').forEach(function (btn)
   });
 });
 
+// Clipboard is an optional enhancement; the export text remains selectable
+// when clipboard access is unavailable or JavaScript is disabled.
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var target = document.getElementById(btn.dataset.copy);
+    if (!target) return;
+    var text = target.textContent || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        btn.textContent = btn.dataset.copiedLabel || btn.textContent;
+      }).catch(function () {});
+    }
+  });
+});
+
 // ============================================================================
 // Service worker registration (PWA offline support)
 // ============================================================================

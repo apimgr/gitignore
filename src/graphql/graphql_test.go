@@ -41,3 +41,32 @@ func TestSchemaRejectsInvalidFields(t *testing.T) {
 		t.Fatalf("invalid query was accepted: %s", response.Data)
 	}
 }
+
+func TestSchemaResolversAndSDL(t *testing.T) {
+	templates, err := template.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := New(templates)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := schema.Execute(context.Background(), `{ list { name fileName category content description tags size } categories search(q: "Go") { name } category(name: "Root") { name } stats { totalTemplates categories totalSizeBytes } combine(templates: ["Go"]) }`, "", nil)
+	if len(response.Errors) != 0 {
+		t.Fatalf("resolver query returned errors: %v", response.Errors)
+	}
+	for _, expected := range []string{`"name":"Go"`, `"fileName":"Go.gitignore"`, `"totalTemplates"`, `"categories"`, `"totalSizeBytes"`} {
+		if !strings.Contains(string(response.Data), expected) {
+			t.Errorf("resolver response missing %s: %s", expected, response.Data)
+		}
+	}
+
+	sdl, err := SDL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sdl, "type Query") || !strings.Contains(sdl, "combine(templates:") {
+		t.Fatalf("SDL does not describe expected API: %s", sdl)
+	}
+}

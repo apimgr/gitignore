@@ -2,7 +2,9 @@ package server
 
 import (
 	"net"
+	"net/netip"
 	"strings"
+	"time"
 )
 
 // alwaysTrustedCIDRs are the proxy peer ranges trusted with no operator
@@ -21,8 +23,9 @@ var alwaysTrustedCIDRs = []string{
 
 // buildTrustedProxies parses the always-trusted ranges, the listen address's
 // own /24 (containerized reverse-proxy sidecar pattern), and any operator
-// supplied additional IPs/CIDRs into a single slice of networks. Unparseable
-// entries are skipped rather than aborting startup.
+// supplied additional IPs/CIDRs/DNS names into a single slice of networks.
+// DNS entries are resolved at startup and refreshed every five minutes.
+// Unparseable entries are skipped rather than aborting startup.
 func buildTrustedProxies(listenAddr string, additional []string) []*net.IPNet {
 	var nets []*net.IPNet
 
@@ -63,8 +66,8 @@ func buildTrustedProxies(listenAddr string, additional []string) []*net.IPNet {
 			}
 			continue
 		}
-		// DNS names are resolved once at startup; each resolved address is
-		// added as a host route.
+		// DNS names are resolved at startup and on each periodic refresh; each
+		// resolved address is added as a host route.
 		if addrs, err := net.LookupIP(entry); err == nil {
 			for _, ip := range addrs {
 				if ip.To4() != nil {
@@ -100,18 +103,73 @@ func parseListenIP(addr string) net.IP {
 // isTrustedPeer reports whether the immediate TCP peer address is in the
 // trusted-proxy set, gating whether X-Forwarded-* headers are honored.
 func (s *Server) isTrustedPeer(remoteAddr string) bool {
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err != nil {
-		host = remoteAddr
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
+	addr, ok := normalizeProxyIP(remoteAddr)
+	if !ok {
 		return false
 	}
+	return s.isTrustedAddress(addr)
+}
+
+func (s *Server) isTrustedAddress(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	s.trustedMu.RLock()
+	defer s.trustedMu.RUnlock()
 	for _, n := range s.trustedProxies {
-		if n.Contains(ip) {
+		if n.Contains(addr.AsSlice()) {
 			return true
 		}
 	}
 	return false
+}
+
+func (s *Server) refreshTrustedProxiesLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.trustedProxyStop:
+			return
+		case <-ticker.C:
+			var additional []string
+			if s.config != nil && s.currentConfig() != nil {
+				additional = s.currentConfig().Server.TrustedProxies.Additional
+			}
+			updated := buildTrustedProxies(s.server.Addr, additional)
+			s.trustedMu.Lock()
+			s.trustedProxies = updated
+			s.trustedMu.Unlock()
+		}
+	}
+}
+
+func (s *Server) stopTrustedProxyRefresh() {
+	if s.trustedProxyStop == nil {
+		return
+	}
+	s.trustedProxyStopOnce.Do(func() { close(s.trustedProxyStop) })
+}
+
+func normalizeProxyIP(value string) (netip.Addr, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"`)
+	if value == "" || strings.EqualFold(value, "unknown") || strings.HasPrefix(value, "_") {
+		return netip.Addr{}, false
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	} else if strings.HasPrefix(value, "[") {
+		end := strings.IndexByte(value, ']')
+		if end < 0 {
+			return netip.Addr{}, false
+		}
+		value = value[1:end]
+	}
+	if zone := strings.LastIndexByte(value, '%'); zone >= 0 {
+		value = value[:zone]
+	}
+	addr, err := netip.ParseAddr(value)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return addr.Unmap(), true
 }

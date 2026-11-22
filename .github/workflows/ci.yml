@@ -18,42 +18,41 @@ concurrency:
 
 jobs:
   secret-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
 
       - name: Determine scan range
-        id: scanrange
+        id: range
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
-            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "base=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
-            echo "head=${{ github.event.after }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "base=" >> "$GITHUB_OUTPUT"
-            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          BASE=""; HEAD=""
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE="${{ github.event.before }}"; HEAD="${{ github.sha }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"; HEAD="${{ github.event.pull_request.head.sha }}"
           fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
 
-      - name: Scan for verified secrets
-        uses: trufflesecurity/trufflehog@37b77001d0174ebec2fcca2bd83ff83a6d45a3ab  # v3.95.3
+      - name: Scan for secrets (truffleHog)
+        uses: trufflesecurity/trufflehog@b2b0a92070f206ab7b5a1105d82a7f2f48d92341  # v3.99.0
         with:
-          base: ${{ steps.scanrange.outputs.base }}
-          head: ${{ steps.scanrange.outputs.head }}
-          extra_args: --only-verified
+          base: ${{ steps.range.outputs.base }}
+          head: ${{ steps.range.outputs.head }}
+          extra_args: --results=${{ steps.range.outputs.base == '' && 'verified' || 'verified,unknown' }} --exclude-paths=.github/trufflehog-exclude.txt
 
   workflow-policy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Verify action pinning and trigger policy
         run: |
           fail=0
-          for f in .github/workflows/*.yml; do
+          for f in .github/workflows/*.yml .gitea/workflows/*.yml .forgejo/workflows/*.yml; do
+            [ -f "$f" ] || continue
             if grep -qE '^\s*pull_request_target\s*:' "$f"; then
               echo "::error file=$f::pull_request_target trigger is not allowed"
               fail=1
@@ -102,20 +101,17 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Validate translations
-        run: go run ./cmd/i18n-validate src/common/i18n/locales/
-
       - name: Run tests with coverage
         run: |
-          mkdir -p "/tmp/${{ github.repository_owner }}"
-          COVDIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/gitignore-XXXXXX")
-          echo "COVDIR=$COVDIR" >> "$GITHUB_ENV"
-          go test -cover -coverprofile="$COVDIR/coverage.out" ./...
-
-      - name: Enforce coverage threshold
-        run: |
+          TEMP_ROOT="${TMPDIR:-/tmp}/${{ github.repository_owner }}"
+          mkdir -p "$TEMP_ROOT"
+          TEST_TMP=$(mktemp -d "$TEMP_ROOT/${{ github.event.repository.name }}-XXXXXX")
+          trap 'case "$TEST_TMP" in "$TEMP_ROOT/${{ github.event.repository.name }}-"*) rm -rf -- "$TEST_TMP" ;; esac' EXIT
+          export TMPDIR="$TEST_TMP"
+          go test -run 'TestKeyConsistency|TestLocalesFS' ./src/common/i18n/...
+          go test -cover -coverprofile="$TEST_TMP/coverage.out" ./...
           THRESHOLD=60
-          PCT=$(go tool cover -func="$COVDIR/coverage.out" | awk '/^total:/ {gsub("%","",$3); print int($3)}')
+          PCT=$(go tool cover -func="$TEST_TMP/coverage.out" | awk '/^total:/ {gsub("%","",$3); print int($3)}')
           if [ "$PCT" -lt "$THRESHOLD" ]; then
             echo "::error::coverage $PCT% < threshold $THRESHOLD%"
             exit 1
@@ -154,29 +150,63 @@ jobs:
             goarch: arm64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set build info
+        run: |
+          echo "VERSION=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          echo "COMMIT_ID=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          BUILD_EPOCH=$(date -u +%s)
+          echo "BUILD_EPOCH=$BUILD_EPOCH" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u -d @${BUILD_EPOCH} +\"%Y-%m-%dT%H:%M:%SZ\")" >> "$GITHUB_ENV"
+          if [ -f site.txt ]; then
+            echo "OFFICIAL_SITE=$(cat site.txt)" >> "$GITHUB_ENV"
+          else
+            echo "OFFICIAL_SITE=${{ secrets.OFFICIAL_SITE }}" >> "$GITHUB_ENV"
+          fi
+
       - name: Build server and CLI
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          mkdir -p "/tmp/${{ github.repository_owner }}"
-          OUTPUT_DIR=$(mktemp -d "/tmp/${{ github.repository_owner }}/gitignore-XXXXXX")
-          go build -buildvcs=false -trimpath -o "$OUTPUT_DIR/gitignore${{ matrix.ext }}" ./src
-          go build -buildvcs=false -trimpath -o "$OUTPUT_DIR/gitignore-cli${{ matrix.ext }}" ./src/client
+          TEMP_ROOT="${TMPDIR:-/tmp}/${{ github.repository_owner }}"
+          mkdir -p "$TEMP_ROOT"
+          OUTPUT_DIR=$(mktemp -d "$TEMP_ROOT/${{ github.event.repository.name }}-XXXXXX")
+          echo "OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+          LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildEpoch=${BUILD_EPOCH}' -X 'main.OfficialSite=${OFFICIAL_SITE}'"
+          go build -buildvcs=false -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT_DIR/gitignore${{ matrix.ext }}" ./src
+          go build -buildvcs=false -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT_DIR/gitignore-cli${{ matrix.ext }}" ./src/client
+
+      - name: Upload server and CLI binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: gitignore-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.OUTPUT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Remove temporary build output
+        if: always() && env.OUTPUT_DIR != ''
+        run: |
+          TEMP_ROOT="${TMPDIR:-/tmp}/${{ github.repository_owner }}"
+          case "$OUTPUT_DIR" in
+            "$TEMP_ROOT/${{ github.event.repository.name }}-"*) rm -rf -- "$OUTPUT_DIR" ;;
+            *) echo "refusing to remove unexpected build path" >&2; exit 1 ;;
+          esac
 
   image-scan:
-    if: github.event_name != 'schedule'
-    needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Build image for scan
-        run: docker build -t gitignore:ci-scan -f docker/Dockerfile .
+      - name: Build image for scanning
+        if: hashFiles('docker/Dockerfile') != ''
+        run: docker build -t local/scan-target:ci -f docker/Dockerfile .
 
-      - name: Scan image
-        run: |
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:0.70.0 image \
-            --exit-code 1 --severity CRITICAL,HIGH gitignore:ci-scan
+      - name: Scan image (Trivy)
+        if: hashFiles('docker/Dockerfile') != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: local/scan-target:ci
+          exit-code: '1'
+          severity: CRITICAL,HIGH

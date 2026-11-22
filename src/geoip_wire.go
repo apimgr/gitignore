@@ -31,11 +31,14 @@ func geoipUpdateHandler(gm *geoip.Manager) scheduler.HandlerFunc {
 // enabled but no database is present yet (AI.md PART 19: "downloaded on first
 // run"). It runs in the background so a slow or offline mirror never blocks
 // startup; the weekly scheduler task retries on the normal cadence.
-func bootstrapGeoIP(ctx context.Context, gm *geoip.Manager) {
+func bootstrapGeoIP(ctx context.Context, gm *geoip.Manager, refresh ...func() error) {
 	if gm == nil || !gm.Enabled() || gm.Available() {
 		return
 	}
 	go func() {
 		_ = gm.Update(ctx)
+		if len(refresh) > 0 && refresh[0] != nil {
+			_ = refresh[0]()
+		}
 	}()
 }

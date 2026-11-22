@@ -23,29 +23,37 @@ type ServerConfig struct {
 	VerifySSL string `yaml:"verify_ssl,omitempty"`
 }
 
-// UpdateConfig holds CLI self-update preferences (checked but not acted on
-// today — this project's server does not yet expose /api/autodiscover
-// cli_versions; the field is preserved for forward compatibility).
+// UpdateConfig holds the CLI self-update preferences. The settings are
+// preserved across profile reads and writes while server release feeds are
+// not yet configured for this project.
 type UpdateConfig struct {
 	Auto    string `yaml:"auto,omitempty"`
 	Channel string `yaml:"channel,omitempty"`
 }
 
+// DisplayConfig selects the interactive UI mode. Auto preserves environment
+// based selection; gui and tui are explicit user preferences.
+type DisplayConfig struct {
+	Mode string `yaml:"mode,omitempty"`
+}
+
 // Config is the full cli.yml document.
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Output string       `yaml:"output,omitempty"`
-	Color  string       `yaml:"color,omitempty"`
-	Lang   string       `yaml:"lang,omitempty"`
-	Update UpdateConfig `yaml:"update,omitempty"`
+	Server  ServerConfig  `yaml:"server"`
+	Output  string        `yaml:"output,omitempty"`
+	Color   string        `yaml:"color,omitempty"`
+	Lang    string        `yaml:"lang,omitempty"`
+	Update  UpdateConfig  `yaml:"update,omitempty"`
+	Display DisplayConfig `yaml:"display,omitempty"`
 }
 
 // Default returns a fresh Config with sane zero-value defaults.
 func Default() *Config {
 	return &Config{
-		Output: "text",
-		Color:  "auto",
-		Update: UpdateConfig{Auto: "no", Channel: "stable"},
+		Output:  "text",
+		Color:   "auto",
+		Update:  UpdateConfig{Auto: "no", Channel: "stable"},
+		Display: DisplayConfig{Mode: "auto"},
 	}
 }
 
@@ -70,7 +78,18 @@ func Load(name string) (*Config, string, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, path, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	if cfg.Display.Mode == "" {
+		cfg.Display.Mode = "auto"
+	}
+	if !IsValidDisplayMode(cfg.Display.Mode) {
+		return nil, path, fmt.Errorf("parse config %s: display.mode must be auto, gui, or tui", path)
+	}
 	return cfg, path, nil
+}
+
+// IsValidDisplayMode reports whether mode is an allowed UI preference.
+func IsValidDisplayMode(mode string) bool {
+	return mode == "auto" || mode == "gui" || mode == "tui"
 }
 
 // Save writes cfg to path with user-only (0600) permissions, creating

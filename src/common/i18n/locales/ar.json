@@ -27,6 +27,7 @@
     "refresh": "تحديث",
     "download": "تنزيل",
     "upload": "رفع",
+    "aliases": "الأسماء المستعارة",
     "copy": "نسخ",
     "copy_to_clipboard": "نسخ إلى الحافظة",
     "copied": "تم النسخ",
@@ -67,7 +68,8 @@
   "theme": {
     "light": "فاتح",
     "dark": "داكن",
-    "auto": "تلقائي"
+    "auto": "تلقائي",
+    "change": "تغيير السمة"
   },
   "nav": {
     "home": "الرئيسية",
@@ -78,12 +80,74 @@
     "terms": "شروط الخدمة",
     "docs": "التوثيق",
     "api_docs": "توثيق API",
+    "security": "الأمان",
     "status": "الحالة",
+    "all_templates": "جميع القوالب",
+    "categories": "الفئات",
+    "combine": "دمج",
+    "stats": "الإحصاءات",
+    "cli": "CLI",
     "skip_to_content": "الانتقال إلى المحتوى الرئيسي",
     "skip_to_navigation": "الانتقال إلى شريط التنقل",
     "main_navigation": "التنقل الرئيسي"
   },
   "health": {
+    "section": {
+      "version": "الإصدار",
+      "runtime": "وقت التشغيل",
+      "cluster": "المجموعة",
+      "features": "الميزات",
+      "checks": "حالة المكونات",
+      "stats": "إحصاءات الخادم"
+    },
+    "field": {
+      "status": "الحالة",
+      "version": "الإصدار",
+      "go_version": "إصدار Go",
+      "build": "البناء",
+      "uptime": "مدة التشغيل",
+      "mode": "الوضع",
+      "checked": "وقت الفحص",
+      "cluster": "المجموعة",
+      "enabled": "مفعّل",
+      "component": "المكوّن",
+      "total_requests": "إجمالي الطلبات",
+      "requests_24h": "الطلبات (24 ساعة)",
+      "active_connections": "الاتصالات النشطة",
+      "last_checked": "آخر فحص:"
+    },
+    "feature": {
+      "tor": "Tor",
+      "i2p": "I2P",
+      "geoip": "GeoIP"
+    },
+    "feature_status": {
+      "disabled": "معطّل",
+      "starting": "قيد البدء",
+      "healthy": "سليم",
+      "unavailable": "غير متاح"
+    },
+    "check_state": {
+      "ok": "سليم",
+      "degraded": "متراجع",
+      "error": "خطأ"
+    },
+    "check_kind": {
+      "geoip": "GeoIP",
+      "blocklist": "قائمة الحظر",
+      "data": "البيانات"
+    },
+    "check": {
+      "database": "قاعدة البيانات",
+      "cache": "ذاكرة التخزين المؤقت",
+      "disk": "القرص",
+      "scheduler": "المجدول",
+      "geoip_asn": "GeoIP: ASN",
+      "geoip_country": "GeoIP: البلد",
+      "geoip_city": "GeoIP: المدينة",
+      "blocklist_firehol_level1": "قائمة الحظر: FireHOL المستوى 1",
+      "data_templates": "البيانات: القوالب"
+    },
     "title": "حالة النظام",
     "all_operational": "جميع الأنظمة تعمل",
     "degraded": "متدهور",
@@ -130,6 +194,11 @@
   },
   "help": {
     "title": "المساعدة",
+    "back": "← المساعدة",
+    "more": "مزيد من المساعدة",
+    "description": "اعثر على إرشادات لاستخدام الفهرس وواجهات API الخاصة به.",
+    "mcp_title": "خادم MCP",
+    "mcp_description": "اربط أدوات الذكاء الاصطناعي بالفهرس باستخدام رمز مالك مرتبط.",
     "getting_started": "البدء",
     "features": "الميزات",
     "api_documentation": "توثيق API",
@@ -146,6 +215,7 @@
     "troubleshooting": "استكشاف الأخطاء وإصلاحها"
   },
   "privacy": {
+    "description": "تعرّف على كيفية تعامل هذه النسخة مع البلاغات والبيانات الوصفية وتفضيلات المتصفح.",
     "title": "سياسة الخصوصية",
     "last_updated": "آخر تحديث:",
     "summary": "ملخص",
@@ -164,6 +234,8 @@
     "data_security": "أمان البيانات",
     "data_storage": "تخزين البيانات والأطراف الثالثة",
     "all_data_stored": "جميع بياناتك مخزّنة على خوادمنا.",
+    "data_not_stored": "قد تُخزَّن البيانات خارج هذا الخادم.",
+    "additional_information": "معلومات إضافية",
     "when_shared": "متى قد تتم مشاركة البيانات",
     "data_retention": "الاحتفاظ بالبيانات",
     "your_rights": "حقوقك",
@@ -186,6 +258,7 @@
     "ccpa_opt_back_in": "إعادة الاشتراك"
   },
   "terms": {
+    "description": "راجع قواعد استخدام نسخة GitIgnore هذه.",
     "title": "شروط الخدمة",
     "acceptance": "القبول",
     "account_terms": "شروط الحساب",
@@ -195,6 +268,29 @@
     "liability": "المسؤولية",
     "changes": "التغييرات",
     "governing_law": "القانون الحاكم"
+  },
+  "preferences_page": {
+    "description": "أدر إعدادات اللغة والمظهر والخصوصية لهذا المتصفح.",
+    "token_management": "إدارة الرموز",
+    "sync_title": "مزامنة التفضيلات",
+    "sync_description": "انقل تفضيلات المتصفح بين أجهزتك باستخدام رابط أو رمز خاص.",
+    "more": "المزيد من التفضيلات",
+    "sync_back": "← التفضيلات",
+    "export_url": "رابط التصدير",
+    "export_code": "رمز التصدير",
+    "export_title": "تصدير",
+    "import_prompt": "الصق رابطًا أو سلسلة استعلام أو رمزًا",
+    "import_action": "استيراد",
+    "appearance": "المظهر",
+    "theme": "السمة",
+    "language": "اللغة",
+    "automatic": "تلقائي",
+    "essential_always": "ملفات تعريف الارتباط الأساسية (دائمًا مفعّلة)",
+    "reset": "إعادة ضبط",
+    "forget_title": "هل تريد محو بياناتي؟",
+    "reset_warning": "سيؤدي هذا إلى محو المظهر واللغة وتفضيلات التطبيق وموافقة ملفات تعريف الارتباط وخيار CCPA وبصمة الإصدار وتخزين المتصفح لهذا الموقع. ستظل بيانات تسجيل الدخول محفوظة. لا يمكن التراجع عن ذلك.",
+    "keep": "احتفاظ",
+    "erase": "محو كل شيء"
   },
   "cookie_consent": {
     "message": "وفقًا لقانون GDPR في الاتحاد الأوروبي، يتم عرض هذه الرسالة.",
@@ -206,7 +302,21 @@
     "preference_description": "تتذكر إعداداتك مثل السمة (فاتح/داكن) واللغة وتفضيلات الواجهة. يؤدي تعطيلها إلى إعادة تعيين الإعدادات الافتراضية في كل زيارة.",
     "analytics_description": "تساعدنا على فهم كيفية استخدام الموقع."
   },
+  "security_page": {
+    "title": "الأمان",
+    "description": "أبلغ عن الثغرات بشكل خاص لمراجعتها بمسؤولية.",
+    "back": "← الأمان",
+    "policy_title": "سياسة الإفصاح الأمني",
+    "policy_description": "كيفية الإبلاغ عن ثغرة وتنسيق الإفصاح عنها.",
+    "thanks_title": "شكرًا لباحثي الأمان",
+    "thanks_description": "يظهر هنا الباحثون الذين يختارون التقدير العلني بعد الإفصاح.",
+    "dpo_title": "مسؤول حماية البيانات",
+    "dpo_description": "معلومات الاتصال لأسئلة الخصوصية حول هذه النسخة.",
+    "report_status_title": "حالة تقرير الأمان",
+    "report_status_description": "حالة تقرير الثغرة المقدم."
+  },
   "about": {
+    "description": "استكشف فهرس GitIgnore وأدواته وواجهة API.",
     "title": "حول",
     "features": "الميزات",
     "version": "الإصدار",
@@ -247,31 +357,124 @@
     "maintenance_mode": "الخدمة غير متاحة"
   },
   "plurals": {
+    "format_seconds": {
+      "zero": "لا ثوانٍ",
+      "one": "{count} ثانية",
+      "two": "ثانيتان",
+      "few": "{count} ثوانٍ",
+      "many": "{count} ثوانٍ",
+      "other": "{count} ثوانٍ"
+    },
+    "format_minutes": {
+      "zero": "لا دقائق",
+      "one": "{count} دقيقة",
+      "two": "دقيقتان",
+      "few": "{count} دقائق",
+      "many": "{count} دقائق",
+      "other": "{count} دقائق"
+    },
+    "format_hours": {
+      "zero": "لا ساعات",
+      "one": "{count} ساعة",
+      "two": "ساعتان",
+      "few": "{count} ساعات",
+      "many": "{count} ساعات",
+      "other": "{count} ساعات"
+    },
+    "format_days": {
+      "zero": "لا أيام",
+      "one": "{count} يوم",
+      "two": "يومان",
+      "few": "{count} أيام",
+      "many": "{count} أيام",
+      "other": "{count} أيام"
+    },
+    "format_bytes": {
+      "zero": "لا بايتات",
+      "one": "{count} بايت",
+      "two": "بايتان",
+      "few": "{count} بايتات",
+      "many": "{count} بايتات",
+      "other": "{count} بايتات"
+    },
+    "format_kilobytes": {
+      "zero": "لا كيلوبايت",
+      "one": "{count} كيلوبايت",
+      "two": "كيلوبايتان",
+      "few": "{count} كيلوبايت",
+      "many": "{count} كيلوبايت",
+      "other": "{count} كيلوبايت"
+    },
+    "format_megabytes": {
+      "zero": "لا ميغابايت",
+      "one": "{count} ميغابايت",
+      "two": "ميغابايتان",
+      "few": "{count} ميغابايت",
+      "many": "{count} ميغابايت",
+      "other": "{count} ميغابايت"
+    },
+    "format_gigabytes": {
+      "zero": "لا غيغابايت",
+      "one": "{count} غيغابايت",
+      "two": "غيغابايتان",
+      "few": "{count} غيغابايت",
+      "many": "{count} غيغابايت",
+      "other": "{count} غيغابايت"
+    },
+    "format_terabytes": {
+      "zero": "لا تيرابايت",
+      "one": "{count} تيرابايت",
+      "two": "تيرابايتان",
+      "few": "{count} تيرابايت",
+      "many": "{count} تيرابايت",
+      "other": "{count} تيرابايت"
+    },
     "items": {
       "zero": "لا توجد عناصر",
       "one": "{count} عنصر",
+      "two": "عنصران",
+      "few": "{count} عناصر",
+      "many": "{count} عنصرًا",
       "other": "{count} عنصر"
     },
     "results": {
       "zero": "لا توجد نتائج",
       "one": "{count} نتيجة",
+      "two": "نتيجتان",
+      "few": "{count} نتائج",
+      "many": "{count} نتيجة",
       "other": "{count} نتيجة"
     },
     "users": {
       "zero": "لا يوجد مستخدمون",
       "one": "{count} مستخدم",
+      "two": "مستخدمان",
+      "few": "{count} مستخدمين",
+      "many": "{count} مستخدمًا",
       "other": "{count} مستخدم"
     },
     "days": {
+      "zero": "لا توجد أيام",
       "one": "{count} يوم",
+      "two": "يومان",
+      "few": "{count} أيام",
+      "many": "{count} يومًا",
       "other": "{count} يوم"
     },
     "hours": {
+      "zero": "لا توجد ساعات",
       "one": "{count} ساعة",
+      "two": "ساعتان",
+      "few": "{count} ساعات",
+      "many": "{count} ساعة",
       "other": "{count} ساعة"
     },
     "minutes": {
+      "zero": "لا توجد دقائق",
       "one": "{count} دقيقة",
+      "two": "دقيقتان",
+      "few": "{count} دقائق",
+      "many": "{count} دقيقة",
       "other": "{count} دقيقة"
     }
   },
@@ -378,7 +581,34 @@
     "type_descriptions": {
       "query": "الاستعلامات المتاحة لجلب البيانات",
       "mutation": "التعديلات المتاحة لتعديل البيانات",
-      "subscription": "الاشتراكات للبيانات في الوقت الفعلي"
+      "subscription": "الاشتراكات للبيانات في الوقت الفعلي",
+      "template": "قالب من الفهرس",
+      "stats": "إحصاءات إجمالية لفهرس القوالب"
+    },
+    "field_descriptions": {
+      "template": {
+        "name": "اسم القالب",
+        "fileName": "اسم ملف القالب",
+        "category": "فئة القالب",
+        "content": "محتوى القالب",
+        "description": "وصف موجز للقالب",
+        "tags": "وسوم البحث المرتبطة بالقالب",
+        "size": "حجم محتوى القالب بالبايت"
+      },
+      "stats": {
+        "totalTemplates": "عدد القوالب في الفهرس",
+        "categories": "عدد الفئات في الفهرس",
+        "totalSizeBytes": "الحجم الإجمالي لمحتوى جميع القوالب بالبايت"
+      },
+      "query": {
+        "template": "استرجاع قالب واحد حسب اسمه",
+        "list": "عرض جميع القوالب المتاحة",
+        "search": "البحث في أسماء القوالب ومحتواها",
+        "categories": "عرض جميع أسماء الفئات المتاحة",
+        "category": "عرض القوالب ضمن فئة واحدة",
+        "combine": "دمج محتوى القوالب المحددة",
+        "stats": "الحصول على إحصاءات إجمالية لفهرس القوالب"
+      }
     }
   },
   "users": {
@@ -490,6 +720,54 @@
     "optional_field": "(اختياري)",
     "hint_email": "لن نشارك بريدك الإلكتروني أبدًا.",
     "errors_count": "يحتوي النموذج على {count} أخطاء"
+  },
+  "owner_tokens_page": {
+    "back": "← التفضيلات",
+    "title": "رموز المالك",
+    "description": "اعرض رمز هذا المتصفح الرئيسي وأدِره، وأنشئ رموزًا مرتبطة لأدواتك.",
+    "new_token": "رمز جديد",
+    "create_desc": "أنشئ رمز مالك مجهولًا لاستخدام MCP وإدارة الرموز المرتبطة.",
+    "create": "إنشاء رمز",
+    "use_existing": "استخدام رمز موجود",
+    "primary": "الرمز الأساسي",
+    "restore_hint": "الصق الرمز الأساسي لاستعادة هذا المتصفح.",
+    "restore": "استعادة الهوية",
+    "active": "نشط",
+    "primary_help": "وصول كامل إلى {resources}. احتفظ به سريًا.",
+    "reveal": "إظهار",
+    "copy": "نسخ",
+    "rotate": "تدوير",
+    "rotate_prompt": "هل تريد تدوير هذا الرمز؟ سيتوقف الرمز الحالي فورًا.",
+    "confirm_rotate": "تأكيد التدوير",
+    "linked": "الرموز المرتبطة",
+    "created": "تاريخ الإنشاء",
+    "last_used": "آخر استخدام",
+    "expires": "ينتهي",
+    "edit": "تعديل",
+    "save": "حفظ",
+    "revoke": "إبطال",
+    "revoke_prompt": "هل تريد إبطال هذا الرمز المرتبط؟ لا يمكن التراجع عن ذلك.",
+    "confirm_revoke": "تأكيد الإبطال",
+    "empty": "لا توجد رموز مرتبطة بعد.",
+    "empty_hint": "أنشئ رمزًا لكل تطبيق، مثل عميل MCP.",
+    "create_linked": "إنشاء رمز مرتبط",
+    "name": "الاسم",
+    "name_hint": "مثال: عميل MCP",
+    "expiry": "انتهاء الصلاحية",
+    "never": "أبدًا",
+    "days_7": "7 أيام",
+    "days_30": "30 يومًا",
+    "days_90": "90 يومًا",
+    "year": "سنة واحدة",
+    "custom_date": "تاريخ مخصص",
+    "expires_on": "ينتهي في",
+    "this_browser": "هذا المتصفح",
+    "browser_saved": "الرمز الأساسي محفوظ في هذا المتصفح.",
+    "forget": "نسيان الرمز المحفوظ",
+    "forget_prompt": "هل تريد نسيان الرمز المحفوظ في هذا المتصفح؟ سيظل صالحًا.",
+    "confirm_forget": "تأكيد النسيان",
+    "resources_remain": "لن يتم حذف {resources}.",
+    "shown_once": "يُعرض مرة واحدة في تحميل هذه الصفحة"
   },
   "a11y": {
     "skip_to_content": "الانتقال إلى المحتوى الرئيسي",

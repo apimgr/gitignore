@@ -8,6 +8,8 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,6 +24,9 @@ import (
 	"golang.org/x/term"
 
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
+	apppath "github.com/apimgr/gitignore/src/path"
+	"github.com/apimgr/gitignore/src/pgp"
 )
 
 // Backup encryption parameters (AI.md PART 21). Argon2id derives the AES-256
@@ -71,9 +76,10 @@ func collectBackupSources(configDir, dataDir string) ([]backupSource, error) {
 	}
 
 	add("server.yml", filepath.Join(configDir, "server.yml"))
-	add("db/gitignore.db", filepath.Join(dataDir, "db", "gitignore.db"))
+	add("secrets.yml", filepath.Join(configDir, "secrets.yml"))
+	add("db/server.db", filepath.Join(dataDir, "db", "server.db"))
 
-	for _, sub := range []string{"template", "theme"} {
+	for _, sub := range []string{"yaml.d", "assets", "template", "theme", "security"} {
 		root := filepath.Join(configDir, sub)
 		if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 			continue
@@ -309,7 +315,7 @@ func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error 
 	// Verify the freshly written backup by reading it back and re-checking
 	// every manifest checksum (AI.md PART 21 → "Verification").
 	if err := verifyBackupFile(backupFile, password); err != nil {
-		os.Remove(backupFile)
+		_ = os.Remove(backupFile)
 		return fmt.Errorf("backup verification failed: %w", err)
 	}
 
@@ -349,14 +355,14 @@ func readBackupArchive(backupFile, password string) ([]byte, error) {
 // rejecting any entry that would escape the staging root (zip-slip / path
 // traversal). It returns the staging directory path; the caller must remove it.
 func extractToStaging(archive []byte) (string, error) {
-	staging, err := os.MkdirTemp("", "gitignore-restore-")
+	staging, err := apppath.TempDir()
 	if err != nil {
 		return "", err
 	}
 
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
-		os.RemoveAll(staging)
+		_ = os.RemoveAll(staging)
 		return "", fmt.Errorf("invalid gzip stream: %w", err)
 	}
 	tr := tar.NewReader(gz)
@@ -367,43 +373,43 @@ func extractToStaging(archive []byte) (string, error) {
 			break
 		}
 		if err != nil {
-			os.RemoveAll(staging)
+			_ = os.RemoveAll(staging)
 			return "", err
 		}
 
 		clean := filepath.Clean(hdr.Name)
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-			os.RemoveAll(staging)
+			_ = os.RemoveAll(staging)
 			return "", fmt.Errorf("refusing path traversal entry: %s", hdr.Name)
 		}
 		dest := filepath.Join(staging, clean)
 		if !strings.HasPrefix(dest, filepath.Clean(staging)+string(os.PathSeparator)) {
-			os.RemoveAll(staging)
+			_ = os.RemoveAll(staging)
 			return "", fmt.Errorf("refusing entry outside staging: %s", hdr.Name)
 		}
 
 		if hdr.FileInfo().IsDir() {
 			if err := os.MkdirAll(dest, 0o755); err != nil {
-				os.RemoveAll(staging)
+				_ = os.RemoveAll(staging)
 				return "", err
 			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			os.RemoveAll(staging)
+			_ = os.RemoveAll(staging)
 			return "", err
 		}
 		f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
-			os.RemoveAll(staging)
+			_ = os.RemoveAll(staging)
 			return "", err
 		}
 		if _, err := io.Copy(f, tr); err != nil {
-			f.Close()
-			os.RemoveAll(staging)
+			_ = f.Close()
+			_ = os.RemoveAll(staging)
 			return "", err
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	return staging, nil
@@ -458,9 +464,88 @@ func verifyBackupFile(backupFile, password string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(staging)
+	defer func() { _ = os.RemoveAll(staging) }()
 	_, err = loadAndVerifyManifest(staging)
 	return err
+}
+
+func verifyBackupPGP(backupFile, password string) error {
+	fi, err := os.Stat(backupFile)
+	if err != nil {
+		return err
+	}
+	if fi.Size() == 0 {
+		return errors.New("backup file is empty")
+	}
+	archive, err := readBackupArchive(backupFile, password)
+	if err != nil {
+		return err
+	}
+	staging, err := extractToStaging(archive)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	manifest, err := loadAndVerifyManifest(staging)
+	if err != nil {
+		return err
+	}
+	if !hasRestoredPGPKeypair(manifest.Contents) {
+		return errors.New("backup manifest does not include both PGP key files")
+	}
+	for _, required := range []string{"security/pgp.pub.asc", "security/pgp.priv.asc.enc", "db/server.db"} {
+		if manifest.Checksums[required] == "" {
+			return fmt.Errorf("backup manifest does not checksum %s", required)
+		}
+	}
+	return verifyStagedPGP(staging)
+}
+
+func verifyStagedPGP(staging string) error {
+	privatePath := filepath.Join(staging, "security", "pgp.priv.asc.enc")
+	publicPath := filepath.Join(staging, "security", "pgp.pub.asc")
+	databasePath := filepath.Join(staging, "db", "server.db")
+	privateEnvelope, err := os.ReadFile(privatePath)
+	if err != nil {
+		return fmt.Errorf("backup PGP private key is missing: %w", err)
+	}
+	publicKey, err := os.ReadFile(publicPath)
+	if err != nil {
+		return fmt.Errorf("backup PGP public key is missing: %w", err)
+	}
+	conn, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		return fmt.Errorf("open staged backup database: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	var encodedSecret string
+	if err := conn.QueryRow("SELECT value FROM app_secrets WHERE key = ?", "installation_secret").Scan(&encodedSecret); err != nil {
+		return fmt.Errorf("backup installation secret is unavailable: %w", err)
+	}
+	secret, err := base64.StdEncoding.DecodeString(encodedSecret)
+	if err != nil || len(secret) != 32 {
+		return errors.New("backup installation secret is invalid")
+	}
+	privateKey, err := pgp.UnprotectPrivateKey(privateEnvelope, secret)
+	if err != nil {
+		return fmt.Errorf("backup PGP private key cannot be decrypted: %w", err)
+	}
+	derivedPublic, err := pgp.PublicFromPrivate(privateKey)
+	if err != nil {
+		return fmt.Errorf("backup PGP private key is invalid: %w", err)
+	}
+	privateFingerprint, err := pgp.Fingerprint(derivedPublic)
+	if err != nil {
+		return err
+	}
+	publicFingerprint, err := pgp.Fingerprint(string(publicKey))
+	if err != nil {
+		return fmt.Errorf("backup PGP public key is invalid: %w", err)
+	}
+	if privateFingerprint != publicFingerprint {
+		return errors.New("backup PGP public and private keys do not match")
+	}
+	return nil
 }
 
 // runRestore implements `--maintenance restore <backup-file>`. It verifies the
@@ -489,7 +574,7 @@ func runRestore(backupFile, configDir, dataDir string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(staging)
+	defer func() { _ = os.RemoveAll(staging) }()
 
 	manifest, err := loadAndVerifyManifest(staging)
 	if err != nil {
@@ -507,8 +592,8 @@ func runRestore(backupFile, configDir, dataDir string) error {
 	for _, rel := range manifest.Contents {
 		src := filepath.Join(staging, filepath.Clean(rel))
 		var dest string
-		if rel == "db/gitignore.db" {
-			dest = filepath.Join(dataDir, "db", "gitignore.db")
+		if rel == "db/server.db" {
+			dest = filepath.Join(dataDir, "db", "server.db")
 		} else {
 			dest = filepath.Join(configDir, filepath.Clean(rel))
 		}
@@ -516,9 +601,36 @@ func runRestore(backupFile, configDir, dataDir string) error {
 			return fmt.Errorf("installing %s: %w", rel, err)
 		}
 	}
+	if hasRestoredPGPKeypair(manifest.Contents) {
+		if err := republishRestoredPGP(configDir, dataDir); err != nil {
+			return fmt.Errorf("restore completed, but PGP keyserver publication is pending: %w", err)
+		}
+	}
 
 	fmt.Println("Restore completed")
 	return nil
+}
+
+func hasRestoredPGPKeypair(contents []string) bool {
+	publicKey, privateKey := false, false
+	for _, item := range contents {
+		clean := filepath.ToSlash(filepath.Clean(item))
+		publicKey = publicKey || clean == "security/pgp.pub.asc"
+		privateKey = privateKey || clean == "security/pgp.priv.asc.enc"
+	}
+	return publicKey && privateKey
+}
+
+func republishRestoredPGP(configDir, dataDir string) error {
+	cfg, err := config.Load(filepath.Join(configDir, "server.yml"))
+	if err != nil {
+		return err
+	}
+	if err := db.Init(dataDir); err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return publishRestoredProjectPGP(cfg, filepath.Join(configDir, "security"))
 }
 
 // installFile copies src to dest atomically (write to a temp file in the
@@ -528,7 +640,7 @@ func installFile(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(dest), ".restore-*")
@@ -537,16 +649,16 @@ func installFile(src, dest string) error {
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 	if err := os.Chmod(tmpName, 0o600); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 	return os.Rename(tmpName, dest)

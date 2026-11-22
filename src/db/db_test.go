@@ -1,12 +1,15 @@
 package db
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestInitCreatesSchemaAndClose(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
 	dataDir := t.TempDir()
 	if err := Init(dataDir); err != nil {
 		t.Fatalf("Init: %v", err)
@@ -17,7 +20,7 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 		}
 	}()
 
-	dbPath := filepath.Join(dataDir, "db", "gitignore.db")
+	dbPath := filepath.Join(dataDir, "db", "server.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Errorf("expected db file at %s: %v", dbPath, err)
 	}
@@ -28,12 +31,24 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 	if err := conn.Ping(); err != nil {
 		t.Errorf("conn.Ping: %v", err)
 	}
+	entries, err := ListSecurityThanks()
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("ListSecurityThanks() before disclosure = %v, %v", entries, err)
+	}
+	if _, err := conn.Exec(`INSERT INTO security_thanks (tracking_id, credit, severity, disclosed_on) VALUES ('sec_test', 'Researcher', 'high', '2026-01-02')`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = ListSecurityThanks()
+	if err != nil || len(entries) != 1 || entries[0].Credit != "Researcher" || !strings.HasPrefix(entries[0].Date, "2026-01-02") || entries[0].Severity != "high" {
+		t.Fatalf("ListSecurityThanks() = %v, %v", entries, err)
+	}
+	exerciseOwnerTokenDatabaseLifecycle(t)
 
 	rows, err := conn.Query(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
 	if err != nil {
 		t.Fatalf("query sqlite_master: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	want := map[string]bool{
 		"server_admin_credentials": false,
@@ -43,6 +58,7 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 		"server_scheduler_state":   false,
 		"server_nodes":             false,
 		"server_join_tokens":       false,
+		"security_thanks":          false,
 		"user_accounts":            false,
 		"user_tokens":              false,
 		"user_sessions":            false,
@@ -61,6 +77,34 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 		if !found {
 			t.Errorf("expected table %q to exist", name)
 		}
+	}
+}
+
+func TestMigrateLegacySecurityThanksToTrackingIDPrimaryKey(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = Close() })
+	for _, statement := range []string{
+		"DROP TABLE security_thanks",
+		"CREATE TABLE security_thanks (id INTEGER PRIMARY KEY AUTOINCREMENT, tracking_id TEXT NOT NULL UNIQUE, credit TEXT NOT NULL, severity TEXT NOT NULL, disclosed_on DATE NOT NULL)",
+		"INSERT INTO security_thanks (tracking_id, credit, severity, disclosed_on) VALUES ('sec_legacy', 'Researcher', 'high', '2026-01-02')",
+	} {
+		if _, err := conn.Exec(statement); err != nil {
+			t.Fatalf("prepare legacy table: %v", err)
+		}
+	}
+	if err := migrateSchema(context.Background(), conn); err != nil {
+		t.Fatalf("migrateSchema: %v", err)
+	}
+	var credit string
+	if err := conn.QueryRow("SELECT credit FROM security_thanks WHERE tracking_id = 'sec_legacy'").Scan(&credit); err != nil || credit != "Researcher" {
+		t.Fatalf("legacy acknowledgment after migration = %q, %v", credit, err)
+	}
+	hasID, err := columnExists(context.Background(), conn, "security_thanks", "id")
+	if err != nil || hasID {
+		t.Fatalf("legacy id column remains = %t, %v", hasID, err)
 	}
 }
 
@@ -86,12 +130,12 @@ func TestInitWithDatabaseDirOverride(t *testing.T) {
 	}
 	defer func() { _ = Close() }()
 
-	dbPath := filepath.Join(overrideDir, "gitignore.db")
+	dbPath := filepath.Join(overrideDir, "server.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Errorf("expected db file at override path %s: %v", dbPath, err)
 	}
 
-	defaultPath := filepath.Join(dataDir, "db", "gitignore.db")
+	defaultPath := filepath.Join(dataDir, "db", "server.db")
 	if _, err := os.Stat(defaultPath); err == nil {
 		t.Errorf("did not expect db file at default path %s when DATABASE_DIR is set", defaultPath)
 	}

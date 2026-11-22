@@ -2,10 +2,17 @@ package server
 
 import (
 	"crypto/tls"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/apimgr/gitignore/src/blocklist"
 )
 
 func TestRemoteHost(t *testing.T) {
@@ -24,6 +31,104 @@ func TestRemoteHost(t *testing.T) {
 	}
 }
 
+func TestAllowlistBypassesRateLimitAndBlockedIP(t *testing.T) {
+	s := &Server{
+		allowlist:  []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+		blockedIPs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+		limiter:    newRateLimiter(1, 60),
+	}
+	handler := s.allowlistMiddleware(s.blocklistMiddleware(s.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))))
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.1.2.3:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("allowlisted request %d status = %d", i, rec.Code)
+		}
+	}
+}
+
+func TestConfiguredIPBlockAndDomainCandidate(t *testing.T) {
+	s := &Server{blockedIPs: []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}}
+	blocked := s.blocklistMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "198.51.100.4:1234"
+	rec := httptest.NewRecorder()
+	blocked.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("blocked IP status = %d", rec.Code)
+	}
+	if got := requestDomainCandidate("security@blocked.example"); got != "blocked.example" {
+		t.Fatalf("email domain = %q", got)
+	}
+}
+
+func TestBlocklistMatchesJSONEmailAndFallsBackToReferer(t *testing.T) {
+	securityDir := t.TempDir()
+	dir := filepath.Join(securityDir, "blocklists")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	updated := []byte(time.Now().UTC().Format(time.RFC3339))
+	for id, contents := range map[string][]byte{blocklist.FireHOLID: []byte("203.0.113.0/24\n"), "domains": []byte("evil.example\n")} {
+		if err := os.WriteFile(filepath.Join(dir, id+".txt"), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, id+".last_updated"), updated, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enabled := true
+	matcher := blocklist.NewMatcher(securityDir, []blocklist.Source{{ID: "domains", Type: "domain", URL: "https://lists.example/domains.txt", Enabled: &enabled}})
+	if err := matcher.Reload(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{blocklist: matcher}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusNoContent)
+		if r.Method == http.MethodPost && string(body) != `{"email":"user@good.example"}` {
+			t.Errorf("body changed by middleware: %s", body)
+		}
+	})
+	handler := s.blocklistMiddleware(next)
+	blocked := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(`{"email":"user@evil.example"}`))
+	blocked.RemoteAddr = "192.0.2.1:1234"
+	blocked.Header.Set("Content-Type", "application/json")
+	blockedRec := httptest.NewRecorder()
+	handler.ServeHTTP(blockedRec, blocked)
+	if blockedRec.Code != http.StatusForbidden {
+		t.Fatalf("JSON email block status = %d", blockedRec.Code)
+	}
+	allowed := httptest.NewRequest(http.MethodPost, "/contact", strings.NewReader(`{"email":"user@good.example"}`))
+	allowed.RemoteAddr = "192.0.2.1:1234"
+	allowed.Header.Set("Content-Type", "application/json")
+	allowed.Header.Set("Referer", "https://good.example/form")
+	allowedRec := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRec, allowed)
+	if allowedRec.Code != http.StatusNoContent {
+		t.Fatalf("allowed JSON request status = %d", allowedRec.Code)
+	}
+	refererBlocked := httptest.NewRequest(http.MethodGet, "/", nil)
+	refererBlocked.RemoteAddr = "192.0.2.1:1234"
+	refererBlocked.Header.Set("Referer", "https://evil.example/form")
+	refererRec := httptest.NewRecorder()
+	handler.ServeHTTP(refererRec, refererBlocked)
+	if refererRec.Code != http.StatusForbidden {
+		t.Fatalf("Referer block status = %d", refererRec.Code)
+	}
+	originWins := httptest.NewRequest(http.MethodGet, "/", nil)
+	originWins.RemoteAddr = "192.0.2.1:1234"
+	originWins.Header.Set("Origin", "https://good.example")
+	originWins.Header.Set("Referer", "https://evil.example/form")
+	originRec := httptest.NewRecorder()
+	handler.ServeHTTP(originRec, originWins)
+	if originRec.Code != http.StatusNoContent {
+		t.Fatalf("Origin did not take precedence over Referer: status %d", originRec.Code)
+	}
+}
+
 func TestFirstIP(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -33,6 +138,9 @@ func TestFirstIP(t *testing.T) {
 		{"  ", ""},
 		{"1.2.3.4", "1.2.3.4"},
 		{"1.2.3.4:80", "1.2.3.4"},
+		{"[2001:DB8::1]:443", "2001:db8::1"},
+		{"::ffff:192.0.2.1", "192.0.2.1"},
+		{"fe80::1%eth0", "fe80::1"},
 		{"not-an-ip", ""},
 		{"  10.0.0.1  ", "10.0.0.1"},
 	}
@@ -67,12 +175,42 @@ func TestClientIPTrustedPeerHonorsForwardedHeaderPriority(t *testing.T) {
 		}
 	})
 
-	t.Run("X-Forwarded-For leftmost used when higher priority headers absent", func(t *testing.T) {
+	t.Run("X-Forwarded-For resolves from nearest hop on the right", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/", nil)
 		req.RemoteAddr = "203.0.113.5:1234"
 		req.Header.Set("X-Forwarded-For", "5.5.5.5, 6.6.6.6")
-		if got := s.clientIP(req); got != "5.5.5.5" {
-			t.Errorf("clientIP() = %q, want 5.5.5.5", got)
+		if got := s.clientIP(req); got != "6.6.6.6" {
+			t.Errorf("clientIP() = %q, want 6.6.6.6", got)
+		}
+	})
+
+	t.Run("skips trusted proxy hops and stops at first untrusted hop", func(t *testing.T) {
+		s.trustedProxies = buildTrustedProxies("", []string{"203.0.113.5", "198.51.100.0/24"})
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "203.0.113.5:1234"
+		req.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.7")
+		if got := s.clientIP(req); got != "203.0.113.9" {
+			t.Errorf("clientIP() = %q, want 203.0.113.9", got)
+		}
+	})
+
+	t.Run("invalid rightmost hop falls back to the peer", func(t *testing.T) {
+		s.trustedProxies = buildTrustedProxies("", []string{"203.0.113.5"})
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "203.0.113.5:1234"
+		req.Header.Set("X-Forwarded-For", "203.0.113.9, unknown")
+		if got := s.clientIP(req); got != "203.0.113.5" {
+			t.Errorf("clientIP() = %q, want 203.0.113.5", got)
+		}
+	})
+
+	t.Run("Forwarded RFC 7239 chain", func(t *testing.T) {
+		s.trustedProxies = buildTrustedProxies("", []string{"203.0.113.5"})
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "203.0.113.5:1234"
+		req.Header.Set("Forwarded", `for=203.0.113.9;proto=https, for="[2001:DB8::1]:443"`)
+		if got := s.clientIP(req); got != "2001:db8::1" {
+			t.Errorf("clientIP() = %q, want 2001:db8::1", got)
 		}
 	})
 

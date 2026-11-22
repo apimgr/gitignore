@@ -70,8 +70,8 @@ func TestGetTorConfig(t *testing.T) {
 	}
 
 	c.UseNetwork = true
-	if !strings.Contains(getTorConfig(&c), "SocksPort auto") {
-		t.Error("outbound enabled should use SocksPort auto")
+	if !strings.Contains(getTorConfig(&c), "SocksPort 127.0.0.1:auto") {
+		t.Error("outbound enabled should use SocksPort 127.0.0.1:auto")
 	}
 
 	c.SafeLogging = false
@@ -183,7 +183,7 @@ func TestSaveLoadOnionKeyRoundTrip(t *testing.T) {
 // TorService methods with a nil dialer/tor field must be safe, pure
 // no-ops — no real tor process is required to exercise them.
 func TestTorServiceMethodsZeroDialer(t *testing.T) {
-	s := &TorService{serviceID: "abc123"}
+	s := &TorService{onionAddress: "abc123.onion"}
 
 	if got, want := s.OnionAddress(), "abc123.onion"; got != want {
 		t.Errorf("OnionAddress() = %q, want %q", got, want)
@@ -227,7 +227,7 @@ func TestTorManagerZeroValueMethods(t *testing.T) {
 	cfg := config.DefaultTorConfig()
 	dataDir := t.TempDir()
 	tm := NewTorManager(context.Background(), 8080, t.TempDir(), dataDir, &cfg)
-	defer tm.Close()
+	defer func() { _ = tm.Close() }()
 
 	if got := tm.OnionAddress(); got != "" {
 		t.Errorf("OnionAddress() before Start() = %q, want empty", got)
@@ -246,7 +246,7 @@ func TestTorManagerZeroValueMethods(t *testing.T) {
 func TestTorManagerMonitorRespectsCancelledContext(t *testing.T) {
 	cfg := config.DefaultTorConfig()
 	tm := NewTorManager(context.Background(), 8080, t.TempDir(), t.TempDir(), &cfg)
-	defer tm.Close()
+	defer func() { _ = tm.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

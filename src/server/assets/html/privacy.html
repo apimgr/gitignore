@@ -1,17 +1,113 @@
 {{define "content"}}
-<h1>Privacy</h1>
-<p>GitIgnore is designed to collect as little as possible.</p>
-<h2>What we store</h2>
-<p>Nothing about you. The service holds only a curated set of <code>.gitignore</code> templates that are compiled into the binary at build time. No personal information is stored or served.</p>
-<h2>Accounts</h2>
-<p>There are no user accounts, registration, or login of any kind. All endpoints are public.</p>
-<h2>Cookies</h2>
-<p>Two optional, non-tracking cookies may be set for your convenience:</p>
-<ul>
-<li><code>theme</code> — remembers your dark / light / auto preference.</li>
-<li><code>lang</code> — remembers your language selection.</li>
-</ul>
-<p>Both are first-party, contain no identifying data, and can be cleared at any time without affecting access.</p>
-<h2>Logs</h2>
-<p>Operators may keep standard HTTP access logs for reliability and abuse prevention. These are controlled by whoever runs this instance, not by the application authors.</p>
+<div class="container container-md">
+  <header class="page-header">
+    <h1 class="page-title">{{t .Lang "privacy.title"}}</h1>
+    <p class="page-lead">{{t .Lang "privacy.description"}}</p>
+    <p class="last-updated">{{t .Lang "privacy.last_updated"}} {{.BuildDate}}</p>
+  </header>
+  <section id="summary" class="section-card" aria-labelledby="summary-title">
+    <h2 id="summary-title">{{t .Lang "privacy.summary"}}</h2>
+    <p>{{if .Data.storedOnServer}}{{t .Lang "privacy.data_stored"}}{{else}}{{t .Lang "privacy.data_not_stored"}}{{end}}</p>
+    {{if .Data.privacy.Data.Sold}}
+    <p>{{t .Lang "privacy.may_sell"}} <a href="#ccpa-opt-out">{{t .Lang "privacy.ccpa_do_not_sell"}}</a>.</p>
+    {{else}}
+    <p>{{t .Lang "privacy.never_sell"}}</p>
+    {{end}}
+    <p>{{t .Lang "privacy.you_control"}}</p>
+  </section>
+  <section id="cookies" class="section-card" aria-labelledby="cookies-title">
+    <h2 id="cookies-title">{{t .Lang "privacy.cookie_policy"}}</h2>
+    <h3>{{t .Lang "privacy.essential_cookies"}}</h3>
+    <p>{{.Data.privacy.Cookies.Essential.Description}}</p>
+    <h3>{{t .Lang "privacy.preference_cookies"}}</h3>
+    <p>{{.Data.privacy.Cookies.Preferences.Description}}</p>
+    <h3>{{t .Lang "privacy.analytics_cookies"}}</h3>
+    {{if .Data.trackingType}}
+    <p>{{.Data.analyticsDescription}}</p>
+    <p>{{t .Lang "privacy.service"}}: {{.Data.trackingName}}.</p>
+    {{else}}
+    <p>{{t .Lang "privacy.no_analytics"}}</p>
+    {{end}}
+    <p><a href="{{path "/server/preferences"}}">{{t .Lang "privacy.manage_cookies"}}</a></p>
+  </section>
+  <section id="data-collection" class="section-card" aria-labelledby="data-collection-title">
+    <h2 id="data-collection-title">{{t .Lang "privacy.data_we_collect"}}</h2>
+    {{.Data.dataCollection}}
+  </section>
+  <section id="data-usage" class="section-card" aria-labelledby="data-usage-title">
+    <h2 id="data-usage-title">{{t .Lang "privacy.how_we_use"}}</h2>
+    {{.Data.dataUsage}}
+  </section>
+  <section id="data-security" class="section-card" aria-labelledby="data-security-title">
+    <h2 id="data-security-title">{{t .Lang "privacy.data_security"}}</h2>
+    {{.Data.dataSecurity}}
+  </section>
+  <section id="data-storage" class="section-card" aria-labelledby="data-storage-title">
+    <h2 id="data-storage-title">{{t .Lang "privacy.data_storage"}}</h2>
+    {{if .Data.storedOnServer}}<p>{{t .Lang "privacy.all_data_stored"}}</p>{{else}}<p>{{t .Lang "privacy.data_not_stored"}}</p>{{end}}
+    <h3>{{t .Lang "privacy.when_shared"}}</h3>
+    <ul>
+      {{range .Data.privacy.Data.Sharing}}
+      <li><strong>{{.Condition}}:</strong> {{.When}} — {{.Data}}</li>
+      {{end}}
+    </ul>
+    <p>{{if .Data.privacy.Data.Sold}}{{t .Lang "privacy.may_sell"}}{{else}}{{t .Lang "privacy.never_sell"}}{{end}}</p>
+  </section>
+  <section id="data-retention" class="section-card" aria-labelledby="data-retention-title">
+    <h2 id="data-retention-title">{{t .Lang "privacy.data_retention"}}</h2>
+    <p>{{.Data.privacy.Retention.Period}}</p>
+  </section>
+  <section id="third-parties" class="section-card" aria-labelledby="third-parties-title">
+    <h2 id="third-parties-title">{{t .Lang "privacy.third_party_services"}}</h2>
+    {{if .Data.privacy.ThirdParty.Services}}
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>{{t .Lang "privacy.service"}}</th><th>{{t .Lang "privacy.purpose"}}</th><th>{{t .Lang "privacy.data_sent"}}</th><th>{{t .Lang "privacy.view_policy"}}</th></tr></thead>
+        <tbody>
+          {{range .Data.privacy.ThirdParty.Services}}
+          <tr><td>{{.Name}}</td><td>{{.Purpose}}</td><td>{{.DataSent}}</td><td>{{if .PolicyURL}}<a href="{{.PolicyURL}}" rel="noopener">{{t $.Lang "privacy.view_policy"}}</a>{{end}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p>{{t .Lang "privacy.no_third_party"}}</p>
+    {{end}}
+  </section>
+  <section id="your-rights" class="section-card" aria-labelledby="your-rights-title">
+    <h2 id="your-rights-title">{{t .Lang "privacy.your_rights"}}</h2>
+    <ul>
+      <li>{{t .Lang "privacy.right_access"}}</li>
+      {{if .Data.privacy.Retention.ExportAvailable}}<li>{{t .Lang "privacy.right_export"}}</li>{{end}}
+      {{if .Data.privacy.Retention.DeletionAvailable}}<li>{{t .Lang "privacy.right_deletion"}}</li>{{end}}
+      <li><a href="{{path "/server/preferences"}}">{{t .Lang "privacy.manage_cookies"}}</a></li>
+    </ul>
+  </section>
+  {{if .Data.privacy.Data.Sold}}
+  <section id="ccpa-opt-out" class="section-card" aria-labelledby="ccpa-title">
+    <h2 id="ccpa-title">{{t .Lang "privacy.ccpa_title"}}</h2>
+    {{if .Data.ccpaOptedOut}}<p>{{t .Lang "privacy.ccpa_opted_out"}}</p>{{end}}
+    <form method="post" action="{{path "/server/ccpa"}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="redirect" value="{{path "/server/privacy"}}">
+      <input type="hidden" name="choice" value="{{if .Data.ccpaOptedOut}}opt-in{{else}}opt-out{{end}}">
+      <button type="submit">{{if .Data.ccpaOptedOut}}{{t .Lang "privacy.ccpa_opt_back_in"}}{{else}}{{t .Lang "privacy.ccpa_do_not_sell"}}{{end}}</button>
+    </form>
+  </section>
+  {{end}}
+  {{if .Data.extension}}
+  <section id="operator-extension" class="section-card" aria-labelledby="operator-extension-title">
+    <h2 id="operator-extension-title">{{t .Lang "privacy.additional_information"}}</h2>
+    {{.Data.extension}}
+  </section>
+  {{end}}
+  <section id="contact" class="section-card" aria-labelledby="contact-title">
+    <h2 id="contact-title">{{t .Lang "privacy.contact_us"}}</h2>
+    {{if .Data.contactEmail}}
+    <p>{{t .Lang "privacy.privacy_inquiries"}} <a href="mailto:{{.Data.contactEmail}}">{{t .Lang "privacy.contact_us"}}</a>.</p>
+    {{else}}
+    <p>{{t .Lang "privacy.privacy_inquiries"}} <a href="{{path "/server/security"}}">{{t .Lang "privacy.contact_us"}}</a>.</p>
+    {{end}}
+  </section>
+</div>
 {{end}}

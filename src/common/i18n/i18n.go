@@ -35,7 +35,7 @@ const DefaultLang = "en"
 // supportedOrder is the canonical order languages are offered in the WebUI
 // selector and the CLI. It matches the "Supported Languages" table in
 // AI.md PART 30.
-var supportedOrder = []string{"en", "es", "zh", "fr", "ar", "de", "ja"}
+var supportedOrder = []string{"en", "es", "fr", "ar", "de", "it", "zh", "ja"}
 
 // LanguageInfo describes one supported language for the selector UI and the
 // html dir attribute.

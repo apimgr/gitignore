@@ -7,10 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/pgp"
 )
 
-// TestCollectBackupSources verifies server.yml, the database, and files under
-// template/theme are all collected, and directories/missing files are skipped.
+// TestCollectBackupSources verifies configuration secrets, user-managed files,
+// security files, the database, and custom templates are collected.
 func TestCollectBackupSources(t *testing.T) {
 	t.Run("empty dirs yield nothing", func(t *testing.T) {
 		configDir := t.TempDir()
@@ -24,18 +27,30 @@ func TestCollectBackupSources(t *testing.T) {
 		}
 	})
 
-	t.Run("collects server.yml, database, and template/theme files", func(t *testing.T) {
+	t.Run("collects server.yml, secrets, user files, database, and templates", func(t *testing.T) {
 		configDir := t.TempDir()
 		dataDir := t.TempDir()
 
 		if err := os.WriteFile(filepath.Join(configDir, "server.yml"), []byte("server: {}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(configDir, "secrets.yml"), []byte("server: {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, sub := range []string{"yaml.d", "assets", "security"} {
+			dir := filepath.Join(configDir, sub)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "example.txt"), []byte(sub), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		dbDir := filepath.Join(dataDir, "db")
 		if err := os.MkdirAll(dbDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dbDir, "gitignore.db"), []byte("binary-db-data"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dbDir, "server.db"), []byte("binary-db-data"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		templateDir := filepath.Join(configDir, "template")
@@ -53,7 +68,11 @@ func TestCollectBackupSources(t *testing.T) {
 
 		want := map[string]bool{
 			"server.yml":           false,
-			"db/gitignore.db":      false,
+			"secrets.yml":          false,
+			"db/server.db":         false,
+			"yaml.d/example.txt":   false,
+			"assets/example.txt":   false,
+			"security/example.txt": false,
 			"template/custom.html": false,
 		}
 		for _, s := range sources {
@@ -85,6 +104,66 @@ func TestCollectBackupSources(t *testing.T) {
 			t.Fatalf("expected no sources from an empty theme dir, got %v", sources)
 		}
 	})
+}
+
+func TestHasRestoredPGPKeypair(t *testing.T) {
+	if !hasRestoredPGPKeypair([]string{"security/pgp.pub.asc", "security/pgp.priv.asc.enc"}) {
+		t.Fatal("expected complete PGP keypair to be detected")
+	}
+	if hasRestoredPGPKeypair([]string{"security/pgp.pub.asc"}) {
+		t.Fatal("public key without private key must not trigger republishing")
+	}
+}
+
+func TestVerifyStagedPGPRequiresKeypair(t *testing.T) {
+	if err := verifyStagedPGP(t.TempDir()); err == nil {
+		t.Fatal("expected missing PGP keypair to fail backup verification")
+	}
+}
+
+func TestVerifyBackupPGPDecryptsArchivedKey(t *testing.T) {
+	configDir := t.TempDir()
+	dataDir := t.TempDir()
+	if err := db.Init(dataDir); err != nil {
+		t.Fatalf("db.Init: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	secret, err := db.InstallationSecret()
+	if err != nil {
+		t.Fatalf("InstallationSecret: %v", err)
+	}
+	pair, err := pgp.Generate("Test Security <security@example.test>", secret)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	securityDir := filepath.Join(configDir, "security")
+	if err := os.MkdirAll(securityDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(securityDir, pgpPublicFilename), []byte(pair.PublicKey), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(securityDir, pgpPrivateFilename), pair.EncryptedPrivateKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close: %v", err)
+	}
+	sources, err := collectBackupSources(configDir, dataDir)
+	if err != nil {
+		t.Fatalf("collectBackupSources: %v", err)
+	}
+	archive, err := buildBackupArchive(sources, false)
+	if err != nil {
+		t.Fatalf("buildBackupArchive: %v", err)
+	}
+	backupFile := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if err := os.WriteFile(backupFile, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupPGP(backupFile, ""); err != nil {
+		t.Fatalf("verifyBackupPGP: %v", err)
+	}
 }
 
 // TestInstallFile verifies atomic install: content and permissions land at
@@ -358,7 +437,7 @@ func TestExtractToStagingExtractsValidEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("extractToStaging: %v", err)
 	}
-	defer os.RemoveAll(staging)
+	defer func() { _ = os.RemoveAll(staging) }()
 
 	got, err := os.ReadFile(filepath.Join(staging, "template", "page.html"))
 	if err != nil {

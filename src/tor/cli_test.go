@@ -77,12 +77,51 @@ func TestStageAndApplyVanityKey(t *testing.T) {
 		t.Errorf("applied ID = %s, want %s", appliedID, wantID)
 	}
 
-	liveID, err := ServiceIDFromBlob(readFile(t, SecretKeyPath(dataDir)))
+	keyFile, err := os.ReadFile(SecretKeyPath(dataDir))
+	if err != nil {
+		t.Fatalf("read secret key: %v", err)
+	}
+	liveBlob, err := torSecretKeyBlob(keyFile)
+	if err != nil {
+		t.Fatalf("torSecretKeyBlob: %v", err)
+	}
+	liveID, err := ServiceIDFromBlob(liveBlob)
 	if err != nil {
 		t.Fatalf("live key: %v", err)
 	}
 	if liveID != wantID {
 		t.Errorf("live secret key ID = %s, want %s", liveID, wantID)
+	}
+}
+
+func TestImportKeyWritesTorFormat(t *testing.T) {
+	dataDir := t.TempDir()
+	blob, wantID := newTestKey(t)
+	keyPath := filepath.Join(t.TempDir(), "vanity-key")
+	if err := os.WriteFile(keyPath, []byte(blob), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+	gotID, err := ImportKey(dataDir, keyPath)
+	if err != nil {
+		t.Fatalf("ImportKey: %v", err)
+	}
+	if gotID != wantID {
+		t.Fatalf("ImportKey ID = %s, want %s", gotID, wantID)
+	}
+	keyFile, err := os.ReadFile(SecretKeyPath(dataDir))
+	if err != nil {
+		t.Fatalf("read secret key: %v", err)
+	}
+	liveBlob, err := torSecretKeyBlob(keyFile)
+	if err != nil {
+		t.Fatalf("torSecretKeyBlob: %v", err)
+	}
+	liveID, err := ServiceIDFromBlob(liveBlob)
+	if err != nil {
+		t.Fatalf("ServiceIDFromBlob: %v", err)
+	}
+	if liveID != wantID {
+		t.Fatalf("live key ID = %s, want %s", liveID, wantID)
 	}
 }
 
@@ -131,15 +170,6 @@ func TestValidateConfigWithConfiguredBinary(t *testing.T) {
 	if bin != fake {
 		t.Errorf("ValidateConfig() bin = %q, want %q", bin, fake)
 	}
-}
-
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return strings.TrimSpace(string(data))
 }
 
 func TestReadHostnameMissingFileReturnsEmpty(t *testing.T) {
@@ -223,8 +253,16 @@ func TestImportKeyValidBlob(t *testing.T) {
 	if id != wantID {
 		t.Errorf("ImportKey() = %q, want %q", id, wantID)
 	}
-	if got := readFile(t, SecretKeyPath(dataDir)); got != blob {
-		t.Errorf("secret key file = %q, want %q", got, blob)
+	keyFile, err := os.ReadFile(SecretKeyPath(dataDir))
+	if err != nil {
+		t.Fatalf("read secret key: %v", err)
+	}
+	gotBlob, err := torSecretKeyBlob(keyFile)
+	if err != nil {
+		t.Fatalf("torSecretKeyBlob: %v", err)
+	}
+	if gotBlob != blob {
+		t.Errorf("secret key blob = %q, want %q", gotBlob, blob)
 	}
 	if _, err := os.Stat(HostnamePath(dataDir)); !os.IsNotExist(err) {
 		t.Errorf("stale hostname file still exists after ImportKey")

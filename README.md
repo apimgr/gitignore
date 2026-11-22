@@ -17,7 +17,7 @@ GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a
 - Connect AI clients through the stateless, read-only MCP endpoint. MCP requires a valid owner or operator Bearer token; use a separate linked token for each client.
 - Run the companion CLI in shell pipelines and generate shell helpers and completions.
 - Publish public `security.txt` and generated `llms.txt` discovery documents.
-- Use public About, Help, Privacy, Terms, Security, DPO, Preferences, and health pages. Contact reporting is linked from the Security page and security.txt.
+- Use public About, Help, Privacy, Terms, Security, DPO, Preferences, and health pages. Contact reporting is linked from the Security page and security.txt; vulnerability reports return a tracking ID with a private status link usable once per UTC day.
 - Synchronize theme and language preferences between devices without exporting consent or credentials.
 - Choose from English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese interfaces.
 

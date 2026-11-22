@@ -17,6 +17,7 @@ import (
 	"github.com/apimgr/gitignore/src/client/api"
 	"github.com/apimgr/gitignore/src/client/cmd"
 	"github.com/apimgr/gitignore/src/client/config"
+	"github.com/apimgr/gitignore/src/client/gui"
 	"github.com/apimgr/gitignore/src/client/output"
 	clipath "github.com/apimgr/gitignore/src/client/path"
 	"github.com/apimgr/gitignore/src/client/tui"
@@ -146,12 +147,15 @@ func main() {
 			cmd.PrintVersion(Version, CommitID, BuildDate, nil)
 			os.Exit(output.ExitSuccess)
 		}
-		// No server configured yet: if we're about to launch the TUI (no
-		// command args, interactive terminal), let the TUI's first-run
-		// setup wizard collect the server URL instead of hard-failing
-		// (AI.md PART 32 "first-run config wizard").
-		if len(args) == 0 && isTUIEligible() {
-			os.Exit(runInteractive(api.New(""), cfg, cfgPath))
+		// No server configured yet: an interactive TUI or GUI can collect
+		// the server URL with its first-run setup screen.
+		if len(args) == 0 {
+			mode, modeErr := selectInteractiveMode(cfg.Display.Mode)
+			if modeErr != nil {
+				printer.Error("%v", modeErr)
+				os.Exit(output.ExitConfig)
+			}
+			os.Exit(runInteractive(mode, api.New(""), cfg, cfgPath))
 		}
 		printer.Error("%v", err)
 		os.Exit(output.ExitConfig)
@@ -167,16 +171,15 @@ func main() {
 		os.Exit(output.ExitSuccess)
 	}
 
-	// Mode detection (AI.md PART 32 "Automatic Mode Detection"): no
-	// subcommand + an interactive terminal launches the bubbletea TUI by
-	// default; explicit commands and non-interactive/piped/dumb terminals
-	// always use the plain CLI path. There is no --tui/--cli flag.
+	// A command argument always uses the plain CLI path. With no command,
+	// display.mode and the local display/TTY environment choose GUI or TUI.
 	if len(args) == 0 {
-		if isTUIEligible() {
-			os.Exit(runInteractive(client, cfg, cfgPath))
+		mode, modeErr := selectInteractiveMode(cfg.Display.Mode)
+		if modeErr != nil {
+			printer.Error("%v", modeErr)
+			os.Exit(output.ExitConfig)
 		}
-		printer.Error("no command given; run %s --help for usage, or run interactively for the TUI", cmd.BinaryName)
-		os.Exit(output.ExitUsage)
+		os.Exit(runInteractive(mode, client, cfg, cfgPath))
 	}
 
 	os.Exit(cmd.Dispatch(client, printer, format, args))
@@ -191,9 +194,58 @@ func isTUIEligible() bool {
 	return env.Mode == display.DisplayModeTUI || env.Mode == display.DisplayModeGUI
 }
 
-// runInteractive launches the bubbletea TUI and maps its outcome to a CLI
-// exit code.
-func runInteractive(client *api.Client, cfg *config.Config, cfgPath string) int {
+type interactiveMode int
+
+const (
+	interactiveTUI interactiveMode = iota
+	interactiveGUI
+)
+
+func selectInteractiveMode(preference string) (interactiveMode, error) {
+	env := display.DetectDisplayEnv()
+	if env.IsSSH || env.IsMosh {
+		if !isTUIEligible() {
+			return 0, fmt.Errorf("interactive mode unavailable: remote sessions require an interactive terminal")
+		}
+		if preference == "gui" {
+			return 0, fmt.Errorf("GUI unavailable in remote SSH or Mosh sessions")
+		}
+		return interactiveTUI, nil
+	}
+
+	switch preference {
+	case "gui":
+		if !gui.IsGUIAvailable() {
+			return 0, fmt.Errorf("GUI unavailable: no supported local display or GUI build is available")
+		}
+		return interactiveGUI, nil
+	case "tui":
+		if !isTUIEligible() {
+			return 0, fmt.Errorf("TUI unavailable: an interactive terminal is required")
+		}
+		return interactiveTUI, nil
+	case "", "auto":
+		if gui.IsGUIAvailable() {
+			return interactiveGUI, nil
+		}
+		if isTUIEligible() {
+			return interactiveTUI, nil
+		}
+		return 0, fmt.Errorf("interactive mode unavailable: connect a display or interactive terminal")
+	default:
+		return 0, fmt.Errorf("invalid display.mode %q: expected auto, gui, or tui", preference)
+	}
+}
+
+// runInteractive launches the selected graphical or terminal UI.
+func runInteractive(mode interactiveMode, client *api.Client, cfg *config.Config, cfgPath string) int {
+	if mode == interactiveGUI {
+		if err := gui.LaunchGUI(client, cfg, cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "gui error: %v\n", err)
+			return output.ExitGeneral
+		}
+		return output.ExitSuccess
+	}
 	if err := tui.Run(client, cfg, cfgPath); err != nil {
 		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
 		return output.ExitGeneral

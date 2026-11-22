@@ -32,11 +32,42 @@ func Configure(name string, maxAgeSeconds int) {
 	}
 }
 
+// SetLanguageCookie persists an explicit language choice using the configured
+// cookie name and lifetime.
+func SetLanguageCookie(w http.ResponseWriter, r *http.Request, lang string) bool {
+	if !IsSupported(lang) {
+		return false
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: normalize(lang), Path: "/", MaxAge: cookieMaxAge, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil})
+	return true
+}
+
+// ClearLanguageCookie removes an explicit language override and restores
+// automatic Accept-Language detection.
+func ClearLanguageCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil})
+}
+
+// LanguagePreference returns the explicit saved language, or "auto" when the
+// visitor is using automatic detection.
+func LanguagePreference(r *http.Request) string {
+	if cookie, err := r.Cookie(cookieName); err == nil && IsSupported(cookie.Value) {
+		return normalize(cookie.Value)
+	}
+	return "auto"
+}
+
 // Middleware resolves the request language (?lang= → cookie → Accept-Language
 // → en), persists a ?lang= choice via a one-year cookie, and stashes the
 // result in the request context for downstream handlers (AI.md PART 30
 // "Language Selection via Query Parameter").
 func Middleware(next http.Handler) http.Handler {
+	return MiddlewareWithSecure(next, func(r *http.Request) bool { return r.TLS != nil })
+}
+
+// MiddlewareWithSecure resolves the language and persists explicit query
+// choices. The server supplies its trusted-proxy-aware transport predicate.
+func MiddlewareWithSecure(next http.Handler, secure func(*http.Request) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A ?lang= that is supported is persisted so subsequent requests keep
 		// the language without the query param (shareable links).
@@ -47,8 +78,7 @@ func Middleware(next http.Handler) http.Handler {
 				Path:     "/",
 				MaxAge:   cookieMaxAge,
 				SameSite: http.SameSiteLaxMode,
-				Secure:   r.TLS != nil,
-				HttpOnly: true,
+				Secure:   secure(r),
 			})
 		}
 		lang := LangFromRequest(r)

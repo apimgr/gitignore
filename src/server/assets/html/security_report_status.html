@@ -1,0 +1,13 @@
+{{define "content"}}
+<div class="container container-sm">
+<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/security"}}">{{t .Lang "security_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "security_page.report_status_title"}}</h1><p class="page-lead">{{t .Lang "security_page.report_status_description"}}</p></header>
+<section class="section-card" aria-labelledby="report-status">
+<h2 id="report-status">{{t .Lang "common.status"}}</h2>
+<p>Tracking ID: <code>{{.Data.trackingID}}</code></p>
+<p>{{.Data.status}}</p>
+{{if .Data.comment}}<p>{{.Data.comment}}</p>{{end}}
+{{if .Data.disclosureDate}}<p>Expected disclosure date: {{.Data.disclosureDate}}</p>{{end}}
+<p>This private link can be opened once per UTC day.</p>
+</section>
+</div>
+{{end}}

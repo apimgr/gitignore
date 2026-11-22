@@ -1,0 +1,61 @@
+{{define "content"}}
+<div class="container container-md">
+<header class="page-header">
+<h1 class="page-title">{{.Health.Project.Name}}</h1>
+{{if .Health.Project.Tagline}}<p class="page-lead">{{.Health.Project.Tagline}}</p>{{else if .Health.Project.Description}}<p class="page-lead">{{.Health.Project.Description}}</p>{{end}}
+</header>
+<div class="status-banner {{.Health.BannerClass}}"><span class="status-icon" aria-hidden="true">{{.Health.StatusIcon}}</span> <span class="status-text">{{.Health.StatusText}}</span></div>
+<section class="section-card" aria-labelledby="health-version">
+<h2 id="health-version">{{t .Lang "health.section.version"}}</h2>
+<dl class="info-list">
+<dt>{{t .Lang "health.field.version"}}</dt><dd><code>{{.Health.Version}}</code></dd>
+<dt>{{t .Lang "health.field.go_version"}}</dt><dd><code>{{.Health.GoVersion}}</code></dd>
+<dt>{{t .Lang "health.field.build"}}</dt><dd><code>{{.Health.Build.Commit}}</code> ({{.Health.BuildDateHuman}})</dd>
+</dl>
+</section>
+<section class="section-card" aria-labelledby="health-runtime">
+<h2 id="health-runtime">{{t .Lang "health.section.runtime"}}</h2>
+<dl class="info-list">
+<dt>{{t .Lang "health.field.uptime"}}</dt><dd>{{.Health.UptimeHuman}}</dd>
+<dt>{{t .Lang "health.field.mode"}}</dt><dd><span class="badge badge-{{.Health.Mode}}">{{.Health.ModeLabel}}</span></dd>
+<dt>{{t .Lang "health.field.checked"}}</dt><dd><time datetime="{{.Health.TimestampISO}}">{{.Health.TimestampHuman}}</time></dd>
+</dl>
+</section>
+<section class="section-card" aria-labelledby="health-cluster">
+<h2 id="health-cluster">{{t .Lang "health.section.cluster"}}</h2>
+<dl class="info-list"><dt>{{t .Lang "health.field.enabled"}}</dt><dd>{{enabled .Lang .Health.Cluster.Enabled}}</dd></dl>
+</section>
+<section class="section-card" aria-labelledby="health-features">
+<h2 id="health-features">{{t .Lang "health.section.features"}}</h2>
+<ul class="feature-list">
+<li>{{t .Lang "health.feature.tor"}}: <span class="status {{statusClass .Health.Features.Tor.Status}}">{{t .Lang (printf "health.feature_status.%s" .Health.Features.Tor.Status)}}</span>{{if .Health.Features.Tor.Hostname}} <span class="code-block"><code>{{.Health.Features.Tor.Hostname}}</code></span>{{end}}</li>
+{{if .Health.Features.I2P.Enabled}}<li>{{t .Lang "health.feature.i2p"}}: <span class="status {{statusClass .Health.Features.I2P.Status}}">{{t .Lang (printf "health.feature_status.%s" .Health.Features.I2P.Status)}}</span>{{if .Health.Features.I2P.Hostname}} <span class="code-block"><code>{{.Health.Features.I2P.Hostname}}</code></span>{{end}}</li>{{end}}
+<li>{{t .Lang "health.feature.geoip"}}: {{enabled .Lang .Health.Features.GeoIP}}</li>
+</ul>
+</section>
+<section class="section-card" aria-labelledby="health-checks">
+<h2 id="health-checks">{{t .Lang "health.section.checks"}}</h2>
+<div class="table-wrapper"><table class="data-table">
+<caption class="visually-hidden">{{t .Lang "health.section.checks"}}</caption>
+<thead><tr><th scope="col">{{t .Lang "health.field.component"}}</th><th scope="col">{{t .Lang "health.field.status"}}</th></tr></thead>
+<tbody>
+<tr><td>{{t .Lang "health.check.database"}}</td><td><span class="status {{statusClass .Health.Checks.Database}}">{{state .Lang .Health.Checks.Database}}</span></td></tr>
+<tr><td>{{t .Lang "health.check.cache"}}</td><td><span class="status {{statusClass .Health.Checks.Cache}}">{{state .Lang .Health.Checks.Cache}}</span></td></tr>
+<tr><td>{{t .Lang "health.check.disk"}}</td><td><span class="status {{statusClass .Health.Checks.Disk}}">{{state .Lang .Health.Checks.Disk}}</span></td></tr>
+<tr><td>{{t .Lang "health.check.scheduler"}}</td><td><span class="status {{statusClass .Health.Checks.Scheduler}}">{{state .Lang .Health.Checks.Scheduler}}</span></td></tr>
+{{if .Health.Checks.Tor}}<tr><td>{{t .Lang "health.feature.tor"}}</td><td><span class="status {{statusClass .Health.Checks.Tor}}">{{state .Lang .Health.Checks.Tor}}</span></td></tr>{{end}}
+{{if .Health.Checks.I2P}}<tr><td>{{t .Lang "health.feature.i2p"}}</td><td><span class="status {{statusClass .Health.Checks.I2P}}">{{state .Lang .Health.Checks.I2P}}</span></td></tr>{{end}}
+{{range .Health.Checks.DatasetOrder}}<tr><td>{{label $.Lang .}}</td><td><span class="status {{statusClass (index $.Health.Checks.Datasets .)}}">{{state $.Lang (index $.Health.Checks.Datasets .)}}</span></td></tr>{{end}}
+</tbody>
+</table></div>
+</section>
+<section class="section-card" aria-labelledby="health-stats">
+<h2 id="health-stats">{{t .Lang "health.section.stats"}}</h2>
+<dl class="info-list stats-grid">
+<dt>{{t .Lang "health.field.total_requests"}}</dt><dd>{{number .Lang .Health.Stats.RequestsTotal}}</dd>
+<dt>{{t .Lang "health.field.requests_24h"}}</dt><dd>{{number .Lang .Health.Stats.Requests24h}}</dd>
+<dt>{{t .Lang "health.field.active_connections"}}</dt><dd>{{number .Lang .Health.Stats.ActiveConns}}</dd>
+</dl>
+</section>
+</div>
+{{end}}

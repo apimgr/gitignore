@@ -3,7 +3,7 @@ PROJECT_NAME := $(shell remote=$$(git remote get-url origin 2>/dev/null); if [ -
 PROJECT_ORG := $(shell remote=$$(git remote get-url origin 2>/dev/null); if [ -n "$$remote" ]; then printf '%s\n' "$$remote" | sed -E 's|.*/([^/]+)/[^/]+(\.git)?$$|\1|'; else basename "$(shell dirname "$(PWD)")"; fi)
 INTERNAL_NAME := $(shell sed -n 's/^internal_name:[[:space:]]*//p' IDEA.md | head -n 1)
 
-VERSION := $(shell cat release.txt 2>/dev/null || echo "0.1.0")
+VERSION ?= $(shell if [ -s release.txt ]; then cat release.txt; else git rev-parse --short=7 HEAD 2>/dev/null || printf 'devel'; fi)
 BUILD_EPOCH := $(shell date -u +%s)
 COMMIT_ID := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo N/A)
 OFFICIAL_SITE := $(shell [ -f site.txt ] && cat site.txt || echo "$${OFFICIAL_SITE:-}")
@@ -68,9 +68,12 @@ build:
 test:
 	@mkdir -p "$(GO_CACHE)" "$(GO_BUILD)"
 	@$(GO_DOCKER) sh -eu -c '\
-		mkdir -p "$${TMPDIR:-/tmp}/$(PROJECT_ORG)"; \
-		coverage_dir=$$(mktemp -d "$${TMPDIR:-/tmp}/$(PROJECT_ORG)/$(INTERNAL_NAME)-XXXXXX"); \
-		trap '\''case "$$coverage_dir" in "$${TMPDIR:-/tmp}/$(PROJECT_ORG)/$(INTERNAL_NAME)-"*) rm -rf -- "$$coverage_dir" ;; esac'\'' EXIT; \
+		temp_parent="$${TMPDIR:-/tmp}/$(PROJECT_ORG)"; \
+		mkdir -p "$$temp_parent"; \
+		test_tmp=$$(mktemp -d "$$temp_parent/$(INTERNAL_NAME)-XXXXXX"); \
+		coverage_dir=$$(mktemp -d "$$temp_parent/$(INTERNAL_NAME)-XXXXXX"); \
+		trap '\''for candidate in "$$test_tmp" "$$coverage_dir"; do case "$$candidate" in "$$temp_parent/$(INTERNAL_NAME)-"*) rm -rf -- "$$candidate" ;; esac; done'\'' EXIT; \
+		export TMPDIR="$$test_tmp"; \
 		go vet ./...; \
 		govulncheck ./...; \
 		go test -coverprofile="$$coverage_dir/coverage.out" ./...; \

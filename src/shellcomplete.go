@@ -10,7 +10,7 @@ import (
 // (AI.md PART 8 "--shell").
 var serverFlagWords = []string{
 	"--port", "--address", "--config", "--data", "--cache", "--log", "--backup",
-	"--pid", "--baseurl", "--daemon", "--mode", "--service", "--maintenance",
+	"--pid", "--baseurl", "--i2p", "--daemon", "--mode", "--service", "--maintenance",
 	"--status", "--update", "--debug", "--color", "--force", "--version", "--help",
 	"--shell",
 }

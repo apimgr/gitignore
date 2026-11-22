@@ -6,7 +6,6 @@
     "direction": "ltr",
     "version": "1.0.0"
   },
-
   "common": {
     "select_language": "言語を選択",
     "save": "保存",
@@ -28,6 +27,7 @@
     "refresh": "更新",
     "download": "ダウンロード",
     "upload": "アップロード",
+    "aliases": "エイリアス",
     "copy": "コピー",
     "copy_to_clipboard": "クリップボードにコピー",
     "copied": "コピーしました",
@@ -65,13 +65,12 @@
     "last_updated": "最終更新: {datetime}",
     "made_with": "制作:"
   },
-
   "theme": {
     "light": "ライト",
     "dark": "ダーク",
-    "auto": "自動"
+    "auto": "自動",
+    "change": "テーマを変更"
   },
-
   "nav": {
     "home": "ホーム",
     "about": "概要",
@@ -81,13 +80,74 @@
     "terms": "利用規約",
     "docs": "ドキュメント",
     "api_docs": "API ドキュメント",
+    "security": "セキュリティ",
     "status": "ステータス",
+    "all_templates": "すべてのテンプレート",
+    "categories": "カテゴリ",
+    "combine": "結合",
+    "stats": "統計",
+    "cli": "CLI",
     "skip_to_content": "メインコンテンツへスキップ",
     "skip_to_navigation": "ナビゲーションへスキップ",
     "main_navigation": "メインナビゲーション"
   },
-
   "health": {
+    "section": {
+      "version": "バージョン",
+      "runtime": "実行状態",
+      "cluster": "クラスター",
+      "features": "機能",
+      "checks": "コンポーネントの状態",
+      "stats": "サーバー統計"
+    },
+    "field": {
+      "status": "状態",
+      "version": "バージョン",
+      "go_version": "Go バージョン",
+      "build": "ビルド",
+      "uptime": "稼働時間",
+      "mode": "モード",
+      "checked": "確認時刻",
+      "cluster": "クラスター",
+      "enabled": "有効",
+      "component": "コンポーネント",
+      "total_requests": "リクエスト総数",
+      "requests_24h": "リクエスト数（24 時間）",
+      "active_connections": "アクティブ接続数",
+      "last_checked": "最終確認:"
+    },
+    "feature": {
+      "tor": "Tor",
+      "i2p": "I2P",
+      "geoip": "GeoIP"
+    },
+    "feature_status": {
+      "disabled": "無効",
+      "starting": "起動中",
+      "healthy": "正常",
+      "unavailable": "利用不可"
+    },
+    "check_state": {
+      "ok": "正常",
+      "degraded": "低下",
+      "error": "エラー"
+    },
+    "check_kind": {
+      "geoip": "GeoIP",
+      "blocklist": "ブロックリスト",
+      "data": "データ"
+    },
+    "check": {
+      "database": "データベース",
+      "cache": "キャッシュ",
+      "disk": "ディスク",
+      "scheduler": "スケジューラー",
+      "geoip_asn": "GeoIP: ASN",
+      "geoip_country": "GeoIP: 国",
+      "geoip_city": "GeoIP: 都市",
+      "blocklist_firehol_level1": "ブロックリスト: FireHOL レベル 1",
+      "data_templates": "データ: テンプレート"
+    },
     "title": "システムステータス",
     "all_operational": "すべてのシステムが正常に稼働しています",
     "degraded": "低下",
@@ -113,7 +173,6 @@
     "production": "本番環境",
     "development": "開発環境"
   },
-
   "status_values": {
     "online": "オンライン",
     "offline": "オフライン",
@@ -124,7 +183,6 @@
     "good": "良好",
     "warn": "警告"
   },
-
   "contact": {
     "title": "お問い合わせ",
     "name": "名前",
@@ -134,9 +192,13 @@
     "send": "メッセージを送信",
     "success": "メッセージをありがとうございます。まもなく返信いたします。"
   },
-
   "help": {
     "title": "ヘルプ",
+    "back": "← ヘルプ",
+    "more": "その他のヘルプ",
+    "description": "カタログとその API の使い方を確認できます。",
+    "mcp_title": "MCP サーバー",
+    "mcp_description": "リンクされた所有者トークンで AI ツールをカタログに接続します。",
     "getting_started": "はじめに",
     "features": "機能",
     "api_documentation": "API ドキュメント",
@@ -152,8 +214,8 @@
     "faq": "よくある質問",
     "troubleshooting": "トラブルシューティング"
   },
-
   "privacy": {
+    "description": "このインスタンスでの報告、メタデータ、ブラウザー設定の取り扱いについて説明します。",
     "title": "プライバシーポリシー",
     "last_updated": "最終更新:",
     "summary": "概要",
@@ -172,6 +234,8 @@
     "data_security": "データセキュリティ",
     "data_storage": "データの保存と第三者",
     "all_data_stored": "お客様のすべてのデータは当社のサーバーに保存されます。",
+    "data_not_stored": "データはこのサーバーの外部に保存される場合があります。",
+    "additional_information": "追加情報",
     "when_shared": "データが共有される場合",
     "data_retention": "データの保持",
     "your_rights": "お客様の権利",
@@ -193,8 +257,8 @@
     "ccpa_opted_out": "データの販売をオプトアウトしました。",
     "ccpa_opt_back_in": "再度オプトインする"
   },
-
   "terms": {
+    "description": "この GitIgnore インスタンスの利用規則をご確認ください。",
     "title": "利用規約",
     "acceptance": "同意",
     "account_terms": "アカウント規約",
@@ -205,7 +269,29 @@
     "changes": "変更",
     "governing_law": "準拠法"
   },
-
+  "preferences_page": {
+    "description": "このブラウザーの言語、外観、プライバシー設定を管理します。",
+    "token_management": "トークン管理",
+    "sync_title": "設定を同期",
+    "sync_description": "プライベートなリンクまたはコードを使って、ブラウザーの設定をデバイス間で移行します。",
+    "more": "その他の設定",
+    "sync_back": "← 設定",
+    "export_url": "エクスポートリンク",
+    "export_code": "エクスポートコード",
+    "export_title": "エクスポート",
+    "import_prompt": "URL、クエリ文字列、またはコードを貼り付け",
+    "import_action": "インポート",
+    "appearance": "外観",
+    "theme": "テーマ",
+    "language": "言語",
+    "automatic": "自動",
+    "essential_always": "必須 Cookie（常に有効）",
+    "reset": "リセット",
+    "forget_title": "設定を消去しますか？",
+    "reset_warning": "テーマ、言語、アプリ設定、Cookie の同意、CCPA の選択、ビルド識別子、およびこのサイトのブラウザー保存領域を消去します。サインイン資格情報は保持されます。この操作は取り消せません。",
+    "keep": "保持",
+    "erase": "すべて消去"
+  },
   "cookie_consent": {
     "message": "EU GDPR 法に従い、このメッセージが表示されています。",
     "accept": "同意する",
@@ -216,14 +302,26 @@
     "preference_description": "テーマ (ライト/ダーク)、言語、インターフェース設定などの設定を記憶します。無効にすると、アクセスのたびにデフォルトにリセットされます。",
     "analytics_description": "サイトの利用状況を把握するのに役立ちます。"
   },
-
+  "security_page": {
+    "title": "セキュリティ",
+    "description": "脆弱性は責任ある確認のため非公開で報告してください。",
+    "back": "← セキュリティ",
+    "policy_title": "セキュリティ開示ポリシー",
+    "policy_description": "脆弱性の報告と開示の調整方法を説明します。",
+    "thanks_title": "セキュリティ研究者への謝辞",
+    "thanks_description": "公開クレジットを希望した研究者を開示後に掲載します。",
+    "dpo_title": "データ保護責任者",
+    "dpo_description": "このインスタンスのプライバシーに関するお問い合わせ先です。",
+    "report_status_title": "セキュリティ報告の状態",
+    "report_status_description": "提出された脆弱性報告の状態です。"
+  },
   "about": {
+    "description": "GitIgnore のカタログ、ツール、API を紹介します。",
     "title": "概要",
     "features": "機能",
     "version": "バージョン",
     "links": "リンク"
   },
-
   "announcements": {
     "warning": "警告",
     "info": "情報",
@@ -231,13 +329,11 @@
     "success": "成功",
     "scheduled_maintenance": "予定されたメンテナンス"
   },
-
   "pwa": {
     "install": "アプリをインストール",
     "installed": "アプリがインストールされました",
     "offline_message": "インターネット接続がありません。キャッシュされたコンテンツを表示しています。"
   },
-
   "errors": {
     "required": "この項目は必須です",
     "invalid_email": "無効なメールアドレスです",
@@ -260,37 +356,56 @@
     "server_error": "内部サーバーエラー",
     "maintenance_mode": "サービスを利用できません"
   },
-
   "plurals": {
+    "format_seconds": {
+      "other": "{count}秒"
+    },
+    "format_minutes": {
+      "other": "{count}分"
+    },
+    "format_hours": {
+      "other": "{count}時間"
+    },
+    "format_days": {
+      "other": "{count}日"
+    },
+    "format_bytes": {
+      "other": "{count}バイト"
+    },
+    "format_kilobytes": {
+      "other": "{count}キロバイト"
+    },
+    "format_megabytes": {
+      "other": "{count}メガバイト"
+    },
+    "format_gigabytes": {
+      "other": "{count}ギガバイト"
+    },
+    "format_terabytes": {
+      "other": "{count}テラバイト"
+    },
     "items": {
       "zero": "アイテムなし",
-      "one": "{count} 件のアイテム",
       "other": "{count} 件のアイテム"
     },
     "results": {
       "zero": "結果なし",
-      "one": "{count} 件の結果",
       "other": "{count} 件の結果"
     },
     "users": {
       "zero": "ユーザーなし",
-      "one": "{count} 人のユーザー",
       "other": "{count} 人のユーザー"
     },
     "days": {
-      "one": "{count} 日",
       "other": "{count} 日"
     },
     "hours": {
-      "one": "{count} 時間",
       "other": "{count} 時間"
     },
     "minutes": {
-      "one": "{count} 分",
       "other": "{count} 分"
     }
   },
-
   "notifications": {
     "title": "通知",
     "mark_all_read": "すべて既読にする",
@@ -321,7 +436,6 @@
       "other_admins": "その他の管理者"
     }
   },
-
   "email": {
     "subjects": {
       "security_alert": "セキュリティアラート - {app_name}",
@@ -340,7 +454,6 @@
       "from": "送信元: {app_name} ({fqdn})"
     }
   },
-
   "swagger": {
     "title": "API ドキュメント - {app_name}",
     "description": "インタラクティブな REST API エクスプローラー",
@@ -384,7 +497,6 @@
       "500": "Server Error - 内部エラー"
     }
   },
-
   "graphql": {
     "title": "GraphQL エクスプローラー - {app_name}",
     "description": "インタラクティブな GraphQL エクスプローラー",
@@ -397,10 +509,36 @@
     "type_descriptions": {
       "query": "データを取得するための利用可能なクエリ",
       "mutation": "データを変更するための利用可能なミューテーション",
-      "subscription": "リアルタイムデータ用のサブスクリプション"
+      "subscription": "リアルタイムデータ用のサブスクリプション",
+      "template": "カタログ内のテンプレート",
+      "stats": "テンプレートカタログの集計統計"
+    },
+    "field_descriptions": {
+      "template": {
+        "name": "テンプレート名",
+        "fileName": "テンプレートのファイル名",
+        "category": "テンプレートのカテゴリ",
+        "content": "テンプレートの内容",
+        "description": "テンプレートの簡単な説明",
+        "tags": "テンプレートに関連付けられた検索タグ",
+        "size": "テンプレート内容のバイト数"
+      },
+      "stats": {
+        "totalTemplates": "カタログ内のテンプレート数",
+        "categories": "カタログ内のカテゴリ数",
+        "totalSizeBytes": "すべてのテンプレート内容の合計バイト数"
+      },
+      "query": {
+        "template": "名前でテンプレートを1つ取得",
+        "list": "利用可能なすべてのテンプレートを一覧表示",
+        "search": "テンプレート名と内容を検索",
+        "categories": "利用可能なすべてのカテゴリ名を一覧表示",
+        "category": "指定したカテゴリのテンプレートを一覧表示",
+        "combine": "選択したテンプレートの内容を結合",
+        "stats": "テンプレートカタログの集計統計を取得"
+      }
     }
   },
-
   "users": {
     "registration": {
       "title": "登録",
@@ -451,7 +589,6 @@
       "disabled": "無効"
     }
   },
-
   "cli": {
     "description": "{project_name} {project_version} - {project_description}",
     "usage": "使用方法:",
@@ -495,27 +632,71 @@
     "update_branch_usage": "更新チャネルを設定: stable、beta、devel（別名: daily、rolling、dev、development）",
     "invalid_update_branch": "更新チャネルが無効です。有効なチャネル: stable、beta、devel。"
   },
-
   "version": {
     "name_version": "{project_name} {project_version}",
     "built": "ビルド日時: {build_date}",
     "go": "Go: {go_version}",
     "os_arch": "OS/Arch: {goos}/{goarch}"
   },
-
   "confirm": {
     "delete_title": "削除の確認",
     "delete_message": "このアイテムを削除してもよろしいですか？",
     "action_irreversible": "この操作は元に戻せません。"
   },
-
   "form": {
     "required_field": "(必須)",
     "optional_field": "(任意)",
     "hint_email": "お客様のメールアドレスを共有することはありません。",
     "errors_count": "フォームに {count} 件のエラーがあります"
   },
-
+  "owner_tokens_page": {
+    "back": "← 設定",
+    "title": "所有者トークン",
+    "description": "このブラウザーのプライマリトークンを表示・管理し、ツール用のリンクトークンを作成します。",
+    "new_token": "新しいトークン",
+    "create_desc": "MCP の利用とリンク済みトークン管理用に匿名の所有者トークンを作成します。",
+    "create": "トークンを作成",
+    "use_existing": "既存のトークンを使用",
+    "primary": "プライマリトークン",
+    "restore_hint": "プライマリトークンを貼り付けて、このブラウザーを復元します。",
+    "restore": "ID を復元",
+    "active": "有効",
+    "primary_help": "{resources} に完全アクセスできます。安全に保管してください。",
+    "reveal": "表示",
+    "copy": "コピー",
+    "rotate": "ローテーション",
+    "rotate_prompt": "このトークンをローテーションしますか？現在の値は直ちに無効になります。",
+    "confirm_rotate": "ローテーションを確認",
+    "linked": "リンク済みトークン",
+    "created": "作成日時",
+    "last_used": "最終使用",
+    "expires": "有効期限",
+    "edit": "編集",
+    "save": "保存",
+    "revoke": "失効",
+    "revoke_prompt": "このリンク済みトークンを失効させますか？元に戻せません。",
+    "confirm_revoke": "失効を確認",
+    "empty": "リンク済みトークンはありません。",
+    "empty_hint": "MCP クライアントなど、アプリごとに作成してください。",
+    "create_linked": "リンク済みトークンを作成",
+    "name": "名前",
+    "name_hint": "例: MCP クライアント",
+    "expiry": "有効期限",
+    "never": "なし",
+    "days_7": "7 日",
+    "days_30": "30 日",
+    "days_90": "90 日",
+    "year": "1 年",
+    "custom_date": "日付を指定",
+    "expires_on": "有効期限日",
+    "this_browser": "このブラウザー",
+    "browser_saved": "プライマリトークンはこのブラウザーに保存されています。",
+    "forget": "保存したトークンを忘れる",
+    "forget_prompt": "このブラウザーの保存トークンを忘れますか？トークン自体は有効なままです。",
+    "confirm_forget": "確認",
+    "resources_remain": "{resources} は削除されません。",
+    "shown_once": "このページの読み込み時に一度だけ表示"
+  },
   "a11y": {
     "skip_to_content": "メインコンテンツへスキップ",
     "skip_to_navigation": "ナビゲーションへスキップ",

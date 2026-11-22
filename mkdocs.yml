@@ -101,11 +101,13 @@ nav:
   - Getting Started:
     - Installation: installation.md
     - Configuration: configuration.md
+    - Server Operations: SERVER.md
   - Usage:
     - API Reference: api.md
     - CLI Reference: cli.md
     - Security: security.md
     - Integrations: integrations.md
+    - Translating: translating.md
   - Development:
     - Contributing: development.md
 

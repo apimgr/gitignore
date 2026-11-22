@@ -279,13 +279,13 @@ func TestHandleRobotsTxtFromConfig(t *testing.T) {
 	}
 }
 
-func TestHandleSecurityTxtDefaultAdmin(t *testing.T) {
+func TestHandleSecurityTxtOmitsUnconfiguredEmail(t *testing.T) {
 	s := &Server{config: &Config{}}
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/security.txt", nil)
 	rec := httptest.NewRecorder()
 	s.handleSecurityTxt(rec, req)
-	if !strings.Contains(rec.Body.String(), "security@apimgr.us") {
-		t.Errorf("expected default admin contact: %s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "Contact: mailto:") {
+		t.Errorf("security.txt included an empty email contact: %s", rec.Body.String())
 	}
 }
 

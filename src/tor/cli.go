@@ -105,12 +105,19 @@ func ApplyStagedVanityKey(dataDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	blob := strings.TrimSpace(string(data))
+	blob, err := torSecretKeyBlob(data)
+	if err != nil {
+		return "", fmt.Errorf("invalid key file: %w", err)
+	}
 	id, err := ServiceIDFromBlob(blob)
 	if err != nil {
 		return "", err
 	}
-	if err := ensureTorFile(SecretKeyPath(dataDir), []byte(blob)); err != nil {
+	keyFile, err := torSecretKeyFile([]byte(blob))
+	if err != nil {
+		return "", fmt.Errorf("invalid Tor v3 secret key: %w", err)
+	}
+	if err := ensureTorFile(SecretKeyPath(dataDir), keyFile); err != nil {
 		return "", err
 	}
 	_ = os.Remove(HostnamePath(dataDir))
@@ -131,7 +138,11 @@ func ImportKey(dataDir, srcPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid key file: %w", err)
 	}
-	if err := ensureTorFile(SecretKeyPath(dataDir), []byte(blob)); err != nil {
+	keyFile, err := torSecretKeyFile([]byte(blob))
+	if err != nil {
+		return "", fmt.Errorf("invalid Tor v3 secret key: %w", err)
+	}
+	if err := ensureTorFile(SecretKeyPath(dataDir), keyFile); err != nil {
 		return "", err
 	}
 	_ = os.Remove(HostnamePath(dataDir))

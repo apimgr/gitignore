@@ -45,12 +45,12 @@ func (s *Server) handleCompatList(w http.ResponseWriter, r *http.Request) {
 			result[key] = byKey[key]
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		json.NewEncoder(w).Encode(result)
+		_ = json.NewEncoder(w).Encode(result)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprint(w, strings.Join(keys, ","))
+	_, _ = fmt.Fprint(w, strings.Join(keys, ","))
 }
 
 // handleCompatTemplates implements gitignore.io's GET /api/{name1,name2,...} route.
@@ -105,5 +105,5 @@ func (s *Server) handleCompatTemplates(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprint(w, body.String())
+	_, _ = fmt.Fprint(w, body.String())
 }

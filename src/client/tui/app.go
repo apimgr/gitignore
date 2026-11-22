@@ -12,6 +12,7 @@ import (
 
 	"github.com/apimgr/gitignore/src/client/api"
 	"github.com/apimgr/gitignore/src/client/config"
+	displayformat "github.com/apimgr/gitignore/src/common/format"
 )
 
 // screen identifies which part of the TUI is currently active.
@@ -79,7 +80,8 @@ type Model struct {
 	nameMode nameListMode
 	selected map[string]bool
 
-	input textinput.Model
+	input         textinput.Model
+	categoryInput bool
 
 	viewport viewport.Model
 	viewName string
@@ -306,6 +308,19 @@ func (m Model) dispatchMenu(id string) (tea.Model, tea.Cmd) {
 			names, err := client.Categories()
 			return namesLoadedMsg{names: names, mode: nameModeCategoryDrill, err: err}
 		}
+	case "category":
+		m.input = textinput.New()
+		m.input.Placeholder = "category name"
+		m.input.Prompt = "> "
+		m.input.Focus()
+		m.categoryInput = true
+		m.screen = screenSearchInput
+		return m, nil
+	case "get":
+		return m, func() tea.Msg {
+			names, err := client.List()
+			return namesLoadedMsg{names: names, mode: nameModeBrowse, err: err}
+		}
 	case "combine":
 		m.selected = map[string]bool{}
 		return m, func() tea.Msg {
@@ -322,6 +337,7 @@ func (m Model) dispatchMenu(id string) (tea.Model, tea.Cmd) {
 		m.input.Placeholder = "search term"
 		m.input.Prompt = "> "
 		m.input.Focus()
+		m.categoryInput = false
 		m.screen = screenSearchInput
 		return m, nil
 	case "settings":
@@ -348,7 +364,13 @@ func (m Model) updateSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		client := m.client
+		categoryInput := m.categoryInput
+		m.categoryInput = false
 		return m, func() tea.Msg {
+			if categoryInput {
+				names, err := client.CategoryTemplates(q)
+				return namesLoadedMsg{names: names, mode: nameModeBrowse, err: err}
+			}
 			names, err := client.Search(q)
 			return namesLoadedMsg{names: names, mode: nameModeBrowse, err: err}
 		}
@@ -443,7 +465,11 @@ func (m Model) View() string {
 	case screenNames:
 		body = m.names.View()
 		if m.nameMode == nameModeCombinePick {
-			body += "\n" + m.styles.Help.Render(fmt.Sprintf("selected: %d", len(selectedNames(m.selected))))
+			lang := ""
+			if m.client != nil {
+				lang = m.client.Lang
+			}
+			body += "\n" + m.styles.Help.Render(fmt.Sprintf("selected: %s", displayformat.Count(int64(len(selectedNames(m.selected))), lang)))
 		}
 	case screenSearchInput:
 		body = m.styles.Title.Render("Search templates") + "\n\n" +
@@ -475,7 +501,7 @@ func (m Model) renderStats() string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("%s: %s\n", k, api.StatsCount(m.stats[k])))
+		fmt.Fprintf(&b, "%s: %s\n", k, api.StatsCount(m.stats[k]))
 	}
 	b.WriteString("\n" + m.styles.Help.Render("esc: back"))
 	return b.String()

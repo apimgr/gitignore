@@ -16,6 +16,7 @@ type APIResponse struct {
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
 	Message string      `json:"message,omitempty"`
+	Details interface{} `json:"details,omitempty"`
 	Meta    interface{} `json:"meta,omitempty"`
 }
 
@@ -57,10 +58,14 @@ func sendAPIResponseOK(w http.ResponseWriter, data interface{}) {
 // sendAPIResponseError writes an error envelope, deriving the HTTP status from
 // the stable error code.
 func sendAPIResponseError(w http.ResponseWriter, code, message string) {
+	sendAPIResponseErrorDetails(w, code, message, map[string]interface{}{})
+}
+
+func sendAPIResponseErrorDetails(w http.ResponseWriter, code, message string, details interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "error")
 	w.WriteHeader(mapAPIErrorCodeToHTTPStatus(code))
-	_ = json.NewEncoder(w).Encode(APIResponse{OK: false, Error: code, Message: message})
+	_ = json.NewEncoder(w).Encode(APIResponse{OK: false, Error: code, Message: message, Details: details})
 }
 
 // apiErrorI18nKey maps a stable API error code to its translation key so error

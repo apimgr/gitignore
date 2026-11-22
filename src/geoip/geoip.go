@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oschwald/maxminddb-golang"
 
@@ -26,10 +27,10 @@ import (
 )
 
 // File names for the downloaded MMDB databases (AI.md PART 19 "Database
-// Sources"). WHOIS has no file — it joins ASN and Country at query time.
+// Sources"). ASN, Country, and City are the only downloaded categories.
 const (
-	fileASN     = "asn.mmdb"
-	fileCountry = "country.mmdb"
+	fileASN     = "iptoasn-asn.mmdb"
+	fileCountry = "iptoasn-country.mmdb"
 	fileCityV4  = "dbip-city-ipv4.mmdb"
 	fileCityV6  = "dbip-city-ipv6.mmdb"
 )
@@ -81,12 +82,11 @@ type CityInfo struct {
 	Longitude   float64
 }
 
-// WhoisInfo joins ASN and country data at query time (AI.md PART 19: WHOIS is
-// not a separate download).
-type WhoisInfo struct {
-	RegistrantOrg string
-	ASN           uint32
-	CountryCode   string
+// NetworkInfo joins ASN and country data at query time.
+type NetworkInfo struct {
+	Organization string
+	ASN          uint32
+	CountryCode  string
 }
 
 // mmReader is the subset of *maxminddb.Reader that the manager needs. Tests
@@ -104,10 +104,11 @@ type Manager struct {
 	cfg config.GeoIPConfig
 	dir string
 
-	asn     mmReader
-	country mmReader
-	cityV4  mmReader
-	cityV6  mmReader
+	asn         mmReader
+	country     mmReader
+	cityV4      mmReader
+	cityV6      mmReader
+	lastUpdated time.Time
 
 	// openReader opens an MMDB file; swappable in tests. Defaults to openMMDB.
 	openReader func(path string) (mmReader, error)
@@ -121,13 +122,9 @@ type Manager struct {
 // derived as {dataDir}/security/geoip (AI.md PART 19). No files are opened
 // until Load is called.
 func New(cfg config.GeoIPConfig, dataDir string) *Manager {
-	dir := strings.TrimSpace(cfg.Dir)
-	if dir == "" {
-		dir = filepath.Join(dataDir, "security", "geoip")
-	}
 	return &Manager{
 		cfg:        cfg,
-		dir:        dir,
+		dir:        filepath.Join(dataDir, "security", "geoip"),
 		openReader: openMMDB,
 	}
 }
@@ -157,18 +154,17 @@ func (m *Manager) Load() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closeLocked()
+	m.lastUpdated = time.Time{}
 	if !m.cfg.Enabled {
 		return
 	}
-	if m.cfg.Databases.ASN {
-		m.asn = m.tryOpen(fileASN)
-	}
-	if m.cfg.Databases.Country {
-		m.country = m.tryOpen(fileCountry)
-	}
-	if m.cfg.Databases.City {
-		m.cityV4 = m.tryOpen(fileCityV4)
-		m.cityV6 = m.tryOpen(fileCityV6)
+	m.asn = m.tryOpen(fileASN)
+	m.country = m.tryOpen(fileCountry)
+	m.cityV4 = m.tryOpen(fileCityV4)
+	m.cityV6 = m.tryOpen(fileCityV6)
+	if stamp, err := os.ReadFile(filepath.Join(m.dir, ".last_updated")); err == nil {
+		m.lastUpdated, _ = time.Parse(time.RFC3339, strings.TrimSpace(string(stamp)))
+		m.lastUpdated = m.lastUpdated.UTC()
 	}
 }
 
@@ -211,6 +207,36 @@ func (m *Manager) Available() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.asn != nil || m.country != nil || m.cityV4 != nil || m.cityV6 != nil
+}
+
+// HealthStatuses reports one public-safe freshness state per enabled database
+// category. City is healthy only when both family databases are usable.
+func (m *Manager) HealthStatuses(now time.Time) map[string]string {
+	if !m.cfg.Enabled {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	loaded := map[string]bool{
+		"asn":     m.asn != nil,
+		"country": m.country != nil,
+		"city":    m.cityV4 != nil && m.cityV6 != nil,
+	}
+	out := make(map[string]string)
+	for _, id := range []string{"asn", "country", "city"} {
+		state := "error"
+		if loaded[id] && !m.lastUpdated.IsZero() {
+			state = "ok"
+			if now.Sub(m.lastUpdated) > 7*24*time.Hour || m.lastUpdated.After(now.Add(5*time.Minute)) {
+				state = "degraded"
+			}
+		}
+		out["geoip_"+id] = state
+	}
+	return out
 }
 
 // LookupCountry resolves the ISO 3166-1 alpha-2 country code for ip. The second
@@ -284,19 +310,18 @@ func (m *Manager) LookupCity(ip net.IP) (CityInfo, bool) {
 	}, true
 }
 
-// LookupWhois joins the ASN and Country databases at query time (AI.md PART 19:
-// WHOIS is not a separate download). It returns false only when neither source
-// yields data.
-func (m *Manager) LookupWhois(ip net.IP) (WhoisInfo, bool) {
+// LookupNetwork joins the ASN and Country databases at query time. It returns
+// false only when neither source yields data.
+func (m *Manager) LookupNetwork(ip net.IP) (NetworkInfo, bool) {
 	asn, aok := m.LookupASN(ip)
 	country, cok := m.LookupCountry(ip)
 	if !aok && !cok {
-		return WhoisInfo{}, false
+		return NetworkInfo{}, false
 	}
-	return WhoisInfo{
-		RegistrantOrg: asn.Org,
-		ASN:           asn.Number,
-		CountryCode:   country.CountryCode,
+	return NetworkInfo{
+		Organization: asn.Org,
+		ASN:          asn.Number,
+		CountryCode:  country.CountryCode,
 	}, true
 }
 

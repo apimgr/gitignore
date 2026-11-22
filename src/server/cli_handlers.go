@@ -104,7 +104,7 @@ case "$1" in
 esac
 `, serverURL, serverURL, defaults)
 
-	w.Write([]byte(script))
+	_, _ = w.Write([]byte(script))
 }
 
 // handleCLIScriptPs generates PowerShell script
@@ -179,7 +179,7 @@ switch ($args[0]) {
 }
 `, serverURL, serverURL, defaults, defaults)
 
-	w.Write([]byte(script))
+	_, _ = w.Write([]byte(script))
 }
 
 // handleCLICompletionBash generates Bash completion script
@@ -208,7 +208,7 @@ _gitignore_completions() {
 complete -F _gitignore_completions gitignore
 `, templates)
 
-	w.Write([]byte(completion))
+	_, _ = w.Write([]byte(completion))
 }
 
 // handleCLICompletionZsh generates Zsh completion script
@@ -251,7 +251,7 @@ _gitignore() {
 }
 `, templateList)
 
-	w.Write([]byte(completion))
+	_, _ = w.Write([]byte(completion))
 }
 
 // handleCLICompletionFish generates Fish completion script
@@ -276,5 +276,5 @@ complete -c gitignore -n "__fish_use_subcommand" -a "help" -d "Show help"
 		completion += fmt.Sprintf("complete -c gitignore -a \"%s\" -d \"%s template\"\n", tmpl, tmpl)
 	}
 
-	w.Write([]byte(completion))
+	_, _ = w.Write([]byte(completion))
 }

@@ -52,16 +52,16 @@ func TestLoadNormalizesUpdateBranchAliases(t *testing.T) {
 	if cfg.Server.Update.Branch != "devel" {
 		t.Fatalf("loaded update branch = %q, want devel", cfg.Server.Update.Branch)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(path), "yaml.d", "maintenance.yml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("maintenance area was not created: %v", err)
 	}
 	if !strings.Contains(string(data), "branch: devel") {
-		t.Fatalf("normalized branch was not written to config file: %s", data)
+		t.Fatalf("normalized branch was not written to maintenance area: %s", data)
 	}
 }
 
-func TestLoadRejectsUnknownUpdateBranch(t *testing.T) {
+func TestLoadUsesDefaultForUnknownUpdateBranch(t *testing.T) {
 	mu.Lock()
 	previousConfig := current
 	previousPath := configPath
@@ -77,7 +77,11 @@ func TestLoadRejectsUnknownUpdateBranch(t *testing.T) {
 	if err := os.WriteFile(path, []byte("server:\n  update:\n    branch: unknown\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
-		t.Fatal("Load accepted an unknown update branch")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected an unknown update branch: %v", err)
+	}
+	if want := DefaultConfig().Server.Update.Branch; cfg.Server.Update.Branch != want {
+		t.Fatalf("loaded update branch = %q, want default %q", cfg.Server.Update.Branch, want)
 	}
 }

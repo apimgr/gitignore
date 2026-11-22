@@ -104,19 +104,22 @@ type Config struct {
 	// operator email (AI.md PART 17). Never called while holding the scheduler
 	// lock.
 	OnError func(id, name string, err error, nextRun time.Time)
+	// OnState publishes low-cardinality execution state for observability.
+	OnState func(id string, running bool, status string, duration time.Duration, lastRun time.Time)
 }
 
 // Scheduler owns the registered tasks and the background execution loop.
 type Scheduler struct {
-	mu       sync.Mutex
-	tasks    map[string]*Task
-	order    []string
-	loc      *time.Location
-	catchUp  time.Duration
-	tick     time.Duration
-	now      func() time.Time
-	persist  func(db.SchedulerState) error
-	onError  func(id, name string, err error, nextRun time.Time)
+	mu      sync.Mutex
+	tasks   map[string]*Task
+	order   []string
+	loc     *time.Location
+	catchUp time.Duration
+	tick    time.Duration
+	now     func() time.Time
+	persist func(db.SchedulerState) error
+	onError func(id, name string, err error, nextRun time.Time)
+	onState func(id string, running bool, status string, duration time.Duration, lastRun time.Time)
 
 	stop    chan struct{}
 	done    chan struct{}
@@ -152,6 +155,7 @@ func New(cfg Config) *Scheduler {
 		now:     time.Now,
 		persist: db.UpsertSchedulerState,
 		onError: cfg.OnError,
+		onState: cfg.OnState,
 	}
 }
 
@@ -344,6 +348,9 @@ func (s *Scheduler) execute(ctx context.Context, t *Task, markRunning bool) {
 	}
 	handler := t.Handler
 	s.mu.Unlock()
+	if s.onState != nil {
+		s.onState(t.ID, true, "", 0, time.Time{})
+	}
 
 	start := s.now()
 	var err error
@@ -385,6 +392,15 @@ func (s *Scheduler) execute(ctx context.Context, t *Task, markRunning bool) {
 		}
 	}
 	s.saveTaskLocked(t)
+	status := ""
+	if t.lastStatus == StatusSuccess {
+		status = "success"
+	} else if t.lastStatus == StatusFailed {
+		status = "error"
+	}
+	if s.onState != nil {
+		s.onState(t.ID, false, status, dur, start)
+	}
 }
 
 // scheduleRetryLocked sets nextRun for a retry with exponential backoff, or the

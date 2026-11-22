@@ -17,7 +17,9 @@ func TestOkMarkHonorsNoColor(t *testing.T) {
 	})
 
 	t.Run("NO_COLOR unset returns emoji", func(t *testing.T) {
-		os.Unsetenv("NO_COLOR")
+		if err := os.Unsetenv("NO_COLOR"); err != nil {
+			t.Fatalf("Unsetenv(NO_COLOR): %v", err)
+		}
 		if got := okMark(); got != "✅" {
 			t.Errorf("okMark() = %q, want emoji", got)
 		}
@@ -33,7 +35,9 @@ func TestWarnMarkHonorsNoColor(t *testing.T) {
 	})
 
 	t.Run("NO_COLOR unset returns emoji", func(t *testing.T) {
-		os.Unsetenv("NO_COLOR")
+		if err := os.Unsetenv("NO_COLOR"); err != nil {
+			t.Fatalf("Unsetenv(NO_COLOR): %v", err)
+		}
 		if got := warnMark(); got != "⚠️ " {
 			t.Errorf("warnMark() = %q, want emoji", got)
 		}
@@ -278,7 +282,9 @@ func TestConfirmPrompt(t *testing.T) {
 			if _, err := w.WriteString(tc.input); err != nil {
 				t.Fatalf("WriteString: %v", err)
 			}
-			w.Close()
+			if err := w.Close(); err != nil {
+				t.Fatalf("PipeWriter.Close: %v", err)
+			}
 
 			if got := confirmPrompt("proceed? "); got != tc.want {
 				t.Errorf("confirmPrompt(%q) = %v, want %v", tc.input, got, tc.want)

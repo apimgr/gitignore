@@ -1,0 +1,11 @@
+{{define "content"}}
+<div class="container container-sm">
+<header class="page-header"><h1 class="page-title">{{t .Lang "security_page.dpo_title"}}</h1><p class="page-lead">{{t .Lang "security_page.dpo_description"}}</p></header>
+<section class="section-card" aria-labelledby="dpo-contact-title">
+<h2 id="dpo-contact-title">Privacy contact</h2>
+{{if .Data.name}}<p>{{.Data.name}}</p>{{end}}
+{{if .Data.email}}<p><a href="mailto:{{.Data.email}}">{{.Data.email}}</a></p>{{else}}<p>For privacy questions, see <a href="{{path "/server/security"}}">the security contact instructions</a>.</p>{{end}}
+<p><a href="{{path "/server/privacy"}}">Privacy policy</a></p>
+</section>
+</div>
+{{end}}

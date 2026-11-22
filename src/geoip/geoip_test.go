@@ -2,12 +2,17 @@ package geoip
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/apimgr/gitignore/src/config"
 )
@@ -95,19 +100,19 @@ func TestCountryAllowed_MissingDBFailsOpen(t *testing.T) {
 	}
 }
 
-func TestLookupWhois_JoinsASNAndCountry(t *testing.T) {
+func TestLookupNetwork_JoinsASNAndCountry(t *testing.T) {
 	m := New(config.GeoIPConfig{Enabled: true}, t_dataDir)
 	m.asn = &fakeReader{asn: map[string]asnRecord{
 		"8.8.8.8": {ASN: 15169, Org: "GOOGLE"},
 	}}
 	m.country = &fakeReader{country: map[string]string{"8.8.8.8": "us"}}
 
-	info, ok := m.LookupWhois(net.ParseIP("8.8.8.8"))
+	info, ok := m.LookupNetwork(net.ParseIP("8.8.8.8"))
 	if !ok {
-		t.Fatal("expected whois result")
+		t.Fatal("expected network data")
 	}
-	if info.ASN != 15169 || info.RegistrantOrg != "GOOGLE" || info.CountryCode != "US" {
-		t.Fatalf("unexpected whois: %+v", info)
+	if info.ASN != 15169 || info.Organization != "GOOGLE" || info.CountryCode != "US" {
+		t.Fatalf("unexpected network info: %+v", info)
 	}
 }
 
@@ -131,10 +136,9 @@ func TestLookupCity_SelectsByFamily(t *testing.T) {
 func TestLoad_MissingFilesNoPanic(t *testing.T) {
 	dir := t.TempDir()
 	m := New(config.GeoIPConfig{
-		Enabled:   true,
-		Dir:       dir,
-		Databases: config.GeoIPDatabasesConfig{ASN: true, Country: true, City: true},
+		Enabled: true,
 	}, dir)
+	m.dir = dir
 	m.Load()
 	if m.Available() {
 		t.Fatal("no databases present, Available must be false")
@@ -148,6 +152,11 @@ func TestLoad_MissingFilesNoPanic(t *testing.T) {
 func TestUpdate_DownloadsAndReloads(t *testing.T) {
 	payload := []byte("fake-mmdb-bytes")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sha256") {
+			sum := sha256.Sum256(payload)
+			_, _ = fmt.Fprintln(w, hex.EncodeToString(sum[:]))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(payload)
 	}))
@@ -155,10 +164,9 @@ func TestUpdate_DownloadsAndReloads(t *testing.T) {
 
 	dir := t.TempDir()
 	m := New(config.GeoIPConfig{
-		Enabled:   true,
-		Dir:       dir,
-		Databases: config.GeoIPDatabasesConfig{ASN: true, Country: true, City: true},
+		Enabled: true,
 	}, dir)
+	m.dir = dir
 	m.mirrorBase = srv.URL
 	// Avoid parsing the fake bytes as a real MMDB during the post-update reload.
 	m.openReader = func(path string) (mmReader, error) { return &fakeReader{}, nil }
@@ -179,16 +187,58 @@ func TestUpdate_DownloadsAndReloads(t *testing.T) {
 	if !m.Available() {
 		t.Fatal("databases should be loaded after Update")
 	}
+	statuses := m.HealthStatuses(time.Now().UTC())
+	for _, key := range []string{"geoip_asn", "geoip_country", "geoip_city"} {
+		if statuses[key] != "ok" {
+			t.Errorf("expected %s=ok, got %q", key, statuses[key])
+		}
+	}
 }
 
 func TestUpdate_DisabledIsNoop(t *testing.T) {
 	dir := t.TempDir()
-	m := New(config.GeoIPConfig{Enabled: false, Dir: dir}, dir)
+	m := New(config.GeoIPConfig{Enabled: false}, dir)
+	m.dir = dir
 	if err := m.Update(context.Background()); err != nil {
 		t.Fatalf("disabled Update must be a no-op, got %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatal("disabled Update must not write files")
+	}
+}
+
+func TestHealthStatusesUsesCachedStateAndOmitesDisabled(t *testing.T) {
+	now := time.Now().UTC()
+	m := New(config.GeoIPConfig{Enabled: true}, t.TempDir())
+	m.asn = &fakeReader{}
+	m.country = &fakeReader{}
+	m.cityV4 = &fakeReader{}
+	m.cityV6 = &fakeReader{}
+	m.lastUpdated = now.Add(-8 * 24 * time.Hour)
+	statuses := m.HealthStatuses(now)
+	for _, key := range []string{"geoip_asn", "geoip_country", "geoip_city"} {
+		if statuses[key] != "degraded" {
+			t.Errorf("expected stale %s=degraded, got %q", key, statuses[key])
+		}
+	}
+
+	m.lastUpdated = now
+	if got := m.HealthStatuses(now)["geoip_country"]; got != "ok" {
+		t.Fatalf("fresh cached database status = %q, want ok", got)
+	}
+
+	disabled := New(config.GeoIPConfig{Enabled: false}, t.TempDir())
+	if got := disabled.HealthStatuses(now); len(got) != 0 {
+		t.Fatalf("disabled GeoIP checks should be omitted, got %v", got)
+	}
+}
+
+func TestHealthStatusesMissingDatabaseIsError(t *testing.T) {
+	m := New(config.GeoIPConfig{Enabled: true}, t.TempDir())
+	m.lastUpdated = time.Now().UTC()
+	statuses := m.HealthStatuses(time.Now().UTC())
+	if statuses["geoip_asn"] != "error" || statuses["geoip_country"] != "error" || statuses["geoip_city"] != "error" {
+		t.Fatalf("missing database checks must report error: %v", statuses)
 	}
 }
 

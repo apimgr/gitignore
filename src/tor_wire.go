@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/server"
 	"github.com/apimgr/gitignore/src/tor"
 )
 
@@ -21,7 +22,7 @@ func torBinaryInstalled(cfg *config.Config) bool {
 // minutes, and the server never fails to start because of Tor (AI.md PART 31).
 // It returns the manager (which the caller closes on shutdown) or nil when Tor
 // is unavailable.
-func startTor(ctx context.Context, cfg *config.Config, configDir, dataDir string, serverPort int) *tor.TorManager {
+func startTor(ctx context.Context, cfg *config.Config, configDir, dataDir string, serverPort int, srv *server.Server) *tor.TorManager {
 	if _, found := tor.FindBinary(cfg.Server.Tor.Binary); !found {
 		fmt.Println("Tor hidden service: disabled (tor not installed)")
 		return nil
@@ -29,13 +30,13 @@ func startTor(ctx context.Context, cfg *config.Config, configDir, dataDir string
 
 	torCfg := cfg.Server.Tor
 	mgr := tor.NewTorManager(ctx, serverPort, configDir, dataDir, &torCfg)
+	go srv.WatchTorBackend(ctx, mgr.BackendPort, mgr.OnionAddress)
 
 	go func() {
 		if err := mgr.Start(); err != nil {
 			fmt.Printf("Tor: bootstrap failed: %v\n", err)
 			return
 		}
-		fmt.Printf("Tor: %s\n", mgr.OnionAddress())
 		mgr.Monitor(ctx)
 	}()
 

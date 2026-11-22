@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	displayformat "github.com/apimgr/gitignore/src/common/format"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/email"
+	"github.com/apimgr/gitignore/src/server"
 	"github.com/apimgr/gitignore/src/tor"
 )
 
@@ -50,7 +52,7 @@ func detectGlobalIPv4() string {
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if ua, ok := conn.LocalAddr().(*net.UDPAddr); ok && ua.IP.To4() != nil && !ua.IP.IsLoopback() {
 		return ua.IP.String()
 	}
@@ -71,6 +73,7 @@ type emailNotifier struct {
 	cfg       *config.Config
 	dataDir   string
 	recipient string
+	i2pStatus func() server.I2PInfo
 }
 
 // buildSender constructs an email.Sender from config, applying the AI.md PART 17
@@ -128,7 +131,7 @@ func notifyRecipient(cfg *config.Config, sender *email.Sender) string {
 // configured) or tests the configured connection, sets the runtime Enabled flag,
 // persists a newly detected host, and logs email.configured=true/false. It never
 // fails the server: no working SMTP simply means email stays disabled.
-func initEmail(cfg *config.Config, configDir, dataDir string) {
+func initEmail(cfg *config.Config, configDir, dataDir string, i2pStatus func() server.I2PInfo) {
 	config.ApplySMTPEnv(cfg)
 	e := &cfg.Server.Notifications.Email
 
@@ -170,6 +173,7 @@ func initEmail(cfg *config.Config, configDir, dataDir string) {
 			cfg:       cfg,
 			dataDir:   dataDir,
 			recipient: notifyRecipient(cfg, sender),
+			i2pStatus: i2pStatus,
 		}
 		fmt.Println("email.configured=true")
 	} else {
@@ -179,7 +183,7 @@ func initEmail(cfg *config.Config, configDir, dataDir string) {
 }
 
 // globals returns the global template variables available in every template
-// (AI.md PART 17 "Global Variables"). I2P is not implemented, so i2p_* are empty.
+// (AI.md PART 17 "Global Variables").
 func (n *emailNotifier) globals() map[string]string {
 	cfg := n.cfg
 	fqdn := cfg.Server.FQDN
@@ -211,6 +215,12 @@ func (n *emailNotifier) globals() map[string]string {
 	if addr := tor.ReadHostname(n.dataDir); addr != "" {
 		vars["onion_address"] = addr
 		vars["onion_url"] = "http://" + addr
+	}
+	if n.i2pStatus != nil {
+		if status := n.i2pStatus(); status.Enabled && status.Running && status.Hostname != "" {
+			vars["i2p_address"] = status.Hostname
+			vars["i2p_url"] = "http://" + status.Hostname
+		}
 	}
 	return vars
 }
@@ -254,6 +264,18 @@ func emitBackupFailed(filename, errMsg string) {
 	notifier.emit("backup_failed", notifier.cfg.Server.Notifications.Email.Events.BackupFailed, map[string]string{
 		"filename": filename,
 		"error":    errMsg,
+	})
+}
+
+func emitDiskLow(path string, usedPercent float64, freeBytes uint64, thresholdPercent float64) {
+	if notifier == nil {
+		return
+	}
+	notifier.emit("disk_low", notifier.cfg.Server.Notifications.DiskLow.Enabled, map[string]string{
+		"path":              path,
+		"used_percent":      strconv.FormatFloat(usedPercent, 'f', 1, 64),
+		"free":              displayformat.Size(int64(freeBytes), notifier.cfg.Server.I18n.DefaultLanguage),
+		"threshold_percent": strconv.FormatFloat(thresholdPercent, 'f', 1, 64),
 	})
 }
 

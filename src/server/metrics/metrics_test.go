@@ -24,6 +24,22 @@ func TestNewRegistersMandatedMetrics(t *testing.T) {
 	m.HTTPRequestSize.WithLabelValues("GET", "/api/v1/templates").Observe(128)
 	m.HTTPResponseSize.WithLabelValues("GET", "/api/v1/templates").Observe(2048)
 	m.HTTPActiveRequests.Set(3)
+	m.DBQueriesTotal.WithLabelValues("select", "templates").Inc()
+	m.DBQueryDuration.WithLabelValues("select", "templates").Observe(0.01)
+	m.DBErrorsTotal.WithLabelValues("select", "other").Inc()
+	m.AuthAttemptsTotal.WithLabelValues("owner_token", "success").Inc()
+	m.CacheHitsTotal.WithLabelValues("items").Inc()
+	m.CacheMissesTotal.WithLabelValues("items").Inc()
+	m.CacheEvictionsTotal.WithLabelValues("items").Inc()
+	m.CacheSize.WithLabelValues("items").Set(3)
+	m.CacheBytes.WithLabelValues("items").Set(512)
+	m.SchedulerTasksTotal.WithLabelValues("cleanup", "success").Inc()
+	m.SchedulerTaskDuration.WithLabelValues("cleanup").Observe(1)
+	m.SchedulerTasksRunning.WithLabelValues("cleanup").Set(0)
+	m.SchedulerLastRun.WithLabelValues("cleanup").Set(1)
+	m.RateLimitRequestsTotal.WithLabelValues("per_ip", "allowed").Inc()
+	m.RateLimitBlockedTotal.WithLabelValues("per_ip").Inc()
+	m.TorRequestsTotal.Inc()
 
 	want := []string{
 		"gitignore_app_info",
@@ -35,6 +51,25 @@ func TestNewRegistersMandatedMetrics(t *testing.T) {
 		"gitignore_http_request_size_bytes",
 		"gitignore_http_response_size_bytes",
 		"gitignore_http_active_requests",
+		"gitignore_db_queries_total",
+		"gitignore_db_query_duration_seconds",
+		"gitignore_db_connections_open",
+		"gitignore_db_connections_in_use",
+		"gitignore_db_errors_total",
+		"gitignore_auth_attempts_total",
+		"gitignore_owner_tokens_active",
+		"gitignore_cache_hits_total",
+		"gitignore_cache_misses_total",
+		"gitignore_cache_evictions_total",
+		"gitignore_cache_size",
+		"gitignore_cache_bytes",
+		"gitignore_scheduler_tasks_total",
+		"gitignore_scheduler_task_duration_seconds",
+		"gitignore_scheduler_tasks_running",
+		"gitignore_scheduler_last_run_timestamp",
+		"gitignore_ratelimit_requests_total",
+		"gitignore_ratelimit_blocked_total",
+		"gitignore_tor_requests_total",
 		"gitignore_go_goroutines",
 		"gitignore_go_mem_alloc_bytes",
 		"gitignore_go_mem_sys_bytes",
@@ -53,6 +88,37 @@ func TestNewRegistersMandatedMetrics(t *testing.T) {
 	for _, name := range want {
 		if !present[name] {
 			t.Errorf("expected metric %q to be registered", name)
+		}
+	}
+}
+
+// TestSystemMetricsAreConditional ensures system metrics follow include_system.
+func TestSystemMetricsAreConditional(t *testing.T) {
+	withoutSystem := New(Options{})
+	families, err := withoutSystem.Registry().Gather()
+	if err != nil {
+		t.Fatalf("gather without system metrics: %v", err)
+	}
+	for _, family := range families {
+		if strings.HasPrefix(family.GetName(), "gitignore_system_") {
+			t.Errorf("system metric %q should be absent when disabled", family.GetName())
+		}
+	}
+
+	withSystem := New(Options{IncludeSystem: true, SystemFn: func() SystemSnapshot {
+		return SystemSnapshot{CPUPercent: 8, MemoryPercent: 20, MemoryUsedBytes: 200, MemoryTotalBytes: 1000, DiskPath: "/data", DiskPercent: 30, DiskUsedBytes: 300, DiskTotalBytes: 1000}
+	}})
+	families, err = withSystem.Registry().Gather()
+	if err != nil {
+		t.Fatalf("gather with system metrics: %v", err)
+	}
+	present := make(map[string]bool, len(families))
+	for _, family := range families {
+		present[family.GetName()] = true
+	}
+	for _, name := range []string{"gitignore_system_cpu_usage_percent", "gitignore_system_memory_usage_percent", "gitignore_system_memory_used_bytes", "gitignore_system_memory_total_bytes", "gitignore_system_disk_usage_percent", "gitignore_system_disk_used_bytes", "gitignore_system_disk_total_bytes"} {
+		if !present[name] {
+			t.Errorf("expected system metric %q", name)
 		}
 	}
 }

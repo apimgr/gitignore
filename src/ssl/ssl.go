@@ -131,10 +131,10 @@ func (m *Manager) GetHTTPHandler(fallback http.Handler) http.Handler {
 // findExistingCerts looks for existing certificates in the mandated priority
 // order (AI.md PART 15 "Certificate Lookup Order"):
 //
-//	1. /etc/letsencrypt/live/domain/     (literal shared directory)
-//	2. /etc/letsencrypt/live/{fqdn}/     (certbot per-FQDN directory)
-//	3. {cert_path}/letsencrypt/{fqdn}/   (app-managed Let's Encrypt certs)
-//	4. {cert_path}/local/{fqdn}/         (self-signed / user-provided certs)
+//  1. /etc/letsencrypt/live/domain/     (literal shared directory)
+//  2. /etc/letsencrypt/live/{fqdn}/     (certbot per-FQDN directory)
+//  3. {cert_path}/letsencrypt/{fqdn}/   (app-managed Let's Encrypt certs)
+//  4. {cert_path}/local/{fqdn}/         (self-signed / user-provided certs)
 func (m *Manager) findExistingCerts(domains []string) (certPath, keyPath string) {
 	// 1. Literal /etc/letsencrypt/live/domain/ shared setup.
 	if c, k := certPair("/etc/letsencrypt/live/domain", "fullchain.pem", "privkey.pem"); c != "" {
@@ -255,7 +255,7 @@ func writePEM(path, blockType string, der []byte, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return pem.Encode(f, &pem.Block{Type: blockType, Bytes: der})
 }
 
@@ -339,7 +339,7 @@ func (cs *ChallengeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) boo
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(auth))
+	_, _ = w.Write([]byte(auth))
 	return true
 }
 

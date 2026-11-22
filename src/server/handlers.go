@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -25,43 +27,55 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIInfo returns API information
 func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
-	base := apiBasePath()
+	base := s.apiBasePath()
 	sendAPIResponseOK(w, map[string]interface{}{
-		"name":      "GitIgnore API",
-		"version":   s.config.Version,
-		"commit":    s.config.Commit,
-		"buildDate": s.config.BuildDate,
+		"name":        "GitIgnore API",
+		"version":     s.config.Version,
+		"api_version": s.apiVersion(),
+		"api_base":    base,
+		"commit":      s.config.Commit,
+		"buildDate":   s.config.BuildDate,
 		"endpoints": map[string]string{
-			"health":       base + "/server/healthz",
-			"list":         base + "/list",
-			"search":       base + "/search?q={query}",
-			"template":     base + "/templates/{name}",
-			"combine":      base + "/combine?templates={name1,name2}",
-			"categories":   base + "/categories",
-			"stats":        base + "/stats",
-			"swagger":      base + "/server/swagger",
-			"graphql":      base + "/server/graphql",
-			"autodiscover": "/api/autodiscover",
+			"health":           base + "/server/healthz",
+			"list":             base + "/list",
+			"search":           base + "/search?q={query}",
+			"template":         base + "/templates/{name}",
+			"combine":          base + "/combine?templates={name1,name2}",
+			"categories":       base + "/categories",
+			"stats":            base + "/stats",
+			"swagger":          base + "/server/swagger",
+			"graphql":          base + "/server/graphql",
+			"mcp":              base + "/server/mcp",
+			"mcp_help":         base + "/server/help/mcp",
+			"about":            base + "/server/about",
+			"privacy":          base + "/server/privacy",
+			"help":             base + "/server/help",
+			"terms":            base + "/server/terms",
+			"preferences":      base + "/server/preferences",
+			"preferences_sync": base + "/server/preferences/sync",
+			"autodiscover":     "/api/autodiscover",
 		},
 	})
 }
 
 // handleAPIAutodiscover returns machine-readable server metadata for
 // zero-config client discovery (AI.md PART 14 "/api/autodiscover"). CLI
-// self-update version feeds are not implemented (see TODO.AI.md), so
-// "cli_versions" is intentionally omitted rather than faked.
+// self-update version feeds are unavailable, so "cli_versions" is omitted
+// rather than returning a fabricated value.
 func (s *Server) handleAPIAutodiscover(w http.ResponseWriter, r *http.Request) {
 	sendAPIResponseOK(w, map[string]interface{}{
-		"name":        "GitIgnore API",
-		"version":     s.config.Version,
-		"commit":      s.config.Commit,
-		"buildDate":   s.config.BuildDate,
-		"api_version": apiVersion,
-		"api_base":    apiBasePath(),
-		"swagger":     "/api/swagger",
-		"graphql":     "/graphql",
+		"name":          "GitIgnore API",
+		"version":       s.config.Version,
+		"commit":        s.config.Commit,
+		"buildDate":     s.config.BuildDate,
+		"api_version":   s.apiVersion(),
+		"api_base":      s.apiBasePath(),
+		"swagger":       "/api/swagger",
+		"graphql":       s.apiBasePath() + "/server/graphql",
 		"graphql_alias": "/api/graphql",
-		"healthz":     "/api/healthz",
+		"mcp":           s.apiBasePath() + "/server/mcp",
+		"mcp_aliases":   []string{"/api/mcp", "/mcp"},
+		"healthz":       "/api/healthz",
 	})
 }
 
@@ -114,7 +128,7 @@ func (s *Server) handleAPITemplatesJSON(w http.ResponseWriter, r *http.Request) 
 	templates := s.config.Templates.ListAll()
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "api")
-	json.NewEncoder(w).Encode(APIResponse{
+	_ = json.NewEncoder(w).Encode(APIResponse{
 		OK:   true,
 		Data: templates,
 		Meta: map[string]interface{}{"count": len(templates)},
@@ -129,9 +143,9 @@ func (s *Server) handleAPITemplatesTarGz(w http.ResponseWriter, r *http.Request)
 	setCacheHeaders(w, "api")
 
 	gz := gzip.NewWriter(w)
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	for _, tmpl := range s.config.Templates.ListAll() {
 		content := []byte(tmpl.Content)
@@ -152,16 +166,23 @@ func (s *Server) handleAPITemplatesTarGz(w http.ResponseWriter, r *http.Request)
 
 // handleSwaggerUI serves a Swagger UI page bound to the OpenAPI JSON endpoint.
 func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	setCacheHeaders(w, "html")
-	fmt.Fprintf(w, swaggerUIHTML, apiBasePath())
+	data := PageData{
+		Title:   i18n.Translate(i18n.LangFromContext(r.Context()), "nav.api_docs"),
+		PageCSS: []string{s.requestPath(r, "/static/vendor/swagger/swagger-ui.css")},
+		PageScripts: []string{
+			s.requestPath(r, "/static/vendor/swagger/swagger-ui-bundle.js"),
+			s.requestPath(r, "/static/vendor/swagger/swagger-init.js"),
+		},
+		Data: map[string]interface{}{"specURL": s.requestPath(r, s.apiBasePath()+"/server/swagger")},
+	}
+	s.renderPage(w, r, "swagger_ui", data)
 }
 
 // handleOpenAPIJSON returns the generated OpenAPI 3.0 specification as JSON.
 func (s *Server) handleOpenAPIJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "api")
-	json.NewEncoder(w).Encode(s.openAPISpec(r))
+	_ = json.NewEncoder(w).Encode(s.openAPISpec(r))
 }
 
 // handleStatic serves embedded static assets under /static/.
@@ -178,7 +199,7 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "image/x-icon")
 	_, _ = io.Copy(w, f)
 }
@@ -186,32 +207,54 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 // handleRobotsTxt serves robots.txt from config
 func (s *Server) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintln(w, "User-agent: *")
-	if s.config.Cfg != nil {
-		for _, path := range s.config.Cfg.WebRobots.Allow {
-			fmt.Fprintf(w, "Allow: %s\n", path)
+	_, _ = fmt.Fprintln(w, "User-agent: *")
+	if s.currentConfig() != nil {
+		for _, path := range s.currentConfig().WebRobots.Allow {
+			_, _ = fmt.Fprintf(w, "Allow: %s\n", path)
 		}
-		for _, path := range s.config.Cfg.WebRobots.Deny {
-			fmt.Fprintf(w, "Disallow: %s\n", path)
+		for _, path := range s.currentConfig().WebRobots.Deny {
+			_, _ = fmt.Fprintf(w, "Disallow: %s\n", path)
 		}
 	} else {
-		fmt.Fprintln(w, "Allow: /")
-		fmt.Fprintln(w, "Allow: /api")
-		fmt.Fprintln(w, "Disallow: /debug")
+		_, _ = fmt.Fprintln(w, "Allow: /")
+		_, _ = fmt.Fprintln(w, "Allow: /api")
+		_, _ = fmt.Fprintln(w, "Disallow: /debug")
 	}
 }
 
 // handleSecurityTxt serves security.txt
 func (s *Server) handleSecurityTxt(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
-	admin := "security@apimgr.us"
-	if s.config.Cfg != nil && s.config.Cfg.WebSecurity.Admin != "" {
-		admin = s.config.Cfg.WebSecurity.Admin
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	serverURL := s.publicServerURL(r)
+	reportURL := "https://github.com/apimgr/gitignore/security/advisories/new"
+	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.ReportURL) != "" {
+		reportURL = strings.TrimSpace(s.currentConfig().Web.Security.ReportURL)
 	}
-	fmt.Fprintf(w, "Contact: mailto:%s\n", admin)
-	fmt.Fprintln(w, "Expires: 2026-12-31T23:59:59.000Z")
-	fmt.Fprintln(w, "Preferred-Languages: en")
-	fmt.Fprintln(w, "Canonical: https://gitignore.apimgr.us/.well-known/security.txt")
+	_, _ = fmt.Fprintf(w, "Contact: %s\n", reportURL)
+	if id, err := securityID(time.Now()); err == nil {
+		_, _ = fmt.Fprintf(w, "Contact: %s\n", securityReportURL(serverURL, id))
+	}
+	email := s.securityContactEmail()
+	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.Contact) != "" {
+		email = strings.TrimSpace(s.currentConfig().Web.Security.Contact)
+	}
+	if email != "" {
+		_, _ = fmt.Fprintf(w, "Contact: mailto:%s\n", email)
+	}
+	_, _ = fmt.Fprintf(w, "Policy: %s/server/security\n", serverURL)
+	expires := time.Now().UTC().AddDate(1, 0, 0)
+	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.Expires) != "" {
+		if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(s.currentConfig().Web.Security.Expires)); err == nil {
+			expires = parsed.UTC()
+		}
+	}
+	_, _ = fmt.Fprintf(w, "Expires: %s\n", expires.Format(time.RFC3339))
+	if metadata, ok := s.visiblePGPMetadata(); ok {
+		_, _ = fmt.Fprintf(w, "Encryption: %s/.well-known/pgp-key.asc\n", serverURL)
+		_, _ = fmt.Fprintf(w, "# PGP-Fingerprint: %s\n", metadata.Fingerprint)
+	}
+	_, _ = fmt.Fprintln(w, "Preferred-Languages: en")
+	_, _ = fmt.Fprintf(w, "Canonical: %s/.well-known/security.txt\n", serverURL)
 }
 
 // handleManifest serves PWA manifest
@@ -235,7 +278,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
     }
   ]
 }`
-	fmt.Fprint(w, manifest)
+	_, _ = fmt.Fprint(w, manifest)
 }
 
 // handleServiceWorker serves the service worker
@@ -288,7 +331,7 @@ self.addEventListener('fetch', function(event) {
   );
 });
 `
-	fmt.Fprint(w, sw)
+	_, _ = fmt.Fprint(w, sw)
 }
 
 // handleAPITemplateText returns a template's content as plain text
@@ -304,7 +347,7 @@ func (s *Server) handleAPITemplateText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprint(w, tmpl.Content)
+	_, _ = fmt.Fprint(w, tmpl.Content)
 }
 
 // handleAPIListText returns list of all templates as text
@@ -312,7 +355,7 @@ func (s *Server) handleAPIListText(w http.ResponseWriter, r *http.Request) {
 	templates := s.config.Templates.List()
 	w.Header().Set("Content-Type", "text/plain")
 	for _, name := range templates {
-		fmt.Fprintln(w, name)
+		_, _ = fmt.Fprintln(w, name)
 	}
 }
 
@@ -326,7 +369,7 @@ func (s *Server) handleAPISearchText(w http.ResponseWriter, r *http.Request) {
 	results := s.config.Templates.Search(query)
 	w.Header().Set("Content-Type", "text/plain")
 	for _, tmpl := range results {
-		fmt.Fprintln(w, tmpl.Name)
+		_, _ = fmt.Fprintln(w, tmpl.Name)
 	}
 }
 
@@ -340,7 +383,7 @@ func (s *Server) handleAPICategoriesText(w http.ResponseWriter, r *http.Request)
 	categories := s.config.Templates.GetCategories()
 	w.Header().Set("Content-Type", "text/plain")
 	for _, cat := range categories {
-		fmt.Fprintln(w, cat)
+		_, _ = fmt.Fprintln(w, cat)
 	}
 }
 
@@ -350,7 +393,7 @@ func (s *Server) handleAPICategoryTemplatesText(w http.ResponseWriter, r *http.R
 	templates := s.config.Templates.GetByCategory(category)
 	w.Header().Set("Content-Type", "text/plain")
 	for _, tmpl := range templates {
-		fmt.Fprintln(w, tmpl.Name)
+		_, _ = fmt.Fprintln(w, tmpl.Name)
 	}
 }
 
@@ -358,7 +401,7 @@ func (s *Server) handleAPICategoryTemplatesText(w http.ResponseWriter, r *http.R
 func (s *Server) handleAPIStatsText(w http.ResponseWriter, r *http.Request) {
 	stats := s.config.Templates.Stats()
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "Total Templates: %d\n", stats["total_templates"])
-	fmt.Fprintf(w, "Categories: %d\n", stats["categories"])
-	fmt.Fprintf(w, "Total Size: %d bytes\n", stats["total_size_bytes"])
+	_, _ = fmt.Fprintf(w, "Total Templates: %d\n", stats["total_templates"])
+	_, _ = fmt.Fprintf(w, "Categories: %d\n", stats["categories"])
+	_, _ = fmt.Fprintf(w, "Total Size: %d bytes\n", stats["total_size_bytes"])
 }

@@ -2,28 +2,27 @@ package graphql
 
 import (
 	"context"
-	"embed"
 
 	graphqlgo "github.com/graph-gophers/graphql-go"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/template"
 )
-
-//go:embed schema.graphql
-var schemaSource embed.FS
 
 // Schema wraps the executable query schema and its documentation source.
 type Schema struct {
 	executable *graphqlgo.Schema
 }
 
-// New loads the validated schema with read-only resolvers for the template manager.
+// New loads the English schema with read-only resolvers for the template manager.
 func New(templates *template.Manager) (*Schema, error) {
-	source, err := schemaSource.ReadFile("schema.graphql")
-	if err != nil {
-		return nil, err
-	}
-	executable, err := graphqlgo.ParseSchema(string(source), &queryResolver{templates: templates}, graphqlgo.MaxDepth(12))
+	return NewForLanguage(templates, i18n.DefaultLang)
+}
+
+// NewForLanguage loads the translated, generated read-only schema.
+func NewForLanguage(templates *template.Manager, lang string) (*Schema, error) {
+	source := generatedSchema(lang)
+	executable, err := graphqlgo.ParseSchema(source, &queryResolver{templates: templates}, graphqlgo.MaxDepth(12))
 	if err != nil {
 		return nil, err
 	}
@@ -32,11 +31,12 @@ func New(templates *template.Manager) (*Schema, error) {
 
 // SDL returns the schema used to construct the executable GraphQL API.
 func SDL() (string, error) {
-	source, err := schemaSource.ReadFile("schema.graphql")
-	if err != nil {
-		return "", err
-	}
-	return string(source), nil
+	return SDLForLanguage(i18n.DefaultLang)
+}
+
+// SDLForLanguage returns the generated schema with descriptions in lang.
+func SDLForLanguage(lang string) (string, error) {
+	return generatedSchema(lang), nil
 }
 
 // Execute parses, validates, and executes a GraphQL query against the schema.
@@ -95,12 +95,12 @@ func (r *queryResolver) Stats() *statsResolver {
 	}
 }
 
-func (r *templateResolver) Name() string        { return r.template.Name }
-func (r *templateResolver) FileName() string    { return r.template.FileName }
-func (r *templateResolver) Category() string    { return r.template.Category }
-func (r *templateResolver) Content() *string    { return &r.template.Content }
+func (r *templateResolver) Name() string         { return r.template.Name }
+func (r *templateResolver) FileName() string     { return r.template.FileName }
+func (r *templateResolver) Category() string     { return r.template.Category }
+func (r *templateResolver) Content() *string     { return &r.template.Content }
 func (r *templateResolver) Description() *string { return &r.template.Description }
-func (r *templateResolver) Size() int32         { return int32(r.template.Size) }
+func (r *templateResolver) Size() int32          { return int32(r.template.Size) }
 func (r *templateResolver) Tags() []string {
 	if len(r.template.Tags) == 0 {
 		return []string{}

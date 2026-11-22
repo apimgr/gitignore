@@ -2,6 +2,6 @@
 <h1>All Templates</h1>
 <p>{{len .Data.templates}} templates.</p>
 <ul class="templates">
-{{range .Data.templates}}<li><a href="/template/{{.}}">{{.}}</a></li>{{end}}
+{{range .Data.templates}}<li><a href="{{path (printf "/template/%s" .)}}">{{.}}</a></li>{{end}}
 </ul>
 {{end}}

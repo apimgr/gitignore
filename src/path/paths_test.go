@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,27 @@ func TestNewPathManagerDefaults(t *testing.T) {
 	}
 	if pm.GetLogsDir() == "" {
 		t.Error("GetLogsDir() empty by default")
+	}
+}
+
+func TestTempDirUsesValidatedProjectScope(t *testing.T) {
+	t.Setenv("PROJECT_ORG", "codex-org")
+	t.Setenv("INTERNAL_NAME", "codex-project")
+	dir, err := TempDir()
+	if err != nil {
+		t.Fatalf("TempDir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	wantParent := filepath.Join(os.TempDir(), "codex-org")
+	if filepath.Dir(dir) != wantParent || !strings.HasPrefix(filepath.Base(dir), "codex-project-") {
+		t.Fatalf("TempDir() = %q, not scoped under %q", dir, wantParent)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("TempDir permissions = %04o, want 0700", info.Mode().Perm())
 	}
 }
 
@@ -221,7 +243,9 @@ func TestXdgConfigHome(t *testing.T) {
 	})
 
 	t.Run("falls back to home/.config", func(t *testing.T) {
-		os.Unsetenv("XDG_CONFIG_HOME")
+		if err := os.Unsetenv("XDG_CONFIG_HOME"); err != nil {
+			t.Fatalf("Unsetenv(XDG_CONFIG_HOME): %v", err)
+		}
 		want := filepath.Join("/home/user", ".config")
 		if got := xdgConfigHome("/home/user"); got != want {
 			t.Errorf("xdgConfigHome() = %q, want %q", got, want)
@@ -238,7 +262,9 @@ func TestXdgDataHome(t *testing.T) {
 	})
 
 	t.Run("falls back to home/.local/share", func(t *testing.T) {
-		os.Unsetenv("XDG_DATA_HOME")
+		if err := os.Unsetenv("XDG_DATA_HOME"); err != nil {
+			t.Fatalf("Unsetenv(XDG_DATA_HOME): %v", err)
+		}
 		want := filepath.Join("/home/user", ".local", "share")
 		if got := xdgDataHome("/home/user"); got != want {
 			t.Errorf("xdgDataHome() = %q, want %q", got, want)

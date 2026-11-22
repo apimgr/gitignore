@@ -1,10 +1,167 @@
 {{define "content"}}
-<h1>Contact</h1>
-<p>GitIgnore is an open-source project. The best way to reach the maintainers is through the project repository.</p>
+<div class="container container-sm">
+<header class="page-header"><h1 class="page-title">{{if eq .Data.type "abuse"}}Report abuse{{else if eq .Data.type "dmca"}}Send a DMCA notice{{else if eq .Data.type "privacy"}}Make a privacy request{{else if eq .Data.type "security"}}Report a security vulnerability{{else}}Contact{{end}}</h1><p class="page-lead">This form is only for reports and privacy requests.</p></header>
+<section class="section-card" aria-labelledby="contact-information">
+<h2 id="contact-information">Contact information</h2>
+<p>This form is only for security reports, terms violations at a URL on this site, DMCA notices, and privacy requests. It cannot be used for support, bug reports, feature requests, or general questions.</p>
+{{if .Data.error}}<p class="alert alert-danger" role="alert">{{.Data.error}}</p>{{end}}
+{{if .Data.success}}<p class="alert alert-success" role="status">{{.Data.success}}</p>{{end}}
+</section>
+{{if .Data.showChooser}}
+<section class="section-card" aria-labelledby="report-types">
+<h2 id="report-types">Report types</h2>
+<nav aria-label="Report type">
 <ul>
-<li><strong>Issues &amp; bug reports:</strong> <a href="https://github.com/apimgr/gitignore/issues" rel="noopener noreferrer">github.com/apimgr/gitignore/issues</a></li>
-<li><strong>Source code:</strong> <a href="https://github.com/apimgr/gitignore" rel="noopener noreferrer">github.com/apimgr/gitignore</a></li>
-<li><strong>Security reports:</strong> see <a href="/.well-known/security.txt">security.txt</a></li>
+<li><a href="{{path "/server/contact?type=abuse"}}">Report abuse</a></li>
+<li><a href="{{path "/server/contact?type=dmca"}}">Send a DMCA notice</a></li>
+<li><a href="{{path "/server/contact?type=privacy"}}">Make a privacy request</a></li>
+{{if .Data.securityMode}}<li><a href="{{path "/server/contact"}}?type=security&amp;security_id={{.Data.securityID}}">Report a security vulnerability</a></li>{{end}}
 </ul>
-<p>This site does not offer accounts or a support inbox — please use the repository for questions and requests.</p>
+</nav>
+<p>To report a security vulnerability, see <a href="{{path "/server/security"}}">the security policy</a>.</p>
+</section>
+{{else if .Data.review}}
+<section class="section-card contact-review" aria-labelledby="review-title">
+<h2 id="review-title">Review your report</h2>
+<p>Type: {{.Data.type}}</p>
+<p class="contact-review-email">{{.Data.email}}</p>
+<p>Subject: {{.Data.subject}}</p>
+<form action="{{path "/server/contact"}}" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="type" value="{{.Data.type}}">
+<input type="hidden" name="security_id" value="{{.Data.securityID}}">
+<input type="hidden" name="name" value="{{.Data.name}}">
+<input type="hidden" name="email" value="{{.Data.email}}">
+<input type="hidden" name="subject" value="{{.Data.subject}}">
+<input type="hidden" name="message" value="{{.Data.message}}">
+<input type="hidden" name="reported_url" value="{{.Data.reported_url}}">
+<input type="hidden" name="reason" value="{{.Data.reason}}">
+<input type="hidden" name="copyrighted_work" value="{{.Data.copyrighted_work}}">
+<input type="hidden" name="good_faith" value="{{.Data.good_faith}}">
+<input type="hidden" name="accuracy" value="{{.Data.accuracy}}">
+<input type="hidden" name="signature" value="{{.Data.signature}}">
+<input type="hidden" name="request_kind" value="{{.Data.request_kind}}">
+<input type="hidden" name="summary" value="{{.Data.summary}}">
+<input type="hidden" name="component" value="{{.Data.component}}">
+<input type="hidden" name="endpoint" value="{{.Data.endpoint}}">
+<input type="hidden" name="severity" value="{{.Data.severity}}">
+<input type="hidden" name="reproduction" value="{{.Data.reproduction}}">
+<input type="hidden" name="impact" value="{{.Data.impact}}">
+<input type="hidden" name="suggested_fix" value="{{.Data.suggested_fix}}">
+<input type="hidden" name="researcher_gpg" value="{{.Data.researcher_gpg}}">
+<input type="hidden" name="cve_requested" value="{{.Data.cve_requested}}">
+<input type="hidden" name="disclosure_days" value="{{.Data.disclosure_days}}">
+<input type="hidden" name="credit_preference" value="{{.Data.credit_preference}}">
+<input type="hidden" name="credit_handle" value="{{.Data.credit_handle}}">
+<input type="hidden" name="coordinated_disclosure" value="{{.Data.coordinated_disclosure}}">
+<input type="hidden" name="step" value="confirm">
+<input type="hidden" name="review_token" value="{{.Data.reviewToken}}">
+<label><input name="confirmed" type="checkbox" value="yes" required> This email address is correct, and this is a genuine report, not an advertisement, a solicitation, or spam.</label>
+<button type="submit">Confirm</button>
+</form>
+<form action="{{path "/server/contact"}}" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="type" value="{{.Data.type}}">
+<input type="hidden" name="security_id" value="{{.Data.securityID}}">
+<input type="hidden" name="name" value="{{.Data.name}}">
+<input type="hidden" name="email" value="{{.Data.email}}">
+<input type="hidden" name="subject" value="{{.Data.subject}}">
+<input type="hidden" name="message" value="{{.Data.message}}">
+<input type="hidden" name="reported_url" value="{{.Data.reported_url}}">
+<input type="hidden" name="reason" value="{{.Data.reason}}">
+<input type="hidden" name="copyrighted_work" value="{{.Data.copyrighted_work}}">
+<input type="hidden" name="good_faith" value="{{.Data.good_faith}}">
+<input type="hidden" name="accuracy" value="{{.Data.accuracy}}">
+<input type="hidden" name="signature" value="{{.Data.signature}}">
+<input type="hidden" name="request_kind" value="{{.Data.request_kind}}">
+<input type="hidden" name="summary" value="{{.Data.summary}}">
+<input type="hidden" name="component" value="{{.Data.component}}">
+<input type="hidden" name="endpoint" value="{{.Data.endpoint}}">
+<input type="hidden" name="severity" value="{{.Data.severity}}">
+<input type="hidden" name="reproduction" value="{{.Data.reproduction}}">
+<input type="hidden" name="impact" value="{{.Data.impact}}">
+<input type="hidden" name="suggested_fix" value="{{.Data.suggested_fix}}">
+<input type="hidden" name="researcher_gpg" value="{{.Data.researcher_gpg}}">
+<input type="hidden" name="cve_requested" value="{{.Data.cve_requested}}">
+<input type="hidden" name="disclosure_days" value="{{.Data.disclosure_days}}">
+<input type="hidden" name="credit_preference" value="{{.Data.credit_preference}}">
+<input type="hidden" name="credit_handle" value="{{.Data.credit_handle}}">
+<input type="hidden" name="coordinated_disclosure" value="{{.Data.coordinated_disclosure}}">
+<input type="hidden" name="step" value="edit">
+<button type="submit">Edit</button>
+</form>
+</section>
+{{else}}
+<section class="section-card" aria-labelledby="contact-form-title">
+<h2 id="contact-form-title">Report details</h2>
+<form action="{{path "/server/contact"}}" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="type" value="{{.Data.type}}">
+{{if .Data.securityMode}}<input type="hidden" name="security_id" value="{{.Data.securityID}}">{{end}}
+<input type="hidden" name="form_token" value="{{.Data.formToken}}">
+<input type="hidden" name="step" value="submit">
+<div class="contact-honeypot" aria-hidden="true"><label for="contact-website">Leave this field empty</label><input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off" maxlength="200"></div>
+<label for="contact-name">Name (required)</label>
+<input id="contact-name" name="name" type="text" maxlength="100" value="{{.Data.name}}" autocomplete="name" required>
+<label for="contact-email">Email (required)</label>
+<input id="contact-email" name="email" type="email" maxlength="254" value="{{.Data.email}}" autocomplete="email" required>
+{{if eq .Data.type "abuse"}}
+<label for="reported-url">Reported URL (required)</label>
+<input id="reported-url" name="reported_url" type="url" maxlength="2048" value="{{.Data.reported_url}}" required>
+<label for="report-reason">Reason (required)</label>
+<select id="report-reason" name="reason" required><option value="">Choose a reason</option><option value="illegal_content">Illegal content</option><option value="terms_violation">Terms violation</option><option value="harassment">Harassment</option><option value="malware_phishing">Malware or phishing</option><option value="other">Other</option></select>
+{{else if eq .Data.type "dmca"}}
+<label for="reported-url">Reported URL (required)</label><input id="reported-url" name="reported_url" type="url" maxlength="2048" value="{{.Data.reported_url}}" required>
+<label for="copyrighted-work">Copyrighted work (required)</label><textarea id="copyrighted-work" name="copyrighted_work" maxlength="2000" required>{{.Data.copyrighted_work}}</textarea>
+<label><input name="good_faith" type="checkbox" value="yes" required> I have a good-faith belief that this use is not authorized by the copyright owner, its agent, or the law.</label>
+<label><input name="accuracy" type="checkbox" value="yes" required> The information is accurate and, under penalty of perjury, I am the owner or authorized to act for the owner.</label>
+<label for="signature">Signature (required)</label><input id="signature" name="signature" type="text" maxlength="100" required>
+{{else if eq .Data.type "privacy"}}
+<label for="request-kind">Request kind (required)</label>
+<select id="request-kind" name="request_kind" required><option value="">Choose a request</option><option value="access">Access</option><option value="export">Export</option><option value="deletion">Deletion</option><option value="correction">Correction</option><option value="opt_out">Opt out</option><option value="other">Other</option></select>
+{{else if eq .Data.type "security"}}
+<h2>Security report details</h2>
+<label for="security-component">Affected component (required)</label><input id="security-component" name="component" type="text" maxlength="255" required>
+<label for="security-endpoint">Affected endpoint or URL (optional)</label><input id="security-endpoint" name="endpoint" type="text" maxlength="2048">
+<label for="security-severity">Severity (required)</label><select id="security-severity" name="severity" required><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="informational">Informational</option></select>
+<label for="security-summary">Vulnerability summary (required)</label><input id="security-summary" name="summary" type="text" maxlength="200" required>
+<label for="security-reproduction">Steps to reproduce (required)</label><textarea id="security-reproduction" name="reproduction" maxlength="10000" required></textarea>
+<label for="security-impact">Impact (required)</label><textarea id="security-impact" name="impact" maxlength="5000" required></textarea>
+<label for="security-fix">Suggested fix (optional)</label><textarea id="security-fix" name="suggested_fix" maxlength="5000"></textarea>
+<label for="security-pubkey">Researcher GPG key or HTTPS URL (optional)</label><textarea id="security-pubkey" name="researcher_gpg" maxlength="16384"></textarea>
+<label><input name="cve_requested" type="checkbox" value="yes"> Request CVE assignment (optional)</label>
+<label for="security-timeline">Preferred disclosure timeline in days (optional)</label><input id="security-timeline" name="disclosure_days" type="number" min="1" max="365" value="90">
+<label for="security-credit">Credit preference (required)</label><select id="security-credit" name="credit_preference" required><option value="real_name">Yes, use my real name</option><option value="handle">Yes, use my handle</option><option value="no">No credit</option><option value="anonymous">Anonymous</option></select>
+<label for="security-credit-name">Credit handle (required when handle is selected)</label><input id="security-credit-name" name="credit_handle" type="text" maxlength="100">
+<label><input name="coordinated_disclosure" type="checkbox" value="yes" required> I agree to coordinated disclosure while a fix is prepared, up to 90 days.</label>
+{{end}}
+{{if ne .Data.type "security"}}
+<label for="contact-subject">Subject (required)</label><input id="contact-subject" name="subject" type="text" maxlength="200" value="{{.Data.subject}}" required>
+<label for="contact-message">Message (required)</label><textarea id="contact-message" name="message" maxlength="5000" required>{{.Data.message}}</textarea>
+{{end}}
+{{if eq .Data.captchaProvider "simple"}}
+<label for="contact-captcha">{{.Data.challengeQuestion}} (required)</label><input id="contact-captcha" name="captcha_answer" type="text" inputmode="numeric" autocomplete="off" required>
+<input type="hidden" name="captcha_id" value="{{.Data.challengeID}}">
+{{else if eq .Data.captchaProvider "recaptcha"}}
+<div class="g-recaptcha" data-sitekey="{{.Data.captchaSiteKey}}"></div>
+<noscript><label for="contact-captcha">{{.Data.challengeQuestion}} (required)</label><input id="contact-captcha" name="captcha_answer" type="text"><input type="hidden" name="captcha_id" value="{{.Data.challengeID}}"></noscript>
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
+{{else if eq .Data.captchaProvider "hcaptcha"}}
+<div class="h-captcha" data-sitekey="{{.Data.captchaSiteKey}}"></div>
+<noscript><label for="contact-captcha">{{.Data.challengeQuestion}} (required)</label><input id="contact-captcha" name="captcha_answer" type="text"><input type="hidden" name="captcha_id" value="{{.Data.challengeID}}"></noscript>
+<script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+{{end}}
+<button type="submit">Review report</button>
+</form>
+</section>
+{{end}}
+{{if not .Data.review}}
+<section class="section-card" aria-labelledby="security-issues">
+<h2 id="security-issues">Security issues</h2><p>To report a security vulnerability, consult our <a href="{{path "/server/security"}}">security policy</a>.</p>
+</section>
+<section class="section-card" aria-labelledby="abuse-reports">
+<h2 id="abuse-reports">Abuse reports</h2><p>To report abusive content or a terms violation, choose the type Abuse above. To send a DMCA notice, choose the type DMCA.{{if .Data.abuseEmail}} Or email <a href="mailto:{{.Data.abuseEmail}}">{{.Data.abuseEmail}}</a>.{{end}}</p>
+</section>
+{{end}}
+</div>
 {{end}}

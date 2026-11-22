@@ -22,6 +22,8 @@ var mainMenuItems = []menuItem{
 	{id: "list", title: "List templates", desc: "Browse every available template"},
 	{id: "search", title: "Search templates", desc: "Search by name, tag, or keyword"},
 	{id: "categories", title: "Browse categories", desc: "List templates grouped by category"},
+	{id: "category", title: "Templates in a category", desc: "Choose a category and browse its templates"},
+	{id: "get", title: "Get a template", desc: "Choose and view one template"},
 	{id: "combine", title: "Combine templates", desc: "Pick multiple templates and merge them"},
 	{id: "stats", title: "Server stats", desc: "Show server-reported template statistics"},
 	{id: "settings", title: "Settings", desc: "Change the configured server URL"},

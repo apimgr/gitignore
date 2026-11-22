@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -25,6 +26,9 @@ type SchedulerState struct {
 func LoadSchedulerStates() ([]SchedulerState, error) {
 	mu.RLock()
 	defer mu.RUnlock()
+	if conn == nil {
+		return nil, sql.ErrConnDone
+	}
 
 	ctx, cancel := readCtx()
 	defer cancel()
@@ -36,7 +40,7 @@ FROM server_scheduler_state`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var states []SchedulerState
 	for rows.Next() {
@@ -155,6 +159,9 @@ func CleanupExpiredTokens() (int64, error) {
 func Ping() error {
 	mu.RLock()
 	defer mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("database is not initialized")
+	}
 
 	ctx, cancel := readCtx()
 	defer cancel()
@@ -168,9 +175,9 @@ type scanner interface {
 
 func scanSchedulerState(s scanner) (SchedulerState, error) {
 	var (
-		st                SchedulerState
-		lastRun, nextRun  sql.NullString
-		enabled           int
+		st               SchedulerState
+		lastRun, nextRun sql.NullString
+		enabled          int
 	)
 	if err := s.Scan(&st.TaskID, &st.TaskName, &st.Schedule, &lastRun,
 		&st.LastStatus, &st.LastError, &nextRun, &st.RunCount, &st.FailCount,

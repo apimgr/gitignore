@@ -94,7 +94,7 @@ func CmdStats(c *api.Client, p *output.Printer, format string) int {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Printf("%s: %s\n", k, api.StatsCount(stats[k]))
+		fmt.Printf("%s: %s\n", k, api.StatsCount(stats[k], c.Lang))
 	}
 	return output.ExitSuccess
 }

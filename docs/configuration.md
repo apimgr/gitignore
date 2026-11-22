@@ -92,6 +92,27 @@ Abuse, DMCA, and privacy reports use the public contact form. Security reports a
 
 Directory variables are initialization inputs and must be set before startup.
 
+### I2P eepsite
+
+I2P is enabled by the computed default in containers and disabled by default on bare metal and in VMs. Explicit precedence is `--i2p` / `--i2p=false`, `I2P_ENABLED`, `server.i2p.enabled` in `yaml.d/i2p.yml`, then the computed default. The image does not set `I2P_ENABLED`.
+
+```yaml
+server:
+  i2p:
+    enabled: false
+    binary: ""
+    sam_address: "127.0.0.1:7656"
+    virtual_port: 80
+    inbound_length: 3
+    outbound_length: 3
+    inbound_quantity: 5
+    outbound_quantity: 5
+    signature_type: 7
+    bootstrap_timeout: 300
+```
+
+When enabled, the app prefers a managed dedicated `i2pd` process and falls back to an existing SAMv3 bridge. It creates a separate loopback backend and persists the destination key under `{data_dir}/i2p/site/`; the `.b32.i2p` address remains stable across restarts. No provider means the eepsite is skipped without preventing the main server from starting. `/server/healthz` reports its enabled state, provider, status, and public address.
+
 ## API version and base URL
 
 `server.api_version` sets the canonical API version segment (`v1` by default). `server.baseurl` or `--baseurl` places the service below a URL prefix, such as `/gitignore`. The root prefix is `/`. Discovery at `/api/autodiscover` reports the effective version and base path.

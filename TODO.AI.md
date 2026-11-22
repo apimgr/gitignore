@@ -1,8 +1,7 @@
 # Implementation Alignment Tasks
 
-- [ ] Finish server contact and security reporting conformance with AI.md PARTS 11, 12, 14, and 16: PGP key management/report encryption remains absent, so the current maintainer notification cannot decrypt its AES ciphertext; finish the remaining report lifecycle, notification, and validation requirements, then verify.
-- [ ] Complete server page and API conformance, including shared routing, content negotiation, security headers, translations, and accessibility.
-- [ ] Align configuration, database, logging, metrics, GeoIP, scheduler, backup, update, service, Tor/I2P, and operational behavior with their applicable AI.md PARTS; I2P runtime/config/health/status integration is currently absent.
-- [ ] Replace the client GUI stub with the required pure-Go gogpu/ui implementation; implement GUI auto-detection, configuration override, and parity with the TUI workflows.
-- [ ] Align build, Docker, CI/CD, tests, ReadTheDocs, and supported platform outputs with AI.md PARTS 25–30.
-- [ ] Synchronize README, all docs pages, server-rendered page content, OpenAPI/GraphQL output, and translations with the implemented behavior.
+- [ ] Implement the AI.md configuration file watcher for `server.yml`, `yaml.d/`, `secrets.yml`, and assets; apply hot-reloadable settings and report restart-required changes through health output.
+- [ ] Align configuration loading, generated defaults, area-file assignments, and legacy-key migration with the canonical `server.logs` and `server.scheduler` paths in AI.md.
+- [ ] Complete AI.md page-shell and page-conformance requirements across every `/server/*` page, including shared registry use, accessibility, translated content, and no-JavaScript form behavior.
+- [ ] Synchronize README and every ReadTheDocs page with the implemented routes, configuration, security behavior, integrations, and operational requirements in AI.md.
+- [ ] Complete the remaining AI.md build and CI/CD alignment, run all required local gates, commit through `gitcommit`, and verify the provider CI run.

@@ -35,10 +35,11 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/help` | GET | Help content and registered help-page links |
 | `/api/{api_version}/server/help/mcp` | GET | MCP help and endpoint metadata |
 | `/api/{api_version}/server/dpo` | GET | Data protection officer contact |
-| `/api/{api_version}/server/auth/check` | GET | Machine-only bearer-token check; never returns the token |
 | `/api/{api_version}/server/preferences` | GET / POST | Read and update public browser preferences |
 | `/api/{api_version}/server/preferences/tokens` | GET / POST | List and create linked owner tokens; requires the owner's Bearer token |
 | `/api/{api_version}/server/preferences/tokens/primary` | POST | Issue a primary owner token on request; does not create a resource |
+| `/api/{api_version}/server/preferences/tokens/primary/reveal` | POST | Reveal the primary token; requires the primary Bearer token |
+| `/api/{api_version}/server/preferences/tokens/primary/rotate` | POST | Rotate the primary token |
 | `/api/{api_version}/server/preferences/tokens/{id}` | PATCH / DELETE | Update or revoke one linked token |
 | `/api/{api_version}/server/preferences/sync` | GET | Export preferences for cross-device sync |
 | `/api/{api_version}/server/preferences/sync/import` | GET | Import synchronized preferences |
@@ -77,13 +78,13 @@ The unversioned compatibility routes reproduce the gitignore.io API paths alongs
 | `/api/list?format=json` | GET | Compatible JSON catalog keyed by lowercase template key |
 | `/api/{name1,name2,...}` | GET | Plain-text template blocks in request order |
 
-Template names are matched case-insensitively. Unknown names produce the compatibility error block; the response is `404` when the first name is unknown, while resolved names in the same request still render. See [IDEA.md](../IDEA.md) for the byte-level compatibility contract and the intentionally unsupported gitignore.io web UI and integrations.
+Template names are matched case-insensitively. Unknown names produce the compatibility error block; the response is `404` when the first name is unknown, while resolved names in the same request still render. See the [IDEA.md file in the source repository](https://github.com/apimgr/gitignore/blob/main/IDEA.md) for the byte-level compatibility contract and the intentionally unsupported gitignore.io web UI and integrations.
 
 ## GraphQL
 
 The read-only GraphQL endpoint accepts JSON POST requests at `/api/graphql` and `/api/{api_version}/server/graphql`. The browser playground is `/server/docs/graphql`. Common query fields include `template(name)`, `list`, `search(q)`, `categories`, `category(name)`, `combine(templates)`, and `stats`.
 
-MCP uses Streamable HTTP JSON-RPC at `/api/{api_version}/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`. Every request requires `Authorization: Bearer <token>`; missing or invalid credentials receive `401`. It uses the REST API's token validation and per-operation authorization. `tools/list` includes only operations allowed to the caller. Token-management and token-issuance operations are never tools. Use a separate linked token for each MCP client; create and manage linked tokens at `/server/preferences/tokens`. The endpoint is stateless, accepts POST only, and targets protocol revision `2026-07-28`. See [the MCP help page](/server/help/mcp) for connection details.
+MCP uses stateless Streamable HTTP JSON-RPC at `/api/{api_version}/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`. Every request requires `Authorization: Bearer <token>`; missing or invalid credentials receive `401`. Requests use protocol revision `2026-07-28` and include matching `MCP-Protocol-Version` and `Mcp-Method` headers; calls to named tools, resources, or prompts also include `Mcp-Name`. The endpoint validates `Origin` before credentials and protocol headers. It uses the REST API's token validation and per-operation authorization. `tools/list` includes only operations allowed to the caller. Token-management and token-issuance operations are never tools. Use a separate linked token for each MCP client; create and manage linked tokens at `/server/preferences/tokens`. The endpoint accepts POST only. See the in-app `/server/help/mcp` page for connection details.
 
 Guest preferences are cookie-only. `GET /api/{api_version}/server/preferences` reads the current values, `POST` applies a partial update, and the sync endpoints export or import a canonical URL-safe preference set. The web UI is at `/server/preferences` and `/server/preferences/sync`; consent, CCPA, and credentials are never included in sync data.
 

@@ -22,12 +22,13 @@ curl http://172.17.0.1:64180/api/v1/templates/go.txt
 
 - Search, browse, inspect, and combine templates in the browser.
 - Retrieve and export the catalog over REST, or query it through GraphQL.
+- Connect AI clients through the stateless MCP endpoint with a valid Bearer token.
 - Use unversioned gitignore.io-compatible routes.
 - Run the companion client in a shell pipeline or download generated shell helpers and completions.
-- Visit the public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages. Submit contact messages and vulnerability reports through the protected form.
+- Visit the public About, Help, Privacy, Contact, Terms, Security, health, and API documentation pages. General reports use the contact form; coordinated-disclosure reports use the rotating security link published by the instance.
 - Use eight bundled locales: English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese.
 
-The template catalog is read-only and public. The application has no user registration, admin web panel, or user-submitted templates. Anonymous owner identities use Bearer tokens for protected operations and MCP; catalog REST reads remain public. The contact form accepts abuse, DMCA, privacy, and security reports; delivery and encrypted storage require the corresponding server configuration.
+The template catalog is read-only and public. The application has no user registration, admin web panel, or user-submitted templates. Anonymous owner identities use Bearer tokens for protected operations and MCP; catalog REST reads remain public. The contact form accepts abuse, DMCA, privacy, and security reports. Delivery requires configured SMTP, and security-report storage requires the configured encryption key or project PGP key.
 
 ## Documentation
 
@@ -52,4 +53,4 @@ The main interface includes `/`, `/search`, `/template/{name}`, `/combine`, `/ca
 
 ## License
 
-The application source is MIT licensed; see [LICENSE.md](../LICENSE.md). Embedded template data can carry additional attributions and terms listed there.
+The application source is MIT licensed; see the [LICENSE.md file in the source repository](https://github.com/apimgr/gitignore/blob/main/LICENSE.md). Embedded template data can carry additional attributions and terms listed there.

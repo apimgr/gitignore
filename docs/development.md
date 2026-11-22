@@ -5,7 +5,7 @@
 - Git and Make
 - Docker with access to the `casjaysdev/go:latest` image
 
-The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go build or test commands directly on the host; see the repository's [AI.md](../AI.md) for the complete development rules.
+The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go build or test commands directly on the host; see the repository's [AI.md file](https://github.com/apimgr/gitignore/blob/main/AI.md) for the complete development rules.
 
 ## Layout
 
@@ -57,4 +57,4 @@ Update the relevant pages in `docs/` when browser routes, API behavior, configur
 4. Update the affected documentation pages.
 5. Submit a pull request with a concise description of behavior and verification.
 
-Follow standard Go formatting and place comments above the code they describe. See [AI.md](../AI.md) for the repository's full coding requirements.
+Follow standard Go formatting and place comments above the code they describe. See the repository's [AI.md file](https://github.com/apimgr/gitignore/blob/main/AI.md) for the full coding requirements.

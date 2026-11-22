@@ -39,6 +39,20 @@ gitignore --maintenance security update sec_0123456789abcdef --status triaged --
 
 The security command never prints report bodies. `update` accepts `--status`, `--comment`, `--disclosure-date YYYY-MM-DD`, and `--severity`; statuses may only move forward or to `wont_fix`. `--shell completions [SHELL]` and `--shell init [SHELL]` print shell integration text. Supported shells include Bash, Zsh, Fish, POSIX shells, and PowerShell.
 
+Manage the project OpenPGP keypair with the operator token or as root. Private-key import, export, rotation, and deletion require the confirmation prompts described by the command:
+
+```sh
+gitignore --maintenance pgp generate
+gitignore --maintenance pgp rotate
+gitignore --maintenance pgp publish
+gitignore --maintenance pgp export public [PATH]
+gitignore --maintenance pgp export private PATH
+gitignore --maintenance pgp import PATH
+gitignore --maintenance pgp delete
+```
+
+The private key remains encrypted in the configuration security directory. Generate, rotate, and import publish the public key automatically; failed keyserver submissions are retried by the scheduled maintenance task. Backups include the key files and keyserver publication state. `gitignore --maintenance backup test [ARCHIVE]` decrypts the archive as needed and verifies that the encrypted private key decrypts and matches its public key; it does not restore files. If `ARCHIVE` is omitted, the newest backup archive is selected. Encrypted archives prompt for the backup password. See [Security](security.md) for the key lifecycle and report encryption.
+
 Backups include `server.yml`, `secrets.yml` when present, the SQLite database, and existing `yaml.d/`, `assets/`, `template/`, `theme/`, and `security/` files. Restore verifies the archive manifest and checksums before installing files. Backup encryption follows `server.backup.encryption.enabled`.
 
 ## Client (`gitignore-cli`)

@@ -6,7 +6,7 @@ On first startup, the server creates `{config_dir}/server.yml` and, as needed, t
 # {config_dir}/server.yml — node-specific settings
 server:
   address: "[::]"
-  port: "64080"
+  port: "64080" # example value; the generated default is a random available port in 64000–64999
   baseurl: /
   api_version: v1
   mode: production
@@ -26,11 +26,31 @@ server:
       mcp: "Project-specific MCP usage guidance appended to the generated help page."
 ```
 
-The merged view starts with built-in defaults, then reads `server.yml`, ordered `yaml.d/*.yml` drop-ins, and finally `secrets.yml`. Command-line flags and environment variables have higher precedence. Maps merge by key; later scalar or list values replace earlier ones. The server watches these files for changes and reloads valid settings.
+The merged view starts with built-in defaults, then reads `server.yml`, ordered `yaml.d/*.yml` drop-ins, and finally `secrets.yml`. Maps merge by key; later scalar or list values replace earlier ones. Environment variables and command-line flags override only the settings explicitly supported by the running binary; they are not a general override layer for every YAML setting. For example, `--port` overrides `PORT`, which overrides `server.port`, and `--address` overrides `LISTEN`, which overrides `server.address`. Configuration file monitoring and reload behavior follow the current AI.md configuration contract.
 
 `server.yml`, `secrets.yml`, and each drop-in file use mode `0600`; the `yaml.d/` directory uses `0700`. The `secrets.yml` file holds credentials such as the operator token, encryption key, SMTP password, and CAPTCHA secret. The server generates required secrets and never returns them in API responses or prints them in full in configuration output.
 
-`server.yml` contains node-specific settings. Area files are grouped under `yaml.d/`: `branding.yml`, `web.yml`, `pages.yml`, `contact.yml`, `privacy.yml`, `security.yml`, `logs.yml`, `metrics.yml`, `notifications.yml`, `tor.yml`, `i2p.yml`, `maintenance.yml`, and `app.yml`. The merge uses the same dotted setting names in any file, but the documented area file is each setting's normal home. If a legacy single-file `server.yml` contains area settings or credentials, startup migrates those values to their designated files.
+`server.yml` contains node-specific settings. Area files are grouped under `yaml.d/`; the merge accepts any setting in any file, but the documented area file is its normal home. The canonical layout is:
+
+| File | Settings |
+|---|---|
+| `server.yml` | Node identity and listener, database, cache, TLS, trusted proxies, and cluster settings |
+| `yaml.d/branding.yml` | `server.branding`, `server.seo`, and `web.ui` |
+| `yaml.d/web.yml` | `web.*` except `web.ui`, plus CORS, CSRF, URL detection, compression, health, and localization settings |
+| `yaml.d/pages.yml` | `server.pages` |
+| `yaml.d/contact.yml` | `server.contact` |
+| `yaml.d/privacy.yml` | `server.privacy`, `server.compliance`, and `server.tracking` |
+| `yaml.d/security.yml` | `server.security`, `server.rate_limit`, `server.geoip`, `server.limits`, `server.tokens`, and `data.*` |
+| `yaml.d/logs.yml` | `server.logs` |
+| `yaml.d/metrics.yml` | `server.metrics` |
+| `yaml.d/notifications.yml` | `server.notifications` |
+| `yaml.d/tor.yml` | `server.tor` and top-level `tor` settings |
+| `yaml.d/i2p.yml` | `server.i2p` |
+| `yaml.d/maintenance.yml` | Maintenance, scheduler, update, backup, and restore settings |
+| `yaml.d/app.yml` | Project-defined settings not assigned to another area |
+| `secrets.yml` | Credentials only |
+
+If a legacy single-file `server.yml` contains area settings or credentials, startup migrates those values to their designated files.
 
 ## Configuration paths
 
@@ -52,26 +72,27 @@ PID files are skipped in containers. See [Server Operations](SERVER.md) for life
 
 All server settings are nested under `server` unless noted.
 
-| Area | Representative settings |
+| Area | Supported settings |
 |---|---|
-| Listener and routing | `address`, `port`, `fqdn`, `baseurl`, `api_version`, `mode`, `daemonize` |
-| Runtime identity | `user`, `group`, `pidfile` |
-| Branding and SEO | `branding`, `seo`, `admin` |
-| TLS | `ssl.enabled`, `ssl.letsencrypt` and its challenge/provider settings |
-| Database and logs | `database`, `logging` |
-| Scheduling and protection | `schedule`, `rate_limit`, `maintenance`, `healthz.root.enabled` |
-| Metrics and trusted proxies | `metrics`, `trusted_proxies.additional` |
-| Backup and notifications | `backup`, `notifications.webui`, `notifications.email` |
-| Localization | `i18n.enabled`, `i18n.default_language`, `i18n.fallback_language`, `i18n.available_languages`, `i18n.cookie_name`, `i18n.cookie_max_age` |
-| Network services | `tor`, `i2p`, `geoip` |
-| Contact recipients | `contact.general.email`, `contact.security.email`, `contact.abuse.email` |
-| Contact page | `pages.contact.enabled`, `pages.contact.captcha`, `pages.contact.captcha_site_key`, `pages.contact.captcha_secret_key`, `pages.contact.success_message` |
-| Help pages | `pages.help.content`, `pages.help.mcp` |
-| Security reports | `server.security.reports.retention_days` and `web.security` disclosure settings; encryption credentials belong in `secrets.yml` |
-| Updates | `update.branch`, `update.auto_install`, `update.defer_days` |
-| Browser behavior | `web.ui.theme`, `web.cors`, `web_robots.allow`, `web_robots.deny`, `web_security.admin`, `web_security.cors` |
+| Listener and identity | `server.port`, `server.fqdn`, `server.address`, `server.baseurl`, `server.api_version`, `server.daemonize`, `server.mode`, `server.user`, `server.group`, `server.pidfile` |
+| Branding and SEO | `server.branding.*`, `server.seo.*`, and `web.ui.*` |
+| TLS and web security | `server.ssl.*`, `server.trusted_proxies.*`, and `web.*` |
+| Database and cache | `server.database.*` and `server.cache.*` |
+| Scheduler and limits | `server.scheduler.*`, `server.rate_limit.*`, `server.limits.*`, and `server.healthz.*` |
+| Metrics and logs | `server.metrics.*` and `server.logs.*` |
+| Maintenance and backup | `server.maintenance.*`, `server.backup.*`, `server.restore.*`, and `server.update.*` |
+| Owner tokens | `server.tokens.max_linked`, `cookie_max_age`, and `idle_purge_days` |
+| Localization | `server.i18n.*` |
+| Tor and I2P | `server.tor.*`, top-level `tor.*`, and `server.i2p.*` |
+| GeoIP and blocklists | `server.geoip.*`, `server.security.blocklists.*`, `server.security.allowlist`, `server.security.blocked_ips`, and `data.*` |
+| Contact and pages | `server.contact.*` and `server.pages.*` |
+| Privacy and compliance | `server.privacy.*`, `server.compliance.*`, and `server.tracking.*` |
+| Notifications | `server.notifications.*` |
+| Project settings | Project-specific settings belong in `yaml.d/app.yml` |
 
-The server reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM_NAME`, and `SMTP_FROM_EMAIL` for mail transport. Keep credentials and private key material out of source control and logs.
+The table lists every persisted setting group. Generated settings include their defaults and validation guidance. `server.token` and runtime-derived `notifications.email.enabled` are not persisted settings. `server.database.password`, SMTP credentials, CAPTCHA secrets, metrics token, CVE API key, and encryption key are secrets and belong in the protected `secrets.yml` file.
+
+The canonical area-file assignments and all accepted settings are specified in AI.md PART 5 and PART 12. The server reads the SMTP environment variables listed there for mail transport. Keep credentials and private key material out of source control and logs.
 
 ## Contact form and security reports
 
@@ -83,12 +104,14 @@ Abuse, DMCA, and privacy reports use the public contact form. Security reports a
 
 ## Environment variables and precedence
 
-`PORT` and `LISTEN` override listener settings; `DOMAIN` and `HOSTNAME` contribute to FQDN discovery. SMTP environment variables override matching SMTP configuration values. Where all sources exist, the precedence is:
+`PORT` and `LISTEN` override listener settings; `DOMAIN` and `HOSTNAME` contribute to FQDN discovery. SMTP environment variables override matching SMTP configuration values. Configuration files are merged in this order:
 
-1. Command-line flag
-2. Environment variable
-3. `server.yml`
-4. Embedded default
+1. Embedded defaults
+2. `server.yml`
+3. `yaml.d/*.yml` drop-ins in lexical order
+4. `secrets.yml`
+
+Supported startup overrides are then applied for the individual settings documented above. For listener settings, the command-line flag wins over its environment variable, which wins over the merged configuration.
 
 Directory variables are initialization inputs and must be set before startup.
 
@@ -122,3 +145,5 @@ When enabled, the app prefers a managed dedicated `i2pd` process and falls back 
 `server.update.branch` accepts `stable`, `beta`, or `devel`; `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `auto_install` controls whether scheduled update checks install a found version, while `defer_days` controls release age for scheduled checks.
 
 `/server/healthz` is always available. The root `/healthz` alias is disabled unless `server.healthz.root.enabled` is true. Prometheus metrics use `/metrics` by default and can be moved with `server.metrics.endpoint`; restrict the endpoint to trusted monitoring systems and configure `server.metrics.token` when needed. Language detection follows the request's supported locale and the `lang` preference; the explicit language control is on `/server/preferences`.
+
+Health responses use cached component and dataset checks. Core probes and loaded datasets refresh on a schedule, and relevant data reloads refresh the cache immediately. NVD/CVE health is included as `checks.data_cve_nvd`; `checks.data_trivy_db` appears only when Trivy database support is enabled. Individual dataset states are `ok`, `degraded`, or `error`; the public response contains no paths or error details.

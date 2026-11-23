@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never edit AI.md; it is the read-only implementation specification.
@@ -22,6 +24,19 @@
 - Keep project implementation tasks in TODO.AI.md and update it as work is completed.
 - Finish complete implementations; leave no stubs, TODO comments, or deferred work.
 - Treat PART-specific checklists and the FINAL checklist as required verification, not optional guidance.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| Which file controls implementation requirements? | AI.md; IDEA.md supplies product behavior. | PART 0, 1 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Project task | An implementation task tracked in project TODO files. |
+| AI.md issue | A contradiction or defect in the authoritative specification. |
 
 ## KEY RULES
 

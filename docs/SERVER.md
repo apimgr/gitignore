@@ -10,6 +10,8 @@ See [Installation](installation.md) for deployment options and [Configuration](c
 
 The public server pages share the same layout, navigation, theme, skip links, and footer. They are server-rendered and their core content and forms work without JavaScript.
 
+Operators may configure scheduled service notices under `web.announcements` in `yaml.d/web.yml`. Active notices render after the skip links; visitors can dismiss them with a form POST, and the `dismissed_announcements` cookie records the dismissed IDs. The cookie is disclosed on the Privacy page and is removed by Preferences Reset. See [Configuration](configuration.md) for the fields and time window.
+
 | Page | Purpose |
 |---|---|
 | `/server` | Permanent redirect to `/server/about` |

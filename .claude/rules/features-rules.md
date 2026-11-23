@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never use an external scheduler or route an inbound caller-controlled destination through Tor.
@@ -13,6 +15,19 @@
 - Keep email/notification content translated and SMTP behavior consistent with the documented auto-detection rules.
 - Use the built-in scheduler, bounded GeoIP behavior, internal metrics, encrypted/compliant backups, and verified update flow as specified.
 - Treat scheduler, GeoIP, metrics, backup/restore, and update support as required features; enforce bounds and integrity checks on their data and operations.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| What runs periodic maintenance? | The application’s built-in scheduler. | PART 18 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| GeoIP | Approximate IP geolocation used as a risk signal, not identity proof. |
+| I2P provider | The app-managed i2pd process or configured external SAM bridge. |
 
 ## KEY RULES
 

@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never run workflow logic through Makefile targets.
@@ -19,6 +21,19 @@
 - Keep equivalent required pipelines for GitHub, GitLab, Gitea, Forgejo, and Jenkins; use each provider's native CLI for status checks.
 - Run secret scanning, vulnerability scanning, workflow policy checks, tests, lint, and the complete server/client platform matrix as blocking gates.
 - For Go, use `casjaysdev/go:latest` directly; do not add a build-toolchain image or preflight unless a project-specific need is explicit.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| May CI use Makefile targets? | No; CI runs provider-native workflow steps directly. | PART 25, 27 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Provider workflow | Native CI configuration for a supported git provider. |
+| Release provenance | Required build metadata and attestation for release artifacts. |
 
 ## KEY RULES
 

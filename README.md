@@ -1,13 +1,11 @@
 # GitIgnore API
 
+GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, browser interface, and companion `gitignore-cli`. The Go server builds as a self-contained static binary or runs in Docker.
+
 [![CI](https://github.com/apimgr/gitignore/actions/workflows/ci.yml/badge.svg)](https://github.com/apimgr/gitignore/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/apimgr/gitignore)](https://github.com/apimgr/gitignore/releases)
 [![License](https://img.shields.io/github/license/apimgr/gitignore)](LICENSE.md)
 [![Docs](https://readthedocs.org/projects/apimgr-gitignore/badge/?version=latest)](https://apimgr-gitignore.readthedocs.io)
-
-## About
-
-GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, browser interface, and companion `gitignore-cli`. The Go server builds as a self-contained static binary or runs in Docker.
 
 ## Features
 
@@ -22,6 +20,35 @@ GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a
 - Choose from English, Arabic, German, Spanish, French, Italian, Japanese, and Chinese interfaces.
 
 The catalog API is public and read-only. There are no user accounts, admin web panel, or user-submitted templates. See [IDEA.md](IDEA.md) for product scope.
+
+## Install
+
+Download the latest server and client artifacts from [GitHub Releases](https://github.com/apimgr/gitignore/releases/latest).
+
+| Platform | Architectures | Server artifact | Client artifact |
+|---|---|---|---|
+| Linux | amd64, arm64 | `gitignore-linux-{amd64,arm64}` | `gitignore-cli-linux-{amd64,arm64}` |
+| macOS | amd64, arm64 | `gitignore-darwin-{amd64,arm64}` | `gitignore-cli-darwin-{amd64,arm64}` |
+| Windows | amd64, arm64 | `gitignore-windows-{amd64,arm64}.exe` | `gitignore-cli-windows-{amd64,arm64}.exe` |
+| FreeBSD | amd64, arm64 | `gitignore-freebsd-{amd64,arm64}` | `gitignore-cli-freebsd-{amd64,arm64}` |
+
+On Linux, download the matching artifact and install it with:
+
+```sh
+curl -LSsf https://github.com/apimgr/gitignore/releases/latest/download/gitignore-linux-amd64 \
+  -o /usr/local/bin/gitignore && chmod +x /usr/local/bin/gitignore
+```
+
+On macOS, replace `gitignore` with the selected server or client artifact name, then remove the quarantine attribute after download:
+
+```sh
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/;s/aarch64/arm64/')
+curl -LSsf "https://github.com/apimgr/gitignore/releases/latest/download/gitignore-darwin-${ARCH}" \
+  -o /usr/local/bin/gitignore && chmod +x /usr/local/bin/gitignore
+xattr -d com.apple.quarantine /usr/local/bin/gitignore 2>/dev/null || true
+```
+
+Windows users should download the matching `.exe` and add its directory to `%PATH%`. FreeBSD users should download the matching artifact, make it executable with `chmod +x`, and place it on their `PATH`.
 
 ## Production
 

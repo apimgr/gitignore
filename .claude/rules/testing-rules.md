@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never run tests, project binaries, or host-affecting commands directly on the host.
@@ -19,6 +21,19 @@
 - Keep every embedded locale shared by server and client; update each locale in the same change as English keys and validate key parity.
 - Require CI conformance coverage for every registered/error page and browser E2E paths with and without JavaScript.
 - Keep ReadTheDocs navigation and required pages complete, including public discovery/protocol endpoints and all operator/integrator-facing behavior.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| Where do Go tests run? | Through the prescribed container-backed `make test` workflow. | PART 28 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Page conformance | Automated coverage of each registered and error page’s required structure and behavior. |
+| Locale parity | Every embedded locale has the same translation keys as English. |
 
 ## KEY RULES
 

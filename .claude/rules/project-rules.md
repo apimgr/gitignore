@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never commit runtime config, data, logs, cache, binaries, or test output.
@@ -17,6 +19,19 @@
 - Keep licenses and required third-party attributions in LICENSE.md.
 - Keep `docs/` exclusively for ReadTheDocs and cover browser, CLI, API, configuration, security, protocol/discovery, integrations, and development behavior.
 - Keep root `AGENTS.md` as an exact real-file copy of the concise root `CLAUDE.md` loader.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| Which source controls product behavior? | IDEA.md describes behavior; AI.md controls implementation. | PART 0, 1, 2 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| `internal_name` | Frozen filesystem and service identity, independent of display branding. |
+| Runtime data | Generated configuration, database, logs, cache, and other execution state. |
 
 ## KEY RULES
 

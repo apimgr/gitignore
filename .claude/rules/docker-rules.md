@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never copy or symlink build artifacts into arbitrary project or host paths.
@@ -17,6 +19,19 @@
 - Keep runtime logs on stdout/stderr, one process per container, and state under specified `/config` and `/data` mounts.
 - The Go project uses `casjaysdev/go:latest` directly; do not add a Go toolchain image or `ensure-build-image` workflow without an explicit project-specific need.
 - Respect container-specific I2P default behavior while allowing explicit configuration to override it.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| Which Dockerfile builds the application image? | `docker/Dockerfile` using the specified multi-stage build. | PART 26 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Runtime image | The minimal image that runs the static application binary. |
+| Overlay | A project rootfs file copied into its specified image path. |
 
 ## KEY RULES
 

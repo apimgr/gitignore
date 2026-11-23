@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never preserve project-owned obsolete routes as compatibility shims; external compatibility is defined by IDEA.md.
@@ -17,6 +19,19 @@
 - Use proper status codes, response formats, and pagination/filtering where applicable.
 - Preserve content negotiation and the documented error envelope on every route.
 - Keep route tables, OpenAPI operations, GraphQL schema/resolvers, and server-rendered pages synchronized with implemented handlers.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| What is the canonical API route prefix? | `/api/{api_version}/`; aliases exist only where specified. | PART 14 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Canonical route | The versioned route that owns an API operation. |
+| Content negotiation | Selecting a documented representation from request headers or suffix. |
 
 ## KEY RULES
 

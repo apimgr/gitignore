@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never enable CGO or make core operation depend on unembedded assets; configured branding assets follow the explicit PART 16 file/URL/data rules.
@@ -17,6 +19,19 @@
 - Use the actual executable basename for displayed command names and fixed project identity for user-agent and on-disk paths.
 - Keep the required client available in every project; synchronize translations across server and client binaries.
 - Verify downloads with the published SHA-256 and replace binaries atomically; never update from an unverified response.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| Which release targets are required? | Linux, macOS, Windows, and FreeBSD on amd64 and arm64. | PART 7, 32 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Server binary | The `gitignore` application server executable. |
+| Client binary | The companion `gitignore-cli` executable. |
 
 ## KEY RULES
 

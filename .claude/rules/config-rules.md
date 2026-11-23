@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never commit generated `server.yml` or runtime configuration.
@@ -20,6 +22,19 @@
 - Ignore hidden, backup, unsupported, and nested drop-in entries; follow symlinks only when the regular-file target remains inside `yaml.d/`.
 - Migrate legacy names before moving sections, create atomic backups, and never change/revalidate values during migration.
 - Watch `server.yml`, `yaml.d/`, `secrets.yml`, and `assets/`; retain last-good data on parse/load failure and report restart-required settings through health output.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| What is configuration precedence? | Flags, environment, files, then defaults. | PART 5, 6, 12 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Drop-in | An ordered YAML overlay under `yaml.d/`. |
+| Last-good config | The last valid configuration snapshot retained after a reload error. |
 
 ## KEY RULES
 

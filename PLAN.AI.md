@@ -7,7 +7,7 @@ Bring the current repository into complete alignment with AI.md and IDEA.md. AI.
 ## Work sequence
 
 1. Complete the remaining read-only requirement inventory from AI.md PART 0–32, IDEA.md, project rules, current code, all server pages, README, docs, and existing tests. Preserve current user changes.
-2. Resolve disallowed configuration artifacts and the unused credential-shaped IDEA project variable. The variable change is gated on the explicit confirmation required by AI.md; continue unrelated work while waiting.
+2. Align the owner-token cookie identifier with AI.md's lowercase suffix rule. A successful validation of the prior cookie transparently writes the compliant name and expires the prior name; AI.md does not specify this persistent-cookie migration, so report that guidance gap to the coordinating session.
 3. Complete browser-page localization across every rendered page and all supported locales. Translate visible text, accessible labels, titles, metadata, legal content, and no-JavaScript messages; preserve behavior and add deterministic locale-conformance coverage.
 4. Verify and complete localization of other human-readable output required by PART 30, including API errors, health/status, OpenAPI/Swagger, GraphQL, email, and server/client CLI output.
 5. Bring README and all ReadTheDocs content into current alignment. Provide a per-setting configuration reference with defaults, accepted values, validation, and canonical file locations; document routes, formats, security/reporting, discovery, integrations, CLI, and operations.
@@ -19,6 +19,6 @@ Bring the current repository into complete alignment with AI.md and IDEA.md. AI.
 
 - Read the exact AI.md section and existing target file before every write; never edit AI.md.
 - Preserve no-JavaScript form behavior, route contracts, accessibility, locale key/placeholder parity, and supported-language registry parity.
-- Do not expose or store credentials in documentation. Do not change IDEA.md project variables without explicit confirmation.
+- Do not expose or store credentials in documentation. Follow AI.md over project-owned documents and update IDEA.md when its variables or behavior conflict.
 - Keep test/build/runtime artifacts in project-scoped OS temporary storage and remove artifacts created for this work when finished.
 - The comprehensive browser matrix and configuration inventory may reveal additional gaps; add those to TODO.AI.md before expanding implementation scope.

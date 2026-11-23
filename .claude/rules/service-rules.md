@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never perform host service lifecycle actions while developing or testing.
@@ -15,6 +17,18 @@
 - Bind privileged ports before dropping to the configured service user; keep service files aligned with the supported platform matrix.
 - Create required home/config/data/log directories and permissions in the documented order, then drop privileges before application work.
 - Support documented init/service platforms and lifecycle commands without performing host lifecycle actions during validation.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| May development checks change host services? | No; service lifecycle checks run in the prescribed isolated environment. | PART 23, 24, 28 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Privilege drop | Starting privileged only for required setup, then running as the configured service user. |
 
 ## KEY RULES
 

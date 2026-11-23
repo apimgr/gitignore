@@ -32,6 +32,7 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/api/{api_version}/server/about` | GET | About-page source and format |
+| `/api/{api_version}/server/auth/check` | GET | Machine-only token check; requires Bearer authentication, returns the token kind on success or `401`, and never echoes the token |
 | `/api/{api_version}/server/privacy` | GET | Privacy policy data |
 | `/api/{api_version}/server/contact` | GET | Public form fields, validation limits, and a fresh challenge; does not reveal recipients |
 | `/api/{api_version}/server/contact` | POST | Submit a contact report through review and confirmation; delivery occurs only after confirmation |

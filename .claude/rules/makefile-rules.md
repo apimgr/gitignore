@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never use Makefile targets in CI/CD.
@@ -16,6 +18,18 @@
 - Put test runtime and coverage output in the required project-scoped OS temp directory.
 - Mount host Go module/build cache paths when supplied; create cache directories before mounting and avoid repository cache writes.
 - Keep Make targets local-development only; provider workflows build directly using their required container/toolchain rules.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| What is the Makefile for? | Local development only; never CI workflow execution. | PART 25, 27 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Project-scoped temp directory | A unique directory under `${TMPDIR:-/tmp}/{project_org}/`. |
 
 ## KEY RULES
 

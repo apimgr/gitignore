@@ -2,6 +2,8 @@
 
 ⚠️ **These rules are NON-NEGOTIABLE. Violations are bugs.** ⚠️
 
+> Revalidated against AI.md on 2026-11-23.
+
 ## CRITICAL - NEVER DO
 
 - Never interpolate untrusted input into SQL, filesystem paths, shell commands, or executable content.
@@ -18,6 +20,19 @@
 - Keep security reports encrypted and access-controlled; Tor hidden service starts when the Tor binary is found, while I2P is off on bare metal/VM and defaults on in containers.
 - Keep database migrations idempotent and compatible with existing records; use the configured local or remote database backend and never store operator configuration in the database.
 - Keep logs in the required plain-text formats, mask secrets, and do not emit terminal colors or decorative characters into logs.
+
+## KEY DECISIONS (pre-answered)
+
+| Question | Answer | Spec Reference |
+|---|---|---|
+| Where does runtime state live? | In configured data, config, and log paths, never the source tree. | PART 2, 9-11 |
+
+## TERMINOLOGY
+
+| Term | Meaning |
+|---|---|
+| Inbound Tor | The app-managed hidden service that exposes the server. |
+| Outbound Tor | App-controlled Tor client traffic to app-determined destinations. |
 
 ## KEY RULES
 

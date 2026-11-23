@@ -165,10 +165,26 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `web.llms.custom_sections` | `yaml.d/web.yml` | `[]` | Markdown sections appended to generated discovery output. |
 | `web.announcements.enabled` | `yaml.d/web.yml` | `true` | Boolean. |
 | `web.announcements.messages[].id` | `yaml.d/web.yml` | No entries | Unique message identifier. |
-| `web.announcements.messages[].type` | `yaml.d/web.yml` | `warning` in the example | `warning`, `info`, `error`, or `success`. |
-| `web.announcements.messages[].title`, `message` | `yaml.d/web.yml` | Empty (no messages by default) | Text fields. |
-| `web.announcements.messages[].start`, `end` | `yaml.d/web.yml` | Unset | Optional ISO 8601 timestamps delimiting display time. |
-| `web.announcements.messages[].dismissible` | `yaml.d/web.yml` | `true` in the example | Boolean. |
+| `web.announcements.messages[].type` | `yaml.d/web.yml` | `info` | `info`, `warning`, `error`, or `success`; unknown types are not rendered. |
+| `web.announcements.messages[].title`, `message` | `yaml.d/web.yml` | Empty; no messages by default | Plain text; a non-empty message is required. |
+| `web.announcements.messages[].start`, `end` | `yaml.d/web.yml` | Unset | Optional RFC 3339 timestamps; outside this UTC window the message is not rendered. |
+| `web.announcements.messages[].dismissible` | `yaml.d/web.yml` | `false` | Boolean; a dismissible message has a no-JavaScript POST form and stores its ID in the visitor's `dismissed_announcements` cookie. |
+
+Announcements render in configuration order after the skip links and before the shared header. IDs must be unique, lowercase letters or digits followed by lowercase letters, digits, `_` or `-`, and no more than 64 characters. The preferences page omits the dismissal form so its settings form remains the only page form.
+
+```yaml
+web:
+  announcements:
+    enabled: true
+    messages:
+      - id: scheduled-maintenance
+        type: warning
+        title: Scheduled maintenance
+        message: Service may be unavailable during the maintenance window.
+        start: "2026-12-01T02:00:00Z"
+        end: "2026-12-01T04:00:00Z"
+        dismissible: true
+```
 
 ### Branding and SEO
 

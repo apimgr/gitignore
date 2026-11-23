@@ -15,14 +15,46 @@ The container listens on port `80`. Configuration and data paths are set by the 
 
 ## Binary
 
-Download the artifact for your operating system and architecture from the [GitHub releases page](https://github.com/apimgr/gitignore/releases). Release builds cover Linux, macOS, Windows, and FreeBSD on amd64 and arm64. A Linux example:
+Download the matching server or client artifact from [GitHub Releases](https://github.com/apimgr/gitignore/releases/latest). The build matrix includes both binaries for every listed target:
+
+| Platform | Architecture | Server | Client |
+|---|---|---|---|
+| Linux | amd64 | `gitignore-linux-amd64` | `gitignore-cli-linux-amd64` |
+| Linux | arm64 | `gitignore-linux-arm64` | `gitignore-cli-linux-arm64` |
+| macOS | amd64 | `gitignore-darwin-amd64` | `gitignore-cli-darwin-amd64` |
+| macOS | arm64 | `gitignore-darwin-arm64` | `gitignore-cli-darwin-arm64` |
+| Windows | amd64 | `gitignore-windows-amd64.exe` | `gitignore-cli-windows-amd64.exe` |
+| Windows | arm64 | `gitignore-windows-arm64.exe` | `gitignore-cli-windows-arm64.exe` |
+| FreeBSD | amd64 | `gitignore-freebsd-amd64` | `gitignore-cli-freebsd-amd64` |
+| FreeBSD | arm64 | `gitignore-freebsd-arm64` | `gitignore-cli-freebsd-arm64` |
+
+For Linux amd64, install the server with:
 
 ```sh
-chmod +x gitignore-linux-amd64
-./gitignore-linux-amd64 --port 8080
+curl -LSsf https://github.com/apimgr/gitignore/releases/latest/download/gitignore-linux-amd64 \
+  -o /usr/local/bin/gitignore && chmod +x /usr/local/bin/gitignore
+gitignore --port 8080
 ```
 
-The companion client is published separately as `gitignore-cli-{os}-{arch}` (with `.exe` on Windows). See the [CLI reference](cli.md).
+For macOS, select the architecture automatically and remove the quarantine attribute after download:
+
+```sh
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/;s/aarch64/arm64/')
+curl -LSsf "https://github.com/apimgr/gitignore/releases/latest/download/gitignore-darwin-${ARCH}" \
+  -o /usr/local/bin/gitignore && chmod +x /usr/local/bin/gitignore
+xattr -d com.apple.quarantine /usr/local/bin/gitignore 2>/dev/null || true
+```
+
+On Windows, download the matching `.exe` and add its directory to `%PATH%`. On FreeBSD, download the matching artifact, run `chmod +x`, and add it to `PATH`.
+
+The companion client is available in the same release under the `gitignore-cli-` artifact names. For example:
+
+```sh
+curl -LSsf https://github.com/apimgr/gitignore/releases/latest/download/gitignore-cli-linux-amd64 \
+  -o /usr/local/bin/gitignore-cli && chmod +x /usr/local/bin/gitignore-cli
+```
+
+See the [CLI reference](cli.md) for client commands.
 
 ## Service installation
 

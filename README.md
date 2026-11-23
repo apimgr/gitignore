@@ -25,6 +25,19 @@ The catalog API is public and read-only. There are no user accounts, admin web p
 
 ## Production
 
+### Docker
+
+```sh
+docker run -d \
+  --name gitignore \
+  -p 172.17.0.1:64180:80 \
+  -v ./volumes/config:/config:z \
+  -v ./volumes/data:/data:z \
+  ghcr.io/apimgr/gitignore:latest
+```
+
+The container stores configuration and data in the mounted directories. Use a deployment directory for these paths, outside the source checkout.
+
 ### Docker Compose
 
 The production Compose file listens on `172.17.0.1:64180`. Copy it to a deployment directory before starting so persistent configuration and data stay outside the source checkout.

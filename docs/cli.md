@@ -55,7 +55,7 @@ gitignore --maintenance pgp delete
 
 The private key remains encrypted in the configuration security directory. Generate, rotate, and import publish the public key automatically; failed keyserver submissions are retried by the scheduled maintenance task. Backups include the key files and keyserver publication state. `gitignore --maintenance backup test [ARCHIVE]` decrypts the archive as needed and verifies that the encrypted private key decrypts and matches its public key; it does not restore files. If `ARCHIVE` is omitted, the newest backup archive is selected. Encrypted archives prompt for the backup password. See [Security](security.md) for the key lifecycle and report encryption.
 
-Backups include `server.yml`, `secrets.yml` when present, the SQLite database, and existing `yaml.d/`, `assets/`, `template/`, `theme/`, and `security/` files. Restore verifies the archive manifest and checksums before installing files. Backup encryption follows `server.backup.encryption.enabled`.
+Backups include `server.yml`, `secrets.yml` when present, the SQLite database, and existing `yaml.d/`, `assets/`, `template/`, `theme/`, and `security/` files. Restore verifies the archive manifest and checksums before installing files. A configured `server.backup.encryption_password` in `secrets.yml` encrypts backups without prompting; compliance mode rejects backups when that password is missing. Encrypted restore and backup-test operations prompt for the password.
 
 ## Client (`gitignore-cli`)
 

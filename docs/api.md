@@ -66,7 +66,7 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/cli/ps` | GET | Generated PowerShell helper |
 | `/api/{api_version}/cli/completion/{bash,zsh,fish}` | GET | Shell completions |
 
-Native API responses use the documented JSON envelope and errors defined in AI.md PART 14. Health endpoints and external compatibility endpoints follow their specified response formats. The OpenAPI UI is `/server/docs/swagger`; the GraphiQL interface is `/server/docs/graphql`.
+Native API success responses use `{ "ok": true, "data": ... }`; paginated lists add a sibling `pagination` object. Errors use `{ "ok": false, "error": "ERROR_CODE", "message": "...", "details": ... }`, with the HTTP status carried by the response status code. Health endpoints and external compatibility routes use their documented native formats. The OpenAPI UI is `/server/docs/swagger`; the GraphiQL interface is `/server/docs/graphql`.
 
 ## Contact and security reports
 

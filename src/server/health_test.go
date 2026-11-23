@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/geoip"
@@ -86,18 +87,35 @@ func TestStatusIcon(t *testing.T) {
 // TestStatusText verifies the human-readable status text matches each status.
 func TestStatusText(t *testing.T) {
 	cases := []struct {
+		lang   string
 		status string
 		want   string
 	}{
-		{"healthy", "All Systems Operational"},
-		{"degraded", "Degraded Performance"},
-		{"unhealthy", "Service Unavailable"},
-		{"unknown", "Service Unavailable"},
+		{"en", "healthy", "Healthy"},
+		{"es", "healthy", "Saludable"},
+		{"es", "degraded", "Degradado"},
+		{"es", "unknown", "health.status.unknown"},
 	}
 	for _, c := range cases {
-		if got := statusText(c.status); got != c.want {
-			t.Errorf("statusText(%q) = %q, want %q", c.status, got, c.want)
+		if got := statusText(c.lang, c.status); got != c.want {
+			t.Errorf("statusText(%q, %q) = %q, want %q", c.lang, c.status, got, c.want)
 		}
+	}
+}
+
+func TestHumanTimestampUsesRequestLanguage(t *testing.T) {
+	value := time.Date(2025, time.March, 15, 14, 5, 6, 0, time.FixedZone("offset", 2*60*60))
+	if got, want := humanTimestamp("en", value), "March 15, 2025 at 12:05:06 UTC"; got != want {
+		t.Errorf("humanTimestamp(en) = %q, want %q", got, want)
+	}
+	if got, want := humanTimestamp("es", value), "15 de marzo de 2025, a las 12:05:06 UTC"; got != want {
+		t.Errorf("humanTimestamp(es) = %q, want %q", got, want)
+	}
+	if got, want := humanTimestampString("es", "2025-03-15T14:05:06+02:00"), "15 de marzo de 2025, a las 12:05:06 UTC"; got != want {
+		t.Errorf("humanTimestampString(es) = %q, want %q", got, want)
+	}
+	if got := i18n.Translate("es", "health.status.restart_required"); got != "Reinicio requerido" {
+		t.Errorf("Spanish restart status = %q", got)
 	}
 }
 
@@ -208,6 +226,25 @@ func doHealth(s *Server, path, accept, userAgent string) *httptest.ResponseRecor
 	rec := httptest.NewRecorder()
 	s.handleHealthz(rec, req)
 	return rec
+}
+
+func TestHealthFrontendTextUsesRequestLanguage(t *testing.T) {
+	s := newTestHealthServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/server/healthz", nil)
+	req.Header.Set("Accept", "text/plain")
+	req.Header.Set("Accept-Language", "es")
+	req.Header.Set("User-Agent", "curl/8.0.1")
+	rec := httptest.NewRecorder()
+	i18n.Middleware(http.HandlerFunc(s.handleHealthz)).ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Estado:    Saludable") {
+		t.Fatalf("health response did not localize its status:\n%s", body)
+	}
+	monthKey := strings.ToLower(time.Now().UTC().Month().String())
+	if month := i18n.Translate("es", "health.month."+monthKey); !strings.Contains(body, month) {
+		t.Errorf("health response did not localize its timestamp month %q:\n%s", month, body)
+	}
 }
 
 // TestHealthzJSONShape verifies the JSON rendering carries every mandated

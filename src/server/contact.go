@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -21,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/notify"
@@ -36,7 +38,7 @@ type contactChallenge struct {
 func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 	if !s.contactPageEnabled() {
 		if isVersionedAPIContact(s, r) {
-			sendAPIResponseError(w, "NOT_FOUND", "contact form not found")
+			sendAPIResponseError(w, "NOT_FOUND", requestTranslation(r, "contact.runtime.form_not_found"))
 			return
 		}
 		s.handleNotFound(w, r)
@@ -57,7 +59,7 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 		formErr = r.ParseForm()
 	}
 	if formErr != nil {
-		s.renderContact(w, r, http.StatusBadRequest, map[string]interface{}{"error": "The submitted form is too large or invalid."})
+		s.renderContact(w, r, http.StatusBadRequest, map[string]interface{}{"error": requestTranslation(r, "contact.runtime.form_too_large_or_invalid")})
 		return
 	}
 	securityToken := strings.TrimSpace(r.FormValue("security_id"))
@@ -66,14 +68,14 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 		s.logInvalidSecurityID(r, securityToken)
 	}
 	if !validContactType(typeName, securityToken) {
-		s.renderContact(w, r, http.StatusBadRequest, map[string]interface{}{"error": "Choose a valid report type."})
+		s.renderContact(w, r, http.StatusBadRequest, map[string]interface{}{"error": requestTranslation(r, "contact.runtime.invalid_type")})
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	address := strings.TrimSpace(r.FormValue("email"))
 	parsedAddress, addressErr := mail.ParseAddress(address)
 	if name == "" || len([]rune(name)) > 100 || addressErr != nil || parsedAddress.Address != address || len(address) > 254 || hasHeaderControl(name) || hasHeaderControl(address) || hasHeaderControl(r.FormValue("subject")) || !validContactText(allContactValues(r)) {
-		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Enter a name and valid email address."))
+		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.name_email_required")))
 		return
 	}
 	if r.FormValue("website") != "" {
@@ -81,7 +83,7 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.contactOriginValid(r) {
-		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Please submit the form from this site."))
+		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.same_site_required")))
 		return
 	}
 	step := r.FormValue("step")
@@ -92,18 +94,18 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderContact(w, r, http.StatusOK, contactFormValues(r, securityToken, ""))
 		return
 	}
-	if err := validateContactFields(r, typeName); err != nil {
+	if err := validateContactFields(r, typeName, i18n.LangFromContext(r.Context())); err != nil {
 		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, err.Error()))
 		return
 	}
 	if step == "submit" {
 		if !s.verifyFormToken(r.FormValue("form_token"), time.Now()) || !s.verifyContactCaptcha(r) {
-			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Please wait a moment and submit again with a valid verification answer."))
+			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.verification_answer_invalid")))
 			return
 		}
 		reviewToken, err := s.issueReviewToken(r.Form, time.Now())
 		if err != nil {
-			s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, "Form verification is temporarily unavailable."))
+			s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.verification_unavailable")))
 			return
 		}
 		if isVersionedAPIContact(s, r) {
@@ -119,7 +121,7 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if step != "confirm" || !formChecked(r.FormValue("confirmed")) || !s.consumeReviewToken(r.FormValue("review_token"), r.Form, time.Now()) {
-		values := contactFormValues(r, securityToken, "Please read the details and confirm.")
+		values := contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.confirmation_required"))
 		values["review"] = true
 		values["type"] = typeName
 		s.renderContact(w, r, http.StatusBadRequest, values)
@@ -133,15 +135,16 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 	webhookTargets := s.contactWebhookTargets(typeName)
 	webhooksAvailable := s.config.WebhookDispatcher != nil && len(webhookTargets) > 0
 	if (recipient == "" || s.config.SendContactReply == nil) && !webhooksAvailable {
-		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, "Contact delivery is not configured on this server."))
+		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.delivery_unconfigured")))
 		return
 	}
-	message := contactMailBody(r.Form, typeName)
+	message := contactMailBody(r.Form, typeName, i18n.LangFromContext(r.Context()))
 	appName := "GitIgnore"
 	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Server.Branding.Title) != "" {
 		appName = s.currentConfig().Server.Branding.Title
 	}
-	subject := "[" + appName + " contact] " + r.FormValue("subject")
+	contactLabel := i18n.Translate(i18n.LangFromContext(r.Context()), "contact.title")
+	subject := "[" + appName + " " + contactLabel + "] " + r.FormValue("subject")
 	var emailErr error
 	if recipient != "" && s.config.SendContactReply != nil {
 		emailErr = s.config.SendContactReply(recipient, address, subject, message)
@@ -150,7 +153,7 @@ func (s *Server) handleContactSubmit(w http.ResponseWriter, r *http.Request) {
 		s.dispatchContactWebhook(r, typeName, subject, message, "informational", "")
 	}
 	if emailErr != nil && !webhooksAvailable {
-		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, "The message could not be sent right now. Please try again later."))
+		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.delivery_failed")))
 		return
 	}
 	s.contactSuccess(w, r, typeName, "", "")
@@ -162,17 +165,17 @@ func isVersionedAPIContact(s *Server, r *http.Request) bool {
 
 func (s *Server) handleAPIContact(w http.ResponseWriter, r *http.Request) {
 	if !s.contactPageEnabled() {
-		sendAPIResponseError(w, "NOT_FOUND", "contact form not found")
+		sendAPIResponseError(w, "NOT_FOUND", requestTranslation(r, "contact.runtime.form_not_found"))
 		return
 	}
 	token, err := issueContactFormToken(time.Now())
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "contact form is unavailable")
+		sendAPIResponseError(w, "SERVER_ERROR", requestTranslation(r, "contact.runtime.api_form_unavailable"))
 		return
 	}
 	challengeID, question, err := s.issueContactChallenge(r)
 	if err != nil {
-		sendAPIResponseError(w, "RATE_LIMITED", "contact form is temporarily unavailable")
+		sendAPIResponseError(w, "RATE_LIMITED", requestTranslation(r, "contact.runtime.api_challenge_unavailable"))
 		return
 	}
 	types := []string{"abuse", "dmca", "privacy"}
@@ -245,7 +248,10 @@ func validContactType(value, securityID string) bool {
 func (s *Server) contactSuccess(w http.ResponseWriter, r *http.Request, typeName, trackingID, message string) {
 	if isVersionedAPIContact(s, r) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		data := map[string]interface{}{"message": "Your report was received."}
+		if message == "" {
+			message = requestTranslation(r, "contact.runtime.api_success")
+		}
+		data := map[string]interface{}{"message": message}
 		if trackingID != "" {
 			data["tracking_id"] = trackingID
 		}
@@ -316,26 +322,26 @@ func allowedContactFields(typeName string) map[string]bool {
 	return fields
 }
 
-func validateContactFields(r *http.Request, typeName string) error {
+func validateContactFields(r *http.Request, typeName, lang string) error {
 	allowed := allowedContactFields(typeName)
 	for key := range r.Form {
 		if !allowed[key] {
-			return fmt.Errorf("submitted form contains an unsupported field")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_unsupported_field"))
 		}
 	}
 	for key, maximum := range map[string]int{"name": 100, "email": 254, "subject": 200, "message": 5000, "reported_url": 2048, "reason": 64, "copyrighted_work": 2000, "signature": 100, "summary": 200, "component": 255, "endpoint": 2048, "severity": 16, "reproduction": 10000, "impact": 5000, "suggested_fix": 5000, "researcher_gpg": 16384, "credit_preference": 16, "credit_handle": 100} {
 		value := strings.TrimSpace(r.FormValue(key))
 		if len([]rune(value)) > maximum {
-			return fmt.Errorf("one or more fields exceed the stated length limits")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_length"))
 		}
 	}
 	if typeName != "security" && (strings.TrimSpace(r.FormValue("subject")) == "" || strings.TrimSpace(r.FormValue("message")) == "") {
-		return fmt.Errorf("complete the required fields before continuing")
+		return errors.New(i18n.Translate(lang, "contact.runtime.validation_required"))
 	}
 	if typeName == "abuse" || typeName == "dmca" {
 		u, err := url.Parse(strings.TrimSpace(r.FormValue("reported_url")))
 		if err != nil || u.Scheme == "" || u.Host == "" || !strings.EqualFold(u.Host, r.Host) {
-			return fmt.Errorf("reported URL must be on this site")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_reported_url"))
 		}
 	}
 	switch typeName {
@@ -343,34 +349,39 @@ func validateContactFields(r *http.Request, typeName string) error {
 		switch r.FormValue("reason") {
 		case "illegal_content", "terms_violation", "harassment", "malware_phishing", "other":
 		default:
-			return fmt.Errorf("choose a valid abuse report reason")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_abuse_reason"))
 		}
 	case "dmca":
 		if strings.TrimSpace(r.FormValue("copyrighted_work")) == "" || !formChecked(r.FormValue("good_faith")) || !formChecked(r.FormValue("accuracy")) || strings.TrimSpace(r.FormValue("signature")) == "" {
-			return fmt.Errorf("complete the required DMCA notice fields")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_dmca_fields"))
 		}
 	case "privacy":
 		switch r.FormValue("request_kind") {
 		case "access", "export", "deletion", "correction", "opt_out", "other":
 		default:
-			return fmt.Errorf("choose a valid privacy request type")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_privacy_kind"))
 		}
 	case "security":
 		credit := r.FormValue("credit_preference")
 		if !validSeverity(strings.ToLower(strings.TrimSpace(r.FormValue("severity")))) || strings.TrimSpace(r.FormValue("component")) == "" || strings.TrimSpace(r.FormValue("summary")) == "" || strings.TrimSpace(r.FormValue("reproduction")) == "" || strings.TrimSpace(r.FormValue("impact")) == "" || !validCredit(credit) || credit == "handle" && strings.TrimSpace(r.FormValue("credit_handle")) == "" || !formChecked(r.FormValue("coordinated_disclosure")) {
-			return fmt.Errorf("complete the required security report fields")
+			return errors.New(i18n.Translate(lang, "contact.runtime.validation_security_fields"))
 		}
 	}
 	return nil
 }
 
-func contactMailBody(form url.Values, typeName string) string {
-	labels := map[string]string{"type": "Type", "name": "Name", "email": "Email", "reported_url": "Reported URL", "reason": "Reason", "copyrighted_work": "Copyrighted work", "good_faith": "Good-faith statement", "accuracy": "Accuracy statement", "signature": "Signature", "request_kind": "Request kind", "subject": "Subject", "message": "Message"}
+func contactMailBody(form url.Values, typeName, lang string) string {
 	keys := []string{"type", "name", "email", "reported_url", "reason", "copyrighted_work", "good_faith", "accuracy", "signature", "request_kind", "subject", "message"}
 	var body strings.Builder
 	for _, key := range keys {
 		if value := strings.TrimSpace(form.Get(key)); value != "" {
-			fmt.Fprintf(&body, "%s: %s\n", labels[key], value)
+			switch key {
+			case "type":
+				value = i18n.Translate(lang, "web.contact.type_"+value)
+			case "reason", "request_kind":
+				value = i18n.Translate(lang, "web.contact."+value)
+			}
+			fmt.Fprintf(&body, "%s: %s\n", i18n.Translate(lang, "contact.mail.label."+key), value)
 		}
 	}
 	if typeName == "" {
@@ -552,7 +563,7 @@ func (s *Server) renderContact(w http.ResponseWriter, r *http.Request, status in
 	if typeName != "" {
 		formToken, err := issueContactFormToken(time.Now())
 		if err != nil {
-			data["error"] = "The contact form is temporarily unavailable."
+			data["error"] = requestTranslation(r, "contact.runtime.api_form_unavailable")
 		} else {
 			data["formToken"] = formToken
 		}
@@ -564,7 +575,7 @@ func (s *Server) renderContact(w http.ResponseWriter, r *http.Request, status in
 		var err error
 		challengeID, question, err = s.issueContactChallenge(r)
 		if err != nil {
-			data["error"] = "Too many verification challenges were requested. Please wait before trying again."
+			data["error"] = requestTranslation(r, "contact.runtime.api_challenge_unavailable")
 		}
 	}
 	if typeName != "" && provider != "simple" {
@@ -575,15 +586,19 @@ func (s *Server) renderContact(w http.ResponseWriter, r *http.Request, status in
 	data["success"] = ""
 	data["abuseEmail"] = s.publicAbuseEmail()
 	if r.URL.Query().Get("sent") == "1" {
-		message := "Your message was sent successfully."
-		if s.currentConfig() != nil && s.currentConfig().Server.Pages.Contact.SuccessMessage != "" {
-			message = s.currentConfig().Server.Pages.Contact.SuccessMessage
+		message := requestTranslation(r, "contact.runtime.contact_success")
+		if s.currentConfig() != nil {
+			configured := s.currentConfig().Server.Pages.Contact.SuccessMessage
+			defaultMessage := config.DefaultConfig().Server.Pages.Contact.SuccessMessage
+			if configured != "" && configured != defaultMessage {
+				message = configured
+			}
 		}
 		data["success"] = message
 	}
 	if reportID := r.URL.Query().Get("report"); reportID != "" && strings.HasPrefix(reportID, "sec_") {
 		data["reportID"] = reportID
-		data["success"] = "Your security report was received. Keep this tracking ID: " + reportID
+		data["success"] = i18n.TranslateFormat(i18n.LangFromContext(r.Context()), "contact.runtime.security_success", map[string]string{"tracking_id": reportID})
 	}
 	if isVersionedAPIContact(s, r) && status >= http.StatusBadRequest {
 		code := "VALIDATION_FAILED"
@@ -599,12 +614,12 @@ func (s *Server) renderContact(w http.ResponseWriter, r *http.Request, status in
 		}
 		message, _ := data["error"].(string)
 		if message == "" {
-			message = "The contact request could not be completed."
+			message = requestTranslation(r, "contact.runtime.request_unavailable")
 		}
 		sendAPIResponseErrorDetails(w, code, message, map[string]string{"field": "form", "rule": "validation"})
 		return
 	}
-	s.renderPageStatus(w, r, "contact", status, PageData{Title: "Contact", Data: data})
+	s.renderPageStatus(w, r, "contact", status, PageData{Title: requestTranslation(r, "web.handler.title.contact"), Data: data})
 }
 
 func (s *Server) publicAbuseEmail() string {
@@ -675,36 +690,36 @@ func (s *Server) handleSecurityReportSubmit(w http.ResponseWriter, r *http.Reque
 	if strings.TrimSpace(r.FormValue("disclosure_days")) == "" {
 		disclosureDays = 90
 	} else if err != nil || disclosureDays < 1 || disclosureDays > 365 {
-		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Choose a disclosure timeline from 1 to 365 days."))
+		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.disclosure_timeline_invalid")))
 		return
 	}
 	if !validSeverity(severity) || component == "" || len([]rune(component)) > 255 || summary == "" || len([]rune(summary)) > 200 || len([]rune(reproduction)) > 10000 || len([]rune(impact)) > 5000 || len([]rune(r.FormValue("suggested_fix"))) > 5000 || len([]rune(pubkey)) > 16384 || !validCredit(credit) || credit == "handle" && creditName == "" || !formChecked(r.FormValue("coordinated_disclosure")) {
-		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Complete the required security report fields and coordinated disclosure agreement."))
+		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.security_fields_required")))
 		return
 	}
 	if strings.HasPrefix(pubkey, "https://") && len([]rune(pubkey)) > 2048 {
-		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "The HTTPS key URL must be 2048 characters or fewer."))
+		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.key_url_too_long")))
 		return
 	}
 	if pubkey != "" && !strings.HasPrefix(pubkey, "https://") && !strings.Contains(pubkey, "-----BEGIN PGP PUBLIC KEY BLOCK-----") {
-		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Provide an HTTPS key URL or an ASCII-armored public key."))
+		s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.key_material_required")))
 		return
 	}
 	if strings.HasPrefix(pubkey, "https://") {
 		keyURL, err := url.Parse(pubkey)
 		if err != nil || keyURL.Scheme != "https" || keyURL.Host == "" || keyURL.User != nil {
-			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Provide a valid HTTPS key URL."))
+			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.key_url_invalid")))
 			return
 		}
 		pubkey, err = pgp.FetchPublicKey(r.Context(), pubkey)
 		if err != nil {
-			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "The HTTPS URL did not return a valid OpenPGP encryption key."))
+			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.key_fetch_failed")))
 			return
 		}
 	}
 	if pubkey != "" {
 		if _, err := pgp.ParsePublicKey(pubkey); err != nil {
-			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, "Provide a valid OpenPGP encryption key."))
+			s.renderContact(w, r, http.StatusBadRequest, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.key_invalid")))
 			return
 		}
 	}
@@ -722,7 +737,7 @@ func (s *Server) handleSecurityReportSubmit(w http.ResponseWriter, r *http.Reque
 	}
 	plaintext, err := json.Marshal(payload)
 	if err != nil {
-		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, "The report could not be prepared."))
+		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.report_prepare_failed")))
 		return
 	}
 	key := ""
@@ -731,40 +746,42 @@ func (s *Server) handleSecurityReportSubmit(w http.ResponseWriter, r *http.Reque
 	}
 	ciphertext, bodyAlgorithm, projectPublicKey, err := s.encryptSecurityReportBody(key, plaintext)
 	if err != nil {
-		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, "Encrypted report storage is unavailable."))
+		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.encrypted_storage_unavailable")))
 		return
 	}
 	contactPlaintext, err := json.Marshal(securityReportContact{Email: email, ResearcherGPG: pubkey})
 	if err != nil {
-		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, "The report contact details could not be prepared."))
+		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.contact_details_prepare_failed")))
 		return
 	}
 	contactCiphertext, err := encryptSecurityReport(key, contactPlaintext)
 	if err != nil {
-		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, "Encrypted report storage is unavailable."))
+		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.encrypted_storage_unavailable")))
 		return
 	}
 	trackingRandom, err := randomContactToken()
 	if err != nil {
-		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, "The report could not be assigned a tracking ID."))
+		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.tracking_id_failed")))
 		return
 	}
 	trackingID := "sec_" + trackingRandom[:16]
 	researcherToken, err := randomContactToken()
 	if err != nil {
-		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, "The report could not be assigned a status link."))
+		s.renderContact(w, r, http.StatusInternalServerError, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.status_link_failed")))
 		return
 	}
 	tokenHash := sha256.Sum256([]byte(researcherToken))
 	creditPref, creditName := securityCreditStorage(credit, name, creditName)
 	if err := db.SaveSecurityReport(trackingID, securityToken, hex.EncodeToString(tokenHash[:]), ciphertext, bodyAlgorithm, contactCiphertext, severity, component, creditPref, creditName, payload.CVERequested); err != nil {
-		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, "The encrypted report could not be stored."))
+		s.renderContact(w, r, http.StatusServiceUnavailable, contactFormValues(r, securityToken, requestTranslation(r, "contact.runtime.report_store_failed")))
 		return
 	}
 	s.logSecurityReportReceived(trackingID, severity, component)
 	acknowledgmentSent := false
 	if s.config.SendContact != nil || s.config.SendContactReply != nil || s.config.WebhookDispatcher != nil {
-		secureMail := fmt.Sprintf("Security report %s\nSeverity: %s\nComponent: %s\n", trackingID, severity, component)
+		lang := i18n.LangFromContext(r.Context())
+		severityText := i18n.Translate(lang, "web.contact."+strings.ToLower(severity))
+		secureMail := i18n.TranslateFormat(lang, "contact.mail.security.summary", map[string]string{"tracking_id": trackingID, "severity": severityText}) + "\n" + i18n.Translate(lang, "contact.mail.security.component") + ": " + component + "\n"
 		if bodyAlgorithm == "pgp" {
 			if encrypted, encryptErr := pgp.Encrypt(plaintext, projectPublicKey); encryptErr == nil {
 				secureMail = string(encrypted)
@@ -772,32 +789,32 @@ func (s *Server) handleSecurityReportSubmit(w http.ResponseWriter, r *http.Reque
 				secureMail = ""
 			}
 		} else {
-			secureMail += "Warning: no project PGP key is configured. The report body is AES-256-GCM encrypted at rest and in this notification.\nEncrypted report payload (base64):\n" + base64.StdEncoding.EncodeToString(ciphertext)
+			secureMail += i18n.Translate(lang, "contact.mail.security.warning") + "\n" + i18n.Translate(lang, "contact.mail.security.encrypted_payload") + "\n" + base64.StdEncoding.EncodeToString(ciphertext)
 		}
 		if secureMail != "" {
 			if s.config.SendContact != nil || s.config.SendContactReply != nil {
-				_ = s.sendContact(s.securityContactEmail(), "[GitIgnore security] "+trackingID, secureMail)
+				_ = s.sendContact(s.securityContactEmail(), i18n.TranslateFormat(lang, "contact.mail.security.subject", map[string]string{"tracking_id": trackingID}), secureMail)
 			}
 			securityTargets := s.contactWebhookTargets("security")
 			if len(securityTargets) > 0 {
 				s.dispatchWebhook(r, notify.Event{
 					Role: "security", Event: "security.report_received",
-					Subject: "Encrypted security report " + trackingID, Body: secureMail,
+					Subject: i18n.TranslateFormat(lang, "contact.mail.security.subject", map[string]string{"tracking_id": trackingID}), Body: secureMail,
 					Severity: severity, TrackingID: trackingID,
 				}, securityTargets)
 			}
 		}
 		adminTargets := s.contactWebhookTargets("admin")
 		if len(adminTargets) > 0 {
-			summary := fmt.Sprintf("A security report was received and stored encrypted. Tracking ID: %s. Severity: %s.", trackingID, severity)
+			summary := i18n.TranslateFormat(lang, "contact.mail.security.summary", map[string]string{"tracking_id": trackingID, "severity": severityText})
 			s.dispatchWebhook(r, notify.Event{
 				Role: "admin", Event: "security.report_received",
-				Subject: "Security report received", Body: summary,
+				Subject: i18n.Translate(lang, "contact.mail.security.admin_subject"), Body: summary,
 				Severity: severity, TrackingID: trackingID,
 			}, adminTargets)
 		}
 		statusURL := s.publicServerURL(r) + "/server/security/report/" + trackingID + "?token=" + researcherToken
-		acknowledgment := "Your report was received. Tracking ID: " + trackingID + "\nStatus link: " + statusURL
+		acknowledgment := i18n.TranslateFormat(lang, "contact.mail.security.acknowledgment", map[string]string{"tracking_id": trackingID, "status_url": statusURL})
 		if pubkey != "" {
 			if encrypted, encryptErr := pgp.Encrypt([]byte(acknowledgment), pubkey); encryptErr == nil {
 				acknowledgment = string(encrypted)
@@ -805,22 +822,24 @@ func (s *Server) handleSecurityReportSubmit(w http.ResponseWriter, r *http.Reque
 				acknowledgment = ""
 			}
 		}
-		if acknowledgment != "" && s.sendContact(email, "Security report received: "+trackingID, acknowledgment) == nil {
+		if acknowledgment != "" && s.sendContact(email, i18n.TranslateFormat(lang, "contact.mail.security.acknowledgment_subject", map[string]string{"tracking_id": trackingID}), acknowledgment) == nil {
 			acknowledgmentSent = true
 		}
 	}
 	if isVersionedAPIContact(s, r) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		message := "We received your report. Your tracking ID is " + trackingID + "."
+		lang := i18n.LangFromContext(r.Context())
+		message := i18n.TranslateFormat(lang, "contact.runtime.security_success", map[string]string{"tracking_id": trackingID})
 		if acknowledgmentSent {
-			message += " A confirmation email is on its way."
+			message += i18n.Translate(lang, "contact.mail.security.confirmation_email_suffix")
 		}
 		sendAPIResponseOK(w, map[string]interface{}{"tracking_id": trackingID, "message": message})
 		return
 	}
-	message := "We received your report. Your tracking ID is " + trackingID + "."
+	lang := i18n.LangFromContext(r.Context())
+	message := i18n.TranslateFormat(lang, "contact.runtime.security_success", map[string]string{"tracking_id": trackingID})
 	if acknowledgmentSent {
-		message += " A confirmation email is on its way."
+		message += i18n.Translate(lang, "contact.mail.security.confirmation_email_suffix")
 	}
 	s.contactSuccess(w, r, "security", trackingID, message)
 }
@@ -1138,7 +1157,7 @@ func (s *Server) issueContactChallenge(r *http.Request) (string, string, error) 
 		ip:         ip,
 		expires:    now.Add(10 * time.Minute),
 	}
-	return challengeID, fmt.Sprintf("What is %d + %d?", left, right), nil
+	return challengeID, i18n.TranslateFormat(i18n.LangFromContext(r.Context()), "contact.captcha.question", map[string]interface{}{"left": int(left), "right": int(right)}), nil
 }
 
 func (s *Server) consumeContactChallenge(r *http.Request, id, answer string) bool {

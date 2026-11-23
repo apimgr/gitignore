@@ -1,31 +1,31 @@
 {{define "content"}}
 <div class="container container-sm">
-<header class="page-header"><h1 class="page-title">{{if eq .Data.type "abuse"}}Report abuse{{else if eq .Data.type "dmca"}}Send a DMCA notice{{else if eq .Data.type "privacy"}}Make a privacy request{{else if eq .Data.type "security"}}Report a security vulnerability{{else}}Contact{{end}}</h1><p class="page-lead">This form is only for reports and privacy requests.</p></header>
+<header class="page-header"><h1 class="page-title">{{if eq .Data.type "abuse"}}{{t .Lang "web.contact.title_abuse"}}{{else if eq .Data.type "dmca"}}{{t .Lang "web.contact.title_dmca"}}{{else if eq .Data.type "privacy"}}{{t .Lang "web.contact.title_privacy"}}{{else if eq .Data.type "security"}}{{t .Lang "web.contact.title_security"}}{{else}}{{t .Lang "contact.title"}}{{end}}</h1><p class="page-lead">{{t .Lang "web.contact.lead"}}</p></header>
 <section class="section-card" aria-labelledby="contact-information">
-<h2 id="contact-information">Contact information</h2>
-<p>This form is only for security reports, terms violations at a URL on this site, DMCA notices, and privacy requests. It cannot be used for support, bug reports, feature requests, or general questions.</p>
+<h2 id="contact-information">{{t .Lang "web.contact.information_title"}}</h2>
+<p>{{t .Lang "web.contact.information_description"}}</p>
 {{if .Data.error}}<p class="alert alert-danger" role="alert">{{.Data.error}}</p>{{end}}
 {{if .Data.success}}<p class="alert alert-success" role="status">{{.Data.success}}</p>{{end}}
 </section>
 {{if .Data.showChooser}}
 <section class="section-card" aria-labelledby="report-types">
-<h2 id="report-types">Report types</h2>
-<nav aria-label="Report type">
+<h2 id="report-types">{{t .Lang "web.contact.types_title"}}</h2>
+<nav aria-label="{{t .Lang "web.contact.type_label"}}">
 <ul>
-<li><a href="{{path "/server/contact?type=abuse"}}">Report abuse</a></li>
-<li><a href="{{path "/server/contact?type=dmca"}}">Send a DMCA notice</a></li>
-<li><a href="{{path "/server/contact?type=privacy"}}">Make a privacy request</a></li>
-{{if .Data.securityMode}}<li><a href="{{path "/server/contact"}}?type=security&amp;security_id={{.Data.securityID}}">Report a security vulnerability</a></li>{{end}}
+<li><a href="{{path "/server/contact?type=abuse"}}">{{t .Lang "web.contact.title_abuse"}}</a></li>
+<li><a href="{{path "/server/contact?type=dmca"}}">{{t .Lang "web.contact.title_dmca"}}</a></li>
+<li><a href="{{path "/server/contact?type=privacy"}}">{{t .Lang "web.contact.title_privacy"}}</a></li>
+{{if .Data.securityMode}}<li><a href="{{path "/server/contact"}}?type=security&amp;security_id={{.Data.securityID}}">{{t .Lang "web.contact.title_security"}}</a></li>{{end}}
 </ul>
 </nav>
-<p>To report a security vulnerability, see <a href="{{path "/server/security"}}">the security policy</a>.</p>
+<p>{{t .Lang "web.contact.security_policy_prompt"}} <a href="{{path "/server/security"}}">{{t .Lang "nav.security"}}</a>.</p>
 </section>
 {{else if .Data.review}}
 <section class="section-card contact-review" aria-labelledby="review-title">
-<h2 id="review-title">Review your report</h2>
-<p>Type: {{.Data.type}}</p>
+<h2 id="review-title">{{t .Lang "web.contact.review_title"}}</h2>
+<p>{{if eq .Data.type "abuse"}}{{tf .Lang "web.contact.review_type" "type" (t .Lang "web.contact.type_abuse")}}{{else if eq .Data.type "dmca"}}{{tf .Lang "web.contact.review_type" "type" (t .Lang "web.contact.type_dmca")}}{{else if eq .Data.type "privacy"}}{{tf .Lang "web.contact.review_type" "type" (t .Lang "web.contact.type_privacy")}}{{else if eq .Data.type "security"}}{{tf .Lang "web.contact.review_type" "type" (t .Lang "web.contact.type_security")}}{{end}}</p>
 <p class="contact-review-email">{{.Data.email}}</p>
-<p>Subject: {{.Data.subject}}</p>
+<p>{{tf .Lang "web.contact.review_subject" "subject" .Data.subject}}</p>
 <form action="{{path "/server/contact"}}" method="post">
 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 <input type="hidden" name="type" value="{{.Data.type}}">
@@ -56,8 +56,8 @@
 <input type="hidden" name="coordinated_disclosure" value="{{.Data.coordinated_disclosure}}">
 <input type="hidden" name="step" value="confirm">
 <input type="hidden" name="review_token" value="{{.Data.reviewToken}}">
-<label><input name="confirmed" type="checkbox" value="yes" required> This email address is correct, and this is a genuine report, not an advertisement, a solicitation, or spam.</label>
-<button type="submit">Confirm</button>
+<label><input name="confirmed" type="checkbox" value="yes" required> {{t .Lang "web.contact.confirmation_statement"}}</label>
+<button type="submit">{{t .Lang "common.confirm"}}</button>
 </form>
 <form action="{{path "/server/contact"}}" method="post">
 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -88,79 +88,79 @@
 <input type="hidden" name="credit_handle" value="{{.Data.credit_handle}}">
 <input type="hidden" name="coordinated_disclosure" value="{{.Data.coordinated_disclosure}}">
 <input type="hidden" name="step" value="edit">
-<button type="submit">Edit</button>
+<button type="submit">{{t .Lang "common.edit"}}</button>
 </form>
 </section>
 {{else}}
 <section class="section-card" aria-labelledby="contact-form-title">
-<h2 id="contact-form-title">Report details</h2>
+<h2 id="contact-form-title">{{t .Lang "web.contact.details_title"}}</h2>
 <form action="{{path "/server/contact"}}" method="post">
 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 <input type="hidden" name="type" value="{{.Data.type}}">
 {{if .Data.securityMode}}<input type="hidden" name="security_id" value="{{.Data.securityID}}">{{end}}
 <input type="hidden" name="form_token" value="{{.Data.formToken}}">
 <input type="hidden" name="step" value="submit">
-<div class="contact-honeypot" aria-hidden="true"><label for="contact-website">Leave this field empty</label><input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off" maxlength="200"></div>
-<label for="contact-name">Name (required)</label>
+<div class="contact-honeypot" aria-hidden="true"><label for="contact-website">{{t .Lang "web.contact.honeypot"}}</label><input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off" maxlength="200"></div>
+<label for="contact-name">{{tf .Lang "web.contact.label_required" "label" (t .Lang "contact.name")}}</label>
 <input id="contact-name" name="name" type="text" maxlength="100" value="{{.Data.name}}" autocomplete="name" required>
-<label for="contact-email">Email (required)</label>
+<label for="contact-email">{{tf .Lang "web.contact.label_required" "label" (t .Lang "contact.email")}}</label>
 <input id="contact-email" name="email" type="email" maxlength="254" value="{{.Data.email}}" autocomplete="email" required>
 {{if eq .Data.type "abuse"}}
-<label for="reported-url">Reported URL (required)</label>
+<label for="reported-url">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.reported_url")}}</label>
 <input id="reported-url" name="reported_url" type="url" maxlength="2048" value="{{.Data.reported_url}}" required>
-<label for="report-reason">Reason (required)</label>
-<select id="report-reason" name="reason" required><option value="">Choose a reason</option><option value="illegal_content">Illegal content</option><option value="terms_violation">Terms violation</option><option value="harassment">Harassment</option><option value="malware_phishing">Malware or phishing</option><option value="other">Other</option></select>
+<label for="report-reason">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.reason")}}</label>
+<select id="report-reason" name="reason" required><option value="">{{t .Lang "web.contact.choose_reason"}}</option><option value="illegal_content">{{t .Lang "web.contact.illegal_content"}}</option><option value="terms_violation">{{t .Lang "web.contact.terms_violation"}}</option><option value="harassment">{{t .Lang "web.contact.harassment"}}</option><option value="malware_phishing">{{t .Lang "web.contact.malware_phishing"}}</option><option value="other">{{t .Lang "web.contact.other"}}</option></select>
 {{else if eq .Data.type "dmca"}}
-<label for="reported-url">Reported URL (required)</label><input id="reported-url" name="reported_url" type="url" maxlength="2048" value="{{.Data.reported_url}}" required>
-<label for="copyrighted-work">Copyrighted work (required)</label><textarea id="copyrighted-work" name="copyrighted_work" maxlength="2000" required>{{.Data.copyrighted_work}}</textarea>
-<label><input name="good_faith" type="checkbox" value="yes" required> I have a good-faith belief that this use is not authorized by the copyright owner, its agent, or the law.</label>
-<label><input name="accuracy" type="checkbox" value="yes" required> The information is accurate and, under penalty of perjury, I am the owner or authorized to act for the owner.</label>
-<label for="signature">Signature (required)</label><input id="signature" name="signature" type="text" maxlength="100" required>
+<label for="reported-url">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.reported_url")}}</label><input id="reported-url" name="reported_url" type="url" maxlength="2048" value="{{.Data.reported_url}}" required>
+<label for="copyrighted-work">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.copyrighted_work")}}</label><textarea id="copyrighted-work" name="copyrighted_work" maxlength="2000" required>{{.Data.copyrighted_work}}</textarea>
+<label><input name="good_faith" type="checkbox" value="yes" required> {{t .Lang "web.contact.good_faith"}}</label>
+<label><input name="accuracy" type="checkbox" value="yes" required> {{t .Lang "web.contact.accuracy"}}</label>
+<label for="signature">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.signature")}}</label><input id="signature" name="signature" type="text" maxlength="100" required>
 {{else if eq .Data.type "privacy"}}
-<label for="request-kind">Request kind (required)</label>
-<select id="request-kind" name="request_kind" required><option value="">Choose a request</option><option value="access">Access</option><option value="export">Export</option><option value="deletion">Deletion</option><option value="correction">Correction</option><option value="opt_out">Opt out</option><option value="other">Other</option></select>
+<label for="request-kind">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.request_kind")}}</label>
+<select id="request-kind" name="request_kind" required><option value="">{{t .Lang "web.contact.choose_request"}}</option><option value="access">{{t .Lang "web.contact.access"}}</option><option value="export">{{t .Lang "web.contact.export"}}</option><option value="deletion">{{t .Lang "web.contact.deletion"}}</option><option value="correction">{{t .Lang "web.contact.correction"}}</option><option value="opt_out">{{t .Lang "web.contact.opt_out"}}</option><option value="other">{{t .Lang "web.contact.other"}}</option></select>
 {{else if eq .Data.type "security"}}
-<h2>Security report details</h2>
-<label for="security-component">Affected component (required)</label><input id="security-component" name="component" type="text" maxlength="255" required>
-<label for="security-endpoint">Affected endpoint or URL (optional)</label><input id="security-endpoint" name="endpoint" type="text" maxlength="2048">
-<label for="security-severity">Severity (required)</label><select id="security-severity" name="severity" required><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="informational">Informational</option></select>
-<label for="security-summary">Vulnerability summary (required)</label><input id="security-summary" name="summary" type="text" maxlength="200" required>
-<label for="security-reproduction">Steps to reproduce (required)</label><textarea id="security-reproduction" name="reproduction" maxlength="10000" required></textarea>
-<label for="security-impact">Impact (required)</label><textarea id="security-impact" name="impact" maxlength="5000" required></textarea>
-<label for="security-fix">Suggested fix (optional)</label><textarea id="security-fix" name="suggested_fix" maxlength="5000"></textarea>
-<label for="security-pubkey">Researcher GPG key or HTTPS URL (optional)</label><textarea id="security-pubkey" name="researcher_gpg" maxlength="16384"></textarea>
-<label><input name="cve_requested" type="checkbox" value="yes"> Request CVE assignment (optional)</label>
-<label for="security-timeline">Preferred disclosure timeline in days (optional)</label><input id="security-timeline" name="disclosure_days" type="number" min="1" max="365" value="90">
-<label for="security-credit">Credit preference (required)</label><select id="security-credit" name="credit_preference" required><option value="real_name">Yes, use my real name</option><option value="handle">Yes, use my handle</option><option value="no">No credit</option><option value="anonymous">Anonymous</option></select>
-<label for="security-credit-name">Credit handle (required when handle is selected)</label><input id="security-credit-name" name="credit_handle" type="text" maxlength="100">
-<label><input name="coordinated_disclosure" type="checkbox" value="yes" required> I agree to coordinated disclosure while a fix is prepared, up to 90 days.</label>
+<h2>{{t .Lang "web.contact.security_details"}}</h2>
+<label for="security-component">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.component")}}</label><input id="security-component" name="component" type="text" maxlength="255" required>
+<label for="security-endpoint">{{tf .Lang "web.contact.label_optional" "label" (t .Lang "web.contact.endpoint")}}</label><input id="security-endpoint" name="endpoint" type="text" maxlength="2048">
+<label for="security-severity">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.severity")}}</label><select id="security-severity" name="severity" required><option value="critical">{{t .Lang "web.contact.critical"}}</option><option value="high">{{t .Lang "web.contact.high"}}</option><option value="medium">{{t .Lang "web.contact.medium"}}</option><option value="low">{{t .Lang "web.contact.low"}}</option><option value="informational">{{t .Lang "web.contact.informational"}}</option></select>
+<label for="security-summary">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.summary")}}</label><input id="security-summary" name="summary" type="text" maxlength="200" required>
+<label for="security-reproduction">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.reproduction")}}</label><textarea id="security-reproduction" name="reproduction" maxlength="10000" required></textarea>
+<label for="security-impact">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.impact")}}</label><textarea id="security-impact" name="impact" maxlength="5000" required></textarea>
+<label for="security-fix">{{tf .Lang "web.contact.label_optional" "label" (t .Lang "web.contact.suggested_fix")}}</label><textarea id="security-fix" name="suggested_fix" maxlength="5000"></textarea>
+<label for="security-pubkey">{{tf .Lang "web.contact.label_optional" "label" (t .Lang "web.contact.researcher_key")}}</label><textarea id="security-pubkey" name="researcher_gpg" maxlength="16384"></textarea>
+<label><input name="cve_requested" type="checkbox" value="yes"> {{tf .Lang "web.contact.label_optional" "label" (t .Lang "web.contact.request_cve")}}</label>
+<label for="security-timeline">{{tf .Lang "web.contact.label_optional" "label" (t .Lang "web.contact.disclosure_timeline")}}</label><input id="security-timeline" name="disclosure_days" type="number" min="1" max="365" value="90">
+<label for="security-credit">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.credit_preference")}}</label><select id="security-credit" name="credit_preference" required><option value="real_name">{{t .Lang "web.contact.real_name"}}</option><option value="handle">{{t .Lang "web.contact.use_handle"}}</option><option value="no">{{t .Lang "web.contact.no_credit"}}</option><option value="anonymous">{{t .Lang "web.contact.anonymous"}}</option></select>
+<label for="security-credit-name">{{tf .Lang "web.contact.label_required" "label" (t .Lang "web.contact.credit_handle")}}</label><input id="security-credit-name" name="credit_handle" type="text" maxlength="100">
+<label><input name="coordinated_disclosure" type="checkbox" value="yes" required> {{t .Lang "web.contact.coordinated_disclosure"}}</label>
 {{end}}
 {{if ne .Data.type "security"}}
-<label for="contact-subject">Subject (required)</label><input id="contact-subject" name="subject" type="text" maxlength="200" value="{{.Data.subject}}" required>
-<label for="contact-message">Message (required)</label><textarea id="contact-message" name="message" maxlength="5000" required>{{.Data.message}}</textarea>
+<label for="contact-subject">{{tf .Lang "web.contact.label_required" "label" (t .Lang "contact.subject")}}</label><input id="contact-subject" name="subject" type="text" maxlength="200" value="{{.Data.subject}}" required>
+<label for="contact-message">{{tf .Lang "web.contact.label_required" "label" (t .Lang "contact.message")}}</label><textarea id="contact-message" name="message" maxlength="5000" required>{{.Data.message}}</textarea>
 {{end}}
 {{if eq .Data.captchaProvider "simple"}}
-<label for="contact-captcha">{{.Data.challengeQuestion}} (required)</label><input id="contact-captcha" name="captcha_answer" type="text" inputmode="numeric" autocomplete="off" required>
+<label for="contact-captcha">{{tf .Lang "web.contact.label_required" "label" .Data.challengeQuestion}}</label><input id="contact-captcha" name="captcha_answer" type="text" inputmode="numeric" autocomplete="off" required>
 <input type="hidden" name="captcha_id" value="{{.Data.challengeID}}">
 {{else if eq .Data.captchaProvider "recaptcha"}}
 <div class="g-recaptcha" data-sitekey="{{.Data.captchaSiteKey}}"></div>
-<noscript><label for="contact-captcha">{{.Data.challengeQuestion}} (required)</label><input id="contact-captcha" name="captcha_answer" type="text"><input type="hidden" name="captcha_id" value="{{.Data.challengeID}}"></noscript>
+<noscript><label for="contact-captcha">{{tf .Lang "web.contact.label_required" "label" .Data.challengeQuestion}}</label><input id="contact-captcha" name="captcha_answer" type="text"><input type="hidden" name="captcha_id" value="{{.Data.challengeID}}"></noscript>
 <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 {{else if eq .Data.captchaProvider "hcaptcha"}}
 <div class="h-captcha" data-sitekey="{{.Data.captchaSiteKey}}"></div>
-<noscript><label for="contact-captcha">{{.Data.challengeQuestion}} (required)</label><input id="contact-captcha" name="captcha_answer" type="text"><input type="hidden" name="captcha_id" value="{{.Data.challengeID}}"></noscript>
+<noscript><label for="contact-captcha">{{tf .Lang "web.contact.label_required" "label" .Data.challengeQuestion}}</label><input id="contact-captcha" name="captcha_answer" type="text"><input type="hidden" name="captcha_id" value="{{.Data.challengeID}}"></noscript>
 <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
 {{end}}
-<button type="submit">Review report</button>
+<button type="submit">{{t .Lang "web.contact.review_report"}}</button>
 </form>
 </section>
 {{end}}
 {{if not .Data.review}}
 <section class="section-card" aria-labelledby="security-issues">
-<h2 id="security-issues">Security issues</h2><p>To report a security vulnerability, consult our <a href="{{path "/server/security"}}">security policy</a>.</p>
+<h2 id="security-issues">{{t .Lang "web.contact.security_issues"}}</h2><p>{{t .Lang "web.contact.security_issues_description"}} <a href="{{path "/server/security"}}">{{t .Lang "nav.security"}}</a>.</p>
 </section>
 <section class="section-card" aria-labelledby="abuse-reports">
-<h2 id="abuse-reports">Abuse reports</h2><p>To report abusive content or a terms violation, choose the type Abuse above. To send a DMCA notice, choose the type DMCA.{{if .Data.abuseEmail}} Or email <a href="mailto:{{.Data.abuseEmail}}">{{.Data.abuseEmail}}</a>.{{end}}</p>
+<h2 id="abuse-reports">{{t .Lang "web.contact.abuse_reports"}}</h2><p>{{t .Lang "web.contact.abuse_reports_description"}} {{if .Data.abuseEmail}}{{t .Lang "web.contact.email_alternative"}} <a href="mailto:{{.Data.abuseEmail}}">{{.Data.abuseEmail}}</a>.{{end}}</p>
 </section>
 {{end}}
 </div>

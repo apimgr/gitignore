@@ -13,6 +13,7 @@ import (
 	"github.com/apimgr/gitignore/src/client/config"
 	"github.com/apimgr/gitignore/src/common/display"
 	displayformat "github.com/apimgr/gitignore/src/common/format"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/ui/app"
 	"github.com/gogpu/ui/core/button"
@@ -49,7 +50,7 @@ func newMaterialTheme() *material3.Theme {
 // server configuration.
 func LaunchGUI(client *api.Client, cfg *config.Config, cfgPath string) error {
 	if !IsGUIAvailable() {
-		return fmt.Errorf("GUI unavailable: no supported local display is available")
+		return errors.New(i18n.Translate(clientLanguage(client), "cli.client.gui.unavailable"))
 	}
 	if cfg == nil {
 		cfg = config.Default()
@@ -57,12 +58,15 @@ func LaunchGUI(client *api.Client, cfg *config.Config, cfgPath string) error {
 	if client == nil {
 		client = api.New(cfg.Server.Primary)
 	}
+	if client.Lang == "" {
+		client.Lang = cfg.Lang
+	}
 	if client.BaseURL == "" {
 		client.BaseURL = cfg.Server.Primary
 	}
 
 	theme := newMaterialTheme()
-	gogpuApp := gogpu.NewApp(gogpu.DefaultConfig().WithTitle("GitIgnore CLI").WithSize(1000, 720))
+	gogpuApp := gogpu.NewApp(gogpu.DefaultConfig().WithTitle(i18n.Translate(client.Lang, "cli.client.gui.window_title")).WithSize(1000, 720))
 	uiApp := app.New(
 		app.WithWindowProvider(gogpuApp),
 		app.WithPlatformProvider(gogpuApp),
@@ -78,7 +82,17 @@ func LaunchGUI(client *api.Client, cfg *config.Config, cfgPath string) error {
 		selected: map[string]bool{},
 	}
 	ui.showHome()
-	return desktop.Run(gogpuApp, uiApp)
+	if err := desktop.Run(gogpuApp, uiApp); err != nil {
+		return fmt.Errorf("%s", i18n.Translate(client.Lang, "cli.client.gui.launch_failed"))
+	}
+	return nil
+}
+
+func clientLanguage(client *api.Client) string {
+	if client != nil {
+		return client.Lang
+	}
+	return i18n.DefaultLang
 }
 
 type window struct {
@@ -90,42 +104,46 @@ type window struct {
 	selected map[string]bool
 }
 
+func (w *window) text(key string, args ...interface{}) string {
+	return i18n.TranslateFormat(clientLanguage(w.client), key, args...)
+}
+
 func (w *window) showHome() {
 	if w.client.BaseURL == "" {
 		w.showSettings(true)
 		return
 	}
-	w.setRoot("GitIgnore", "Browse the public .gitignore catalog.",
-		w.action("Browse templates", func() { w.loadNames(w.client.List, "Templates") }),
-		w.action("Search templates", w.showSearch),
-		w.action("Browse categories", func() { w.loadNames(w.client.Categories, "Categories") }),
-		w.action("Templates in a category", w.showCategory),
-		w.action("Get a template", func() { w.loadNames(w.client.List, "Templates") }),
-		w.action("Combine templates", w.showCombine),
-		w.action("Catalog statistics", w.showStats),
-		w.action("Server settings", func() { w.showSettings(false) }),
+	w.setRoot(w.text("cli.client.gui.home_title"), w.text("cli.client.gui.home_description"),
+		w.action(w.text("cli.client.gui.browse_templates"), func() { w.loadNames(w.client.List, w.text("cli.client.gui.templates")) }),
+		w.action(w.text("cli.client.gui.search_templates"), w.showSearch),
+		w.action(w.text("cli.client.gui.browse_categories"), func() { w.loadNames(w.client.Categories, w.text("cli.client.gui.categories")) }),
+		w.action(w.text("cli.client.gui.category_templates"), w.showCategory),
+		w.action(w.text("cli.client.gui.get_template"), func() { w.loadNames(w.client.List, w.text("cli.client.gui.templates")) }),
+		w.action(w.text("cli.client.gui.combine_templates"), w.showCombine),
+		w.action(w.text("cli.client.gui.catalog_statistics"), w.showStats),
+		w.action(w.text("cli.client.gui.server_settings"), func() { w.showSettings(false) }),
 	)
 }
 
 func (w *window) showCategory() {
 	name := state.NewSignal("")
 	field := textfield.New(
-		textfield.Placeholder("Category name"),
+		textfield.Placeholder(w.text("cli.client.gui.category_name")),
 		textfield.ValueSignal(name),
-		textfield.A11yLabel("Category name"),
+		textfield.A11yLabel(w.text("cli.client.gui.category_name")),
 		textfield.PainterOpt(material3.TextFieldPainter{Theme: w.theme}),
 	)
-	w.setRoot("Templates in a category", "Enter a category name.",
+	w.setRoot(w.text("cli.client.gui.category_title"), w.text("cli.client.gui.category_prompt"),
 		field,
-		w.action("Show templates", func() {
+		w.action(w.text("cli.client.gui.show_templates"), func() {
 			category := strings.TrimSpace(name.Get())
 			if category == "" {
-				w.showError(fmt.Errorf("enter a category name"))
+				w.showError(fmt.Errorf("%s", w.text("cli.client.gui.category_required")))
 				return
 			}
 			w.loadNames(func() ([]string, error) { return w.client.CategoryTemplates(category) }, category)
 		}),
-		w.action("Back", w.showHome),
+		w.action(w.text("cli.client.gui.back"), w.showHome),
 	)
 }
 
@@ -151,10 +169,10 @@ func (w *window) showError(err error) {
 	previousFocus := ctx.FocusedWidget()
 	message := errorMessage(err)
 	alert := dialog.New(
-		dialog.Title("Request failed"),
+		dialog.Title(w.text("cli.client.gui.request_failed")),
 		dialog.Content(primitives.Text(message).FontSize(15).Color(w.theme.Colors.OnSurface)),
 		dialog.Actions(dialog.Action{
-			Label:   "OK",
+			Label:   w.text("cli.client.gui.ok"),
 			Variant: dialog.VariantFilled,
 			Default: true,
 		}),
@@ -188,7 +206,7 @@ func (w *window) loadNames(load func() ([]string, error), title string) {
 
 func (w *window) showNames(title string, names []string) {
 	items := make([]widget.Widget, 0, 2)
-	items = append(items, w.action("Back", w.showHome))
+	items = append(items, w.action(w.text("cli.client.gui.back"), w.showHome))
 	list := listview.New(
 		listview.ItemCount(len(names)),
 		listview.FixedItemHeight(42),
@@ -201,7 +219,7 @@ func (w *window) showNames(title string, names []string) {
 			if index < 0 || index >= len(names) {
 				return
 			}
-			if title == "Categories" {
+			if title == w.text("cli.client.gui.categories") {
 				w.loadNames(func() ([]string, error) { return w.client.CategoryTemplates(names[index]) }, names[index])
 				return
 			}
@@ -209,7 +227,7 @@ func (w *window) showNames(title string, names []string) {
 		}),
 	)
 	items = append(items, primitives.Box(list).Height(520).Rounded(8).Background(widget.RGBA8(255, 255, 255, 255)))
-	w.setRoot(title, "Select an item to open it.", items...)
+	w.setRoot(title, w.text("cli.client.gui.select_item_prompt"), items...)
 }
 
 func (w *window) showTemplate(name string) {
@@ -220,7 +238,7 @@ func (w *window) showTemplate(name string) {
 	}
 	content := scrollview.New(primitives.Text(tmpl.Content).FontSize(13).Color(w.theme.Colors.OnSurface))
 	w.setRoot(tmpl.Name, fmt.Sprintf("%s · %s", tmpl.FileName, displayformat.Size(int64(tmpl.Size), w.client.Lang)),
-		w.action("Back", w.showHome),
+		w.action(w.text("cli.client.gui.back"), w.showHome),
 		primitives.Box(content).Height(520).Padding(12).Background(w.theme.Colors.SurfaceVariant),
 	)
 }
@@ -228,17 +246,17 @@ func (w *window) showTemplate(name string) {
 func (w *window) showSearch() {
 	query := state.NewSignal("")
 	field := textfield.New(
-		textfield.Placeholder("Search template names"),
+		textfield.Placeholder(w.text("cli.client.gui.search_placeholder")),
 		textfield.ValueSignal(query),
-		textfield.A11yLabel("Template search query"),
+		textfield.A11yLabel(w.text("cli.client.gui.search_query")),
 		textfield.PainterOpt(material3.TextFieldPainter{Theme: w.theme}),
 	)
-	w.setRoot("Search templates", "Enter a name or keyword, then search.",
+	w.setRoot(w.text("cli.client.gui.search_title"), w.text("cli.client.gui.search_prompt"),
 		field,
-		w.action("Search", func() {
-			w.loadNames(func() ([]string, error) { return w.client.Search(query.Get()) }, "Search results")
+		w.action(w.text("cli.client.gui.search"), func() {
+			w.loadNames(func() ([]string, error) { return w.client.Search(query.Get()) }, w.text("cli.client.gui.search_results"))
 		}),
-		w.action("Back", w.showHome),
+		w.action(w.text("cli.client.gui.back"), w.showHome),
 	)
 }
 
@@ -250,7 +268,7 @@ func (w *window) showCombine() {
 	}
 	sort.Strings(names)
 	w.selected = map[string]bool{}
-	items := []widget.Widget{w.action("Back", w.showHome)}
+	items := []widget.Widget{w.action(w.text("cli.client.gui.back"), w.showHome)}
 	list := listview.New(
 		listview.ItemCount(len(names)),
 		listview.FixedItemHeight(42),
@@ -265,9 +283,9 @@ func (w *window) showCombine() {
 	)
 	items = append(items,
 		primitives.Box(list).Height(480).Rounded(8).Background(w.theme.Colors.SurfaceVariant),
-		w.action("Combine selected", func() { w.combineSelected() }),
+		w.action(w.text("cli.client.gui.combine_selected"), func() { w.combineSelected() }),
 	)
-	w.setRoot("Combine templates", "Select one or more templates.", items...)
+	w.setRoot(w.text("cli.client.gui.combine_title"), w.text("cli.client.gui.combine_prompt"), items...)
 }
 
 func (w *window) combineSelected() {
@@ -278,7 +296,7 @@ func (w *window) combineSelected() {
 		}
 	}
 	if len(names) == 0 {
-		w.showError(fmt.Errorf("select at least one template to combine"))
+		w.showError(fmt.Errorf("%s", w.text("cli.client.gui.select_template_required")))
 		return
 	}
 	sort.Strings(names)
@@ -288,8 +306,8 @@ func (w *window) combineSelected() {
 		return
 	}
 	view := scrollview.New(primitives.Text(content).FontSize(12).Color(w.theme.Colors.OnSurface))
-	w.setRoot("Combined templates", strings.Join(names, " + "),
-		w.action("Back", w.showHome),
+	w.setRoot(w.text("cli.client.gui.combined_title"), strings.Join(names, " + "),
+		w.action(w.text("cli.client.gui.back"), w.showHome),
 		primitives.Box(view).Height(520).Padding(12).Background(w.theme.Colors.SurfaceVariant),
 	)
 }
@@ -307,33 +325,34 @@ func (w *window) showStats() {
 	sort.Strings(keys)
 	rows := make([]widget.Widget, 0, len(keys)+1)
 	for _, key := range keys {
-		rows = append(rows, primitives.Text(fmt.Sprintf("%s: %s", key, api.StatsCount(stats[key])).FontSize(16)))
+		rows = append(rows, primitives.Text(fmt.Sprintf("%s: %s", key, api.StatsCount(stats[key], w.client.Lang))).FontSize(16))
 	}
-	rows = append(rows, w.action("Back", w.showHome))
-	w.setRoot("Catalog statistics", "Current server catalog totals.", rows...)
+	rows = append(rows, w.action(w.text("cli.client.gui.back"), w.showHome))
+	w.setRoot(w.text("cli.client.gui.catalog_statistics"), w.text("cli.client.gui.stats_description"), rows...)
 }
 
 func (w *window) showSettings(setup bool) {
 	server := state.NewSignal(w.cfg.Server.Primary)
 	field := textfield.New(
-		textfield.Placeholder("https://server.example.com"),
+		textfield.Placeholder(w.text("cli.client.gui.server_url_placeholder")),
 		textfield.ValueSignal(server),
-		textfield.A11yLabel("Server URL"),
+		textfield.A11yLabel(w.text("cli.client.gui.server_url")),
 		textfield.PainterOpt(material3.TextFieldPainter{Theme: w.theme}),
 	)
-	message := "Change the server used by the client."
+	message := w.text("cli.client.gui.settings_description")
 	if setup {
-		message = "Welcome. Enter the server URL to finish client setup."
+		message = w.text("cli.client.gui.setup_description")
 	}
 	children := []widget.Widget{
 		field,
-		w.action("Test and save", func() {
+		w.action(w.text("cli.client.gui.test_and_save"), func() {
 			url := strings.TrimSpace(server.Get())
 			if !config.IsValidServerURL(url) {
-				w.showError(fmt.Errorf("enter a valid http(s) server URL"))
+				w.showError(fmt.Errorf("%s", w.text("cli.client.gui.invalid_server_url")))
 				return
 			}
 			candidate := api.New(strings.TrimSuffix(url, "/"))
+			candidate.Lang = w.client.Lang
 			if _, err := candidate.List(); err != nil {
 				w.showError(err)
 				return
@@ -341,14 +360,14 @@ func (w *window) showSettings(setup bool) {
 			w.cfg.Server.Primary = candidate.BaseURL
 			w.client.BaseURL = candidate.BaseURL
 			if err := config.Save(w.cfgPath, w.cfg); err != nil {
-				w.showError(err)
+				w.showError(fmt.Errorf("%s", w.text("cli.client.gui.save_failed")))
 				return
 			}
 			w.showHome()
 		}),
 	}
 	if !setup {
-		children = append(children, w.action("Back", w.showHome))
+		children = append(children, w.action(w.text("cli.client.gui.back"), w.showHome))
 	}
-	w.setRoot("Server settings", message, children...)
+	w.setRoot(w.text("cli.client.gui.server_settings"), message, children...)
 }

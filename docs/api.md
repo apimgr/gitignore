@@ -35,6 +35,9 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/privacy` | GET | Privacy policy data |
 | `/api/{api_version}/server/contact` | GET | Public form fields, validation limits, and a fresh challenge; does not reveal recipients |
 | `/api/{api_version}/server/contact` | POST | Submit a contact report through review and confirmation; delivery occurs only after confirmation |
+| `/api/{api_version}/server/reports/csp` | POST | Accept a legacy or Reporting API CSP violation report, log sanitized violation details, and return `204 No Content` |
+| `/api/{api_version}/server/reports/default` | POST | Accept reports sent to the default Reporting API group, log CSP violations, and return `204 No Content` |
+| `/api/{api_version}/server/reports/nel` | POST | Acknowledge Network Error Logging reports with `204 No Content`; report bodies are not retained |
 | `/api/{api_version}/server/help` | GET | Help content and registered help-page links |
 | `/api/{api_version}/server/help/mcp` | GET | MCP help and endpoint metadata |
 | `/api/{api_version}/server/dpo` | GET | Data protection officer contact |

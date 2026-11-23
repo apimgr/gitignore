@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	clipath "github.com/apimgr/gitignore/src/client/path"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	srvconfig "github.com/apimgr/gitignore/src/config"
 )
 
@@ -59,30 +60,31 @@ func Default() *Config {
 
 // Load reads the named config profile, creating a default one on first run.
 // name is a profile name (bare "test" -> test.yml) or an absolute path.
-func Load(name string) (*Config, string, error) {
+func Load(name string, languages ...string) (*Config, string, error) {
+	lang := configLanguage(languages)
 	path := clipath.ConfigFile(name)
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		cfg := Default()
-		if saveErr := Save(path, cfg); saveErr != nil {
+		if saveErr := Save(path, cfg, lang); saveErr != nil {
 			return cfg, path, saveErr
 		}
 		return cfg, path, nil
 	}
 	if err != nil {
-		return nil, path, fmt.Errorf("read config %s: %w", path, err)
+		return nil, path, fmt.Errorf("%s: %w", i18n.TranslateFormat(lang, "cli.client.config.read_failed", map[string]string{"path": path}), err)
 	}
 
 	cfg := Default()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, path, fmt.Errorf("parse config %s: %w", path, err)
+		return nil, path, fmt.Errorf("%s: %w", i18n.TranslateFormat(lang, "cli.client.config.parse_failed", map[string]string{"path": path}), err)
 	}
 	if cfg.Display.Mode == "" {
 		cfg.Display.Mode = "auto"
 	}
 	if !IsValidDisplayMode(cfg.Display.Mode) {
-		return nil, path, fmt.Errorf("parse config %s: display.mode must be auto, gui, or tui", path)
+		return nil, path, fmt.Errorf("%s", i18n.Translate(lang, "cli.client.config.invalid_display_mode"))
 	}
 	return cfg, path, nil
 }
@@ -94,20 +96,31 @@ func IsValidDisplayMode(mode string) bool {
 
 // Save writes cfg to path with user-only (0600) permissions, creating
 // parent directories first.
-func Save(path string, cfg *Config) error {
+func Save(path string, cfg *Config, languages ...string) error {
+	lang := configLanguage(languages)
 	if err := clipath.EnsureDirs(); err != nil {
-		return fmt.Errorf("ensure dirs: %w", err)
+		return fmt.Errorf("%s: %w", i18n.Translate(lang, "cli.client.config.ensure_directories_failed"), err)
 	}
 
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return fmt.Errorf("%s: %w", i18n.Translate(lang, "cli.client.config.encode_failed"), err)
 	}
 
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write config %s: %w", path, err)
+		return fmt.Errorf("%s: %w", i18n.TranslateFormat(lang, "cli.client.config.write_failed", map[string]string{"path": path}), err)
 	}
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("%s: %w", i18n.TranslateFormat(lang, "cli.client.config.permissions_failed", map[string]string{"path": path}), err)
+	}
+	return nil
+}
+
+func configLanguage(languages []string) string {
+	if len(languages) > 0 {
+		return i18n.ResolveCLILang(languages[0], "")
+	}
+	return i18n.ResolveCLILang("", "")
 }
 
 // IsValidServerURL reports whether s parses as an absolute http(s) URL.

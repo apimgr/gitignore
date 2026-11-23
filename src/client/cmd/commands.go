@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -38,20 +39,20 @@ func CmdList(c *api.Client, p *output.Printer, format string) int {
 		return handleAPIError(err, p)
 	}
 	sort.Strings(names)
-	return printNames(names, format, p, "Template")
+	return printNames(names, format, p, text("cli.client.table.template"))
 }
 
 // CmdSearch implements `gitignore-cli search QUERY`.
 func CmdSearch(c *api.Client, p *output.Printer, format, query string) int {
 	if strings.TrimSpace(query) == "" {
-		p.Error("search requires a query, e.g. %s search golang", binaryName())
+		p.ErrorText(text("cli.client.command.search_requires_query", "binary", binaryName()))
 		return output.ExitUsage
 	}
 	names, err := c.Search(query)
 	if err != nil {
 		return handleAPIError(err, p)
 	}
-	return printNames(names, format, p, "Template")
+	return printNames(names, format, p, text("cli.client.table.template"))
 }
 
 // CmdCategories implements `gitignore-cli categories`.
@@ -61,20 +62,20 @@ func CmdCategories(c *api.Client, p *output.Printer, format string) int {
 		return handleAPIError(err, p)
 	}
 	sort.Strings(cats)
-	return printNames(cats, format, p, "Category")
+	return printNames(cats, format, p, text("cli.client.table.category"))
 }
 
 // CmdCategory implements `gitignore-cli category NAME`.
 func CmdCategory(c *api.Client, p *output.Printer, format, name string) int {
 	if strings.TrimSpace(name) == "" {
-		p.Error("category requires a name, e.g. %s category editors", binaryName())
+		p.ErrorText(text("cli.client.command.category_requires_name", "binary", binaryName()))
 		return output.ExitUsage
 	}
 	names, err := c.CategoryTemplates(name)
 	if err != nil {
 		return handleAPIError(err, p)
 	}
-	return printNames(names, format, p, "Template")
+	return printNames(names, format, p, text("cli.client.table.template"))
 }
 
 // CmdStats implements `gitignore-cli stats`.
@@ -102,7 +103,7 @@ func CmdStats(c *api.Client, p *output.Printer, format string) int {
 // CmdGetTemplate implements `gitignore-cli get NAME` / `template NAME`.
 func CmdGetTemplate(c *api.Client, p *output.Printer, format, name string) int {
 	if strings.TrimSpace(name) == "" {
-		p.Error("get requires a template name, e.g. %s get Go", binaryName())
+		p.ErrorText(text("cli.client.command.get_requires_name", "binary", binaryName()))
 		return output.ExitUsage
 	}
 	tmpl, err := c.GetTemplate(name)
@@ -126,7 +127,7 @@ func CmdGetTemplate(c *api.Client, p *output.Printer, format, name string) int {
 // "gitignore-cli Go Node > .gitignore".
 func CmdCombine(c *api.Client, p *output.Printer, format string, names []string) int {
 	if len(names) == 0 {
-		p.Error("combine requires one or more template names, e.g. %s Go Node", binaryName())
+		p.ErrorText(text("cli.client.command.combine_requires_names", "binary", binaryName()))
 		return output.ExitUsage
 	}
 	content, err := c.Combine(names)
@@ -151,22 +152,23 @@ func CmdCombine(c *api.Client, p *output.Printer, format string, names []string)
 // handleAPIError maps an API/connection error to a CLI exit code and prints
 // a PART-32-style actionable message.
 func handleAPIError(err error, p *output.Printer) int {
-	if apiErr, ok := err.(*api.APIError); ok {
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
 		switch apiErr.Status {
 		case 404:
-			p.Error("resource not found: %s", apiErr.Message)
+			p.ErrorText(text("cli.client.error.resource_not_found", "message", apiErr.Message))
 			return output.ExitNotFound
 		case 401, 403:
-			p.Error("authentication failed: %s", apiErr.Message)
+			p.ErrorText(text("cli.client.error.authentication_failed", "message", apiErr.Message))
 			return output.ExitAuth
 		default:
-			p.Error("%s", apiErr.Message)
+			p.ErrorText(apiErr.Message)
 			return output.ExitGeneral
 		}
 	}
-	p.Error("%s", err.Error())
-	fmt.Fprintln(os.Stderr, "  Check your network connection and server address.")
-	fmt.Fprintln(os.Stderr, "  Use --server to specify a different server.")
+	p.ErrorText(err.Error())
+	fmt.Fprintln(os.Stderr, text("cli.client.error.check_network"))
+	fmt.Fprintln(os.Stderr, text("cli.client.error.specify_server"))
 	return output.ExitConnection
 }
 

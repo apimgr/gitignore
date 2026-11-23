@@ -23,8 +23,8 @@ func TestHandleHome(t *testing.T) {
 	}
 }
 
-// TestHandleStaticServesEmbeddedFile verifies handleStatic serves a known
-// embedded asset with the immutable static cache policy.
+// TestHandleStaticServesEmbeddedFile verifies long-lived caching requires the
+// current build stamp and unversioned assets revalidate.
 func TestHandleStaticServesEmbeddedFile(t *testing.T) {
 	s := newTestCompatServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/static/images/icon.svg", nil)
@@ -34,8 +34,14 @@ func TestHandleStaticServesEmbeddedFile(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
 	}
-	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
-		t.Errorf("Cache-Control = %q, want immutable", cc)
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("unversioned Cache-Control = %q, want no-cache", cc)
+	}
+	versioned := httptest.NewRequest(http.MethodGet, "/static/images/icon.svg?v="+s.assetStamp(), nil)
+	versionedRec := httptest.NewRecorder()
+	s.handleStatic(versionedRec, versioned)
+	if cc := versionedRec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Errorf("versioned Cache-Control = %q, want immutable", cc)
 	}
 }
 
@@ -315,8 +321,16 @@ func TestHandleServiceWorker(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
 	rec := httptest.NewRecorder()
 	s.handleServiceWorker(rec, req)
-	if !strings.Contains(rec.Body.String(), "CACHE_NAME") {
-		t.Errorf("expected service worker script: %s", rec.Body.String())
+	for _, expected := range []string{"gitignore-cache-", "NAV_TIMEOUT_MS = 8000", "SKIP_WAITING", "request.mode === 'navigate'", "url.pathname.startsWith('/api/')", "!response.redirected", "offlineResponse()"} {
+		if !strings.Contains(rec.Body.String(), expected) {
+			t.Errorf("service worker missing %q", expected)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_ASSETS)));\n  self.skipWaiting();") {
+		t.Error("service worker must wait for user approval before activation")
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", cc)
 	}
 }
 
@@ -408,7 +422,10 @@ func TestHandleAPIStatsText(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats.txt", nil)
 	rec := httptest.NewRecorder()
 	s.handleAPIStatsText(rec, req)
-	if !strings.Contains(rec.Body.String(), "Total Templates:") {
+	if !strings.Contains(rec.Body.String(), "Total templates:") {
 		t.Errorf("expected stats text: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Total size:") {
+		t.Errorf("expected translated stats labels: %s", rec.Body.String())
 	}
 }

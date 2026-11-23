@@ -72,7 +72,7 @@ func TestInteractiveInputAndHelp(t *testing.T) {
 			t.Errorf("Interactive returned %d", got)
 		}
 	})
-	if !strings.Contains(outputText, "interactive mode") || !strings.Contains(outputText, "Commands:") {
+	if !strings.Contains(strings.ToLower(outputText), "interactive mode") || !strings.Contains(outputText, "Commands:") {
 		t.Fatalf("interactive help output incomplete: %s", outputText)
 	}
 }

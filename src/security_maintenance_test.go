@@ -34,6 +34,19 @@ func TestSecurityMaintenanceValidators(t *testing.T) {
 	}
 }
 
+func TestSecurityMaintenanceLabelsUseOutputLanguage(t *testing.T) {
+	previous := outputLanguage
+	t.Setenv("LANG", "en_US.UTF-8")
+	setOutputLanguage("es", "")
+	t.Cleanup(func() { outputLanguage = previous })
+	if got := securityStatusLabel("wont_fix"); got != "No se corregirá" {
+		t.Errorf("securityStatusLabel(wont_fix) = %q, want Spanish translation", got)
+	}
+	if got := securitySeverityLabel("critical"); got != "Crítica" {
+		t.Errorf("securitySeverityLabel(critical) = %q, want Spanish translation", got)
+	}
+}
+
 func TestSecurityMaintenanceReportListingAndUpdate(t *testing.T) {
 	if err := db.Init(t.TempDir()); err != nil {
 		t.Fatal(err)

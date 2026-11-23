@@ -133,7 +133,7 @@ func buildBackupArchive(sources []backupSource, encrypted bool) ([]byte, error) 
 	for _, src := range sources {
 		data, err := os.ReadFile(src.diskPath)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", src.diskPath, err)
+			return nil, fmt.Errorf("%s: %w", cliText("cli.backup.source_read_failed", "path", src.diskPath), err)
 		}
 		sum := sha256.Sum256(data)
 		manifest.Checksums[src.archivePath] = hex.EncodeToString(sum[:])
@@ -219,7 +219,7 @@ func encryptBackup(plaintext []byte, password string) ([]byte, error) {
 // "Decrypt test").
 func decryptBackup(blob []byte, password string) ([]byte, error) {
 	if len(blob) < backupSaltLen+backupNonceLen {
-		return nil, errors.New("encrypted backup is truncated")
+		return nil, errors.New(cliText("cli.backup.encrypted_truncated"))
 	}
 	salt := blob[:backupSaltLen]
 	nonce := blob[backupSaltLen : backupSaltLen+backupNonceLen]
@@ -236,7 +236,7 @@ func decryptBackup(blob []byte, password string) ([]byte, error) {
 	}
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, errors.New("decryption failed (wrong password or corrupted backup)")
+		return nil, errors.New(cliText("cli.backup.decryption_failed"))
 	}
 	return plaintext, nil
 }
@@ -248,7 +248,7 @@ func promptPassword(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return "", errors.New("a password is required but stdin is not a terminal")
+		return "", errors.New(cliText("cli.backup.password_requires_terminal"))
 	}
 	pw, err := term.ReadPassword(fd)
 	fmt.Fprintln(os.Stderr)
@@ -260,26 +260,16 @@ func promptPassword(prompt string) (string, error) {
 
 // runBackup implements `--maintenance backup [filename]`.
 func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error {
-	encrypt := cfg != nil && cfg.Server.Backup.Encryption.Enabled
-
 	password := ""
-	if encrypt {
-		pw, err := promptPassword("Enter backup password: ")
-		if err != nil {
-			return err
-		}
-		confirm, err := promptPassword("Confirm backup password: ")
-		if err != nil {
-			return err
-		}
-		if pw == "" {
-			return errors.New("backup password cannot be empty")
-		}
-		if pw != confirm {
-			return errors.New("passwords do not match")
-		}
-		password = pw
+	complianceEnabled := false
+	if cfg != nil {
+		password = cfg.Server.Backup.EncryptionPassword
+		complianceEnabled = cfg.Server.Compliance.Enabled
 	}
+	if complianceEnabled && password == "" {
+		return errors.New(cliText("cli.backup.compliance_password_required", "setting", "server.backup.encryption_password"))
+	}
+	encrypt := password != ""
 
 	// Ensure the filename extension matches the encryption decision.
 	backupFile = normalizeBackupExt(backupFile, encrypt)
@@ -289,7 +279,7 @@ func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error 
 		return err
 	}
 	if len(sources) == 0 {
-		return errors.New("nothing to back up (no config or database found)")
+		return errors.New(cliText("cli.backup.nothing_to_back_up"))
 	}
 
 	archive, err := buildBackupArchive(sources, encrypt)
@@ -316,10 +306,10 @@ func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error 
 	// every manifest checksum (AI.md PART 21 → "Verification").
 	if err := verifyBackupFile(backupFile, password); err != nil {
 		_ = os.Remove(backupFile)
-		return fmt.Errorf("backup verification failed: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.verification_failed"), err)
 	}
 
-	fmt.Printf("Backup created: %s\n", backupFile)
+	fmt.Println(cliText("cli.backup.created", "file", backupFile))
 	return nil
 }
 
@@ -363,7 +353,7 @@ func extractToStaging(archive []byte) (string, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		_ = os.RemoveAll(staging)
-		return "", fmt.Errorf("invalid gzip stream: %w", err)
+		return "", fmt.Errorf("%s: %w", cliText("cli.backup.invalid_gzip"), err)
 	}
 	tr := tar.NewReader(gz)
 
@@ -380,12 +370,12 @@ func extractToStaging(archive []byte) (string, error) {
 		clean := filepath.Clean(hdr.Name)
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 			_ = os.RemoveAll(staging)
-			return "", fmt.Errorf("refusing path traversal entry: %s", hdr.Name)
+			return "", fmt.Errorf("%s", cliText("cli.backup.unsafe_archive_path", "path", hdr.Name))
 		}
 		dest := filepath.Join(staging, clean)
 		if !strings.HasPrefix(dest, filepath.Clean(staging)+string(os.PathSeparator)) {
 			_ = os.RemoveAll(staging)
-			return "", fmt.Errorf("refusing entry outside staging: %s", hdr.Name)
+			return "", fmt.Errorf("%s", cliText("cli.backup.entry_outside_staging", "path", hdr.Name))
 		}
 
 		if hdr.FileInfo().IsDir() {
@@ -421,25 +411,25 @@ func extractToStaging(archive []byte) (string, error) {
 func loadAndVerifyManifest(staging string) (*backupManifest, error) {
 	raw, err := os.ReadFile(filepath.Join(staging, "manifest.json"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid manifest: %w", err)
+		return nil, fmt.Errorf("%s: %w", cliText("cli.backup.invalid_manifest"), err)
 	}
 	var m backupManifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("invalid manifest: %w", err)
+		return nil, fmt.Errorf("%s: %w", cliText("cli.backup.invalid_manifest"), err)
 	}
 
 	for path, want := range m.Checksums {
 		clean := filepath.Clean(path)
 		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
-			return nil, fmt.Errorf("manifest lists unsafe path: %s", path)
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_unsafe_path", "path", path))
 		}
 		data, err := os.ReadFile(filepath.Join(staging, clean))
 		if err != nil {
-			return nil, fmt.Errorf("manifest file missing: %s", path)
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_file_missing", "path", path))
 		}
 		sum := sha256.Sum256(data)
 		if hex.EncodeToString(sum[:]) != want {
-			return nil, fmt.Errorf("checksum mismatch for %s", path)
+			return nil, fmt.Errorf("%s", cliText("cli.backup.checksum_mismatch", "path", path))
 		}
 	}
 
@@ -454,7 +444,7 @@ func verifyBackupFile(backupFile, password string) error {
 		return err
 	}
 	if fi.Size() == 0 {
-		return errors.New("backup file is empty")
+		return errors.New(cliText("cli.backup.file_empty"))
 	}
 	archive, err := readBackupArchive(backupFile, password)
 	if err != nil {
@@ -475,7 +465,7 @@ func verifyBackupPGP(backupFile, password string) error {
 		return err
 	}
 	if fi.Size() == 0 {
-		return errors.New("backup file is empty")
+		return errors.New(cliText("cli.backup.file_empty"))
 	}
 	archive, err := readBackupArchive(backupFile, password)
 	if err != nil {
@@ -491,11 +481,11 @@ func verifyBackupPGP(backupFile, password string) error {
 		return err
 	}
 	if !hasRestoredPGPKeypair(manifest.Contents) {
-		return errors.New("backup manifest does not include both PGP key files")
+		return errors.New(cliText("cli.backup.pgp_key_files_missing"))
 	}
 	for _, required := range []string{"security/pgp.pub.asc", "security/pgp.priv.asc.enc", "db/server.db"} {
 		if manifest.Checksums[required] == "" {
-			return fmt.Errorf("backup manifest does not checksum %s", required)
+			return fmt.Errorf("%s", cliText("cli.backup.manifest_checksum_missing", "path", required))
 		}
 	}
 	return verifyStagedPGP(staging)
@@ -507,32 +497,32 @@ func verifyStagedPGP(staging string) error {
 	databasePath := filepath.Join(staging, "db", "server.db")
 	privateEnvelope, err := os.ReadFile(privatePath)
 	if err != nil {
-		return fmt.Errorf("backup PGP private key is missing: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_private_key_missing"), err)
 	}
 	publicKey, err := os.ReadFile(publicPath)
 	if err != nil {
-		return fmt.Errorf("backup PGP public key is missing: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_public_key_missing"), err)
 	}
 	conn, err := sql.Open("sqlite", databasePath)
 	if err != nil {
-		return fmt.Errorf("open staged backup database: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.database_open_failed"), err)
 	}
 	defer func() { _ = conn.Close() }()
 	var encodedSecret string
 	if err := conn.QueryRow("SELECT value FROM app_secrets WHERE key = ?", "installation_secret").Scan(&encodedSecret); err != nil {
-		return fmt.Errorf("backup installation secret is unavailable: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.installation_secret_unavailable"), err)
 	}
 	secret, err := base64.StdEncoding.DecodeString(encodedSecret)
 	if err != nil || len(secret) != 32 {
-		return errors.New("backup installation secret is invalid")
+		return errors.New(cliText("cli.backup.installation_secret_invalid"))
 	}
 	privateKey, err := pgp.UnprotectPrivateKey(privateEnvelope, secret)
 	if err != nil {
-		return fmt.Errorf("backup PGP private key cannot be decrypted: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_private_key_decrypt_failed"), err)
 	}
 	derivedPublic, err := pgp.PublicFromPrivate(privateKey)
 	if err != nil {
-		return fmt.Errorf("backup PGP private key is invalid: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_private_key_invalid"), err)
 	}
 	privateFingerprint, err := pgp.Fingerprint(derivedPublic)
 	if err != nil {
@@ -540,10 +530,10 @@ func verifyStagedPGP(staging string) error {
 	}
 	publicFingerprint, err := pgp.Fingerprint(string(publicKey))
 	if err != nil {
-		return fmt.Errorf("backup PGP public key is invalid: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_public_key_invalid"), err)
 	}
 	if privateFingerprint != publicFingerprint {
-		return errors.New("backup PGP public and private keys do not match")
+		return errors.New(cliText("cli.backup.pgp_key_mismatch"))
 	}
 	return nil
 }
@@ -553,19 +543,19 @@ func verifyStagedPGP(staging string) error {
 // 21 → "Restore Verification" / "Restore Behavior").
 func runRestore(backupFile, configDir, dataDir string) error {
 	if _, err := os.Stat(backupFile); err != nil {
-		return fmt.Errorf("backup file not found: %s", backupFile)
+		return fmt.Errorf("%s", cliText("cli.backup.file_not_found", "file", backupFile))
 	}
 
 	password := ""
 	if strings.HasSuffix(backupFile, ".enc") {
-		pw, err := promptPassword("Enter backup password: ")
+		pw, err := promptPassword(cliText("cli.backup.password_prompt"))
 		if err != nil {
 			return err
 		}
 		password = pw
 	}
 
-	fmt.Println("Verifying backup integrity...")
+	fmt.Println(cliText("cli.backup.verifying"))
 	archive, err := readBackupArchive(backupFile, password)
 	if err != nil {
 		return err
@@ -581,14 +571,14 @@ func runRestore(backupFile, configDir, dataDir string) error {
 		return err
 	}
 	if manifest.AppVersion != "" && manifest.AppVersion != Version {
-		fmt.Printf("Warning: backup was created by app version %s (running %s)\n", manifest.AppVersion, Version)
+		fmt.Println(cliText("cli.backup.version_mismatch_warning", "backup_version", manifest.AppVersion, "running_version", Version))
 	}
-	fmt.Println("Verification OK")
+	fmt.Println(cliText("cli.backup.verification_ok"))
 
 	// Install each verified file to its live location. server.yml goes to the
 	// config dir; everything else is relative to the config dir except the
 	// database, which lives under the data dir.
-	fmt.Println("Restoring...")
+	fmt.Println(cliText("cli.backup.restoring"))
 	for _, rel := range manifest.Contents {
 		src := filepath.Join(staging, filepath.Clean(rel))
 		var dest string
@@ -598,16 +588,16 @@ func runRestore(backupFile, configDir, dataDir string) error {
 			dest = filepath.Join(configDir, filepath.Clean(rel))
 		}
 		if err := installFile(src, dest); err != nil {
-			return fmt.Errorf("installing %s: %w", rel, err)
+			return fmt.Errorf("%s: %w", cliText("cli.backup.install_failed", "path", rel), err)
 		}
 	}
 	if hasRestoredPGPKeypair(manifest.Contents) {
 		if err := republishRestoredPGP(configDir, dataDir); err != nil {
-			return fmt.Errorf("restore completed, but PGP keyserver publication is pending: %w", err)
+			return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_publication_pending"), err)
 		}
 	}
 
-	fmt.Println("Restore completed")
+	fmt.Println(cliText("cli.backup.restore_completed"))
 	return nil
 }
 

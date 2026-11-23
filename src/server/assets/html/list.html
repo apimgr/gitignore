@@ -1,6 +1,6 @@
 {{define "content"}}
-<h1>All Templates</h1>
-<p>{{len .Data.templates}} templates.</p>
+<h1>{{t .Lang "nav.all_templates"}}</h1>
+<p>{{tf .Lang "web.catalog.count" "count" (len .Data.templates)}}</p>
 <ul class="templates">
 {{range .Data.templates}}<li><a href="{{path (printf "/template/%s" .)}}">{{.}}</a></li>{{end}}
 </ul>

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 func TestRenderSubstitutesVariables(t *testing.T) {
@@ -99,6 +101,31 @@ func TestAllEmbeddedDefaultsValidate(t *testing.T) {
 	for _, name := range TemplateNames {
 		if _, _, err := r.Render(name, map[string]string{}); err != nil {
 			t.Errorf("Render(%q): %v", name, err)
+		}
+	}
+}
+
+func TestRenderLocalizedTranslatesCopyBeforeSubstitution(t *testing.T) {
+	vars := map[string]string{
+		"app_name":  "gitignore",
+		"app_url":   "https://api.example.com",
+		"fqdn":      "api.example.com",
+		"timestamp": "2026-07-20T00:00:00Z",
+		"filename":  "backup-2026.tar.zst",
+		"size":      "12 MB",
+	}
+	subject, body, err := NewRenderer("").RenderLocalized("backup_complete", "es", vars)
+	if err != nil {
+		t.Fatalf("RenderLocalized: %v", err)
+	}
+	wantSubject := i18n.TranslateFormat("es", "email.templates.backup_complete.subject", map[string]string{"app_name": "gitignore"})
+	if subject != wantSubject || subject == i18n.TranslateFormat("en", "email.templates.backup_complete.subject", map[string]string{"app_name": "gitignore"}) {
+		t.Errorf("localized subject = %q, want Spanish translation %q", subject, wantSubject)
+	}
+	wantSummary := i18n.Translate("es", "email.templates.backup_complete.summary")
+	for _, want := range []string{wantSummary, "backup-2026.tar.zst", "12 MB", "https://api.example.com", "api.example.com"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("localized body missing %q\n%s", want, body)
 		}
 	}
 }

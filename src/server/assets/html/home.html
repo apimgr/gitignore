@@ -1,12 +1,12 @@
 {{define "content"}}
-<h1>GitIgnore Template Server</h1>
-<p>{{.Description}} Browse, search, and combine <code>.gitignore</code> templates, or use the API.</p>
+<h1>{{t .Lang "web.home.title"}}</h1>
+<p>{{.Description}} {{t .Lang "web.home.description"}}</p>
 <form action="{{path "/search"}}" method="get">
-<input type="text" name="q" placeholder="Search templates…" aria-label="Search">
-<button type="submit">Search</button>
+<input type="text" name="q" placeholder="{{t .Lang "web.home.search_placeholder"}}" aria-label="{{t .Lang "common.search"}}">
+<button type="submit">{{t .Lang "common.search"}}</button>
 </form>
-<p><strong>{{.Data.total}}</strong> templates across <strong>{{.Data.categories}}</strong> categories.</p>
-<h2>Quick start</h2>
+<p>{{tf .Lang "web.home.catalog_summary" "templates" .Data.total "categories" .Data.categories}}</p>
+<h2>{{t .Lang "web.home.quick_start"}}</h2>
 <pre>curl {{.BaseURL}}{{.APIBase}}/templates/go
 curl {{.BaseURL}}{{.APIBase}}/combine?templates=go,node,macos</pre>
 {{end}}

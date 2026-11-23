@@ -17,7 +17,7 @@ import (
 // handleHome serves the home page
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, r, "home", PageData{
-		Title: "Home",
+		Title: i18n.T(r, "web.home.title"),
 		Data: map[string]interface{}{
 			"total":      s.config.Templates.Count(),
 			"categories": len(s.config.Templates.GetCategories()),
@@ -167,8 +167,11 @@ func (s *Server) handleAPITemplatesTarGz(w http.ResponseWriter, r *http.Request)
 // handleSwaggerUI serves a Swagger UI page bound to the OpenAPI JSON endpoint.
 func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:   i18n.Translate(i18n.LangFromContext(r.Context()), "nav.api_docs"),
-		PageCSS: []string{s.requestPath(r, "/static/vendor/swagger/swagger-ui.css")},
+		Title: i18n.Translate(i18n.LangFromContext(r.Context()), "nav.api_docs"),
+		PageCSS: []string{
+			s.requestPath(r, "/static/vendor/swagger/swagger-ui.css"),
+			s.requestPath(r, "/static/vendor/swagger/swagger-custom.css"),
+		},
 		PageScripts: []string{
 			s.requestPath(r, "/static/vendor/swagger/swagger-ui-bundle.js"),
 			s.requestPath(r, "/static/vendor/swagger/swagger-init.js"),
@@ -187,13 +190,14 @@ func (s *Server) handleOpenAPIJSON(w http.ResponseWriter, r *http.Request) {
 
 // handleStatic serves embedded static assets under /static/.
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	setCacheHeaders(w, "static")
+	setVersionedCacheHeaders(w, r, s.assetStamp())
 	http.StripPrefix("/static/", http.FileServer(staticHTTPFS)).ServeHTTP(w, r)
 }
 
 // handleFavicon serves the embedded favicon.
 func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	setCacheHeaders(w, "static")
+	w.Header().Set("ETag", `"`+s.assetStamp()+`"`)
 	f, err := staticHTTPFS.Open("favicon.ico")
 	if err != nil {
 		http.NotFound(w, r)
@@ -260,6 +264,7 @@ func (s *Server) handleSecurityTxt(w http.ResponseWriter, r *http.Request) {
 // handleManifest serves PWA manifest
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/manifest+json")
+	setVersionedCacheHeaders(w, r, s.assetStamp())
 	manifest := `{
   "name": "GitIgnore API",
   "short_name": "GitIgnore",
@@ -284,53 +289,80 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 // handleServiceWorker serves the service worker
 func (s *Server) handleServiceWorker(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
-	sw := `// GitIgnore Service Worker
-const CACHE_NAME = 'gitignore-v2';
-const OFFLINE_URL = '/static/offline.html';
-const urlsToCache = [
-  '/',
-  '/static/css/main.css',
-  '/static/js/app.js',
-  '/static/images/icon.svg',
-  '/manifest.json',
-  OFFLINE_URL
-];
+	setVersionedCacheHeaders(w, r, s.assetStamp())
+	stamp := s.assetStamp()
+	staticURL := func(path string) string { return path + "?v=" + stamp }
+	sw := fmt.Sprintf(`// GitIgnore Service Worker
+const CACHE_NAME = %q;
+const CACHE_PREFIX = 'gitignore-cache-';
+const OFFLINE_URL = %q;
+const PRECACHE_ASSETS = [%q, %q, %q, %q, %q];
+const NAV_TIMEOUT_MS = 8000;
 
-self.addEventListener('install', function(event) {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(urlsToCache);
-    })
-  );
-  self.skipWaiting();
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_ASSETS)));
 });
 
-self.addEventListener('activate', function(event) {
-  event.waitUntil(
-    caches.keys().then(function(keys) {
-      return Promise.all(keys.filter(function(k) {
-        return k !== CACHE_NAME;
-      }).map(function(k) {
-        return caches.delete(k);
-      }));
-    })
-  );
-  self.clients.claim();
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(
+    keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key))
+  )).then(() => self.clients.claim()));
 });
 
-self.addEventListener('fetch', function(event) {
-  if (event.request.method !== 'GET') {
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+function withTimeout(promise, milliseconds) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('navigation timeout')), milliseconds);
+    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+
+function offlineResponse() {
+  return new Response('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Offline</title><main><h1>Offline</h1><p>This page is unavailable offline. Reconnect and try again.</p></main></html>', {
+    status: 503, statusText: 'Service Unavailable', headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+function remember(request, response) {
+  if (response.ok && !response.redirected) {
+    const copy = response.clone();
+    caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).catch(() => {});
+  }
+  return response;
+}
+
+async function navigationFallback(request) {
+  try {
+    const cachedPage = await caches.match(request, { ignoreSearch: true });
+    if (cachedPage) return cachedPage;
+    const offlinePage = await caches.match(OFFLINE_URL, { ignoreSearch: true });
+    if (offlinePage) return offlinePage;
+  } catch (_) {}
+  return offlineResponse();
+}
+
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+
+  if (request.mode === 'navigate') {
+    event.respondWith(withTimeout(fetch(request), NAV_TIMEOUT_MS).then(response => {
+      if (response.redirected) throw new Error('redirected navigation');
+      return remember(request, response);
+    }).catch(() => navigationFallback(request)));
     return;
   }
-  event.respondWith(
-    caches.match(event.request).then(function(response) {
-      return response || fetch(event.request).catch(function() {
-        return caches.match(OFFLINE_URL);
-      });
-    })
-  );
+
+  if (url.pathname.startsWith('/static/')) {
+    event.respondWith(caches.match(request, { ignoreSearch: true }).then(cached => cached || fetch(request).then(response => remember(request, response)))
+      .catch(() => new Response('', { status: 504, statusText: 'Gateway Timeout' })));
+  }
 });
-`
+`, "gitignore-cache-"+stamp, "/static/offline.html", staticURL("/static/css/main.css"), staticURL("/static/js/app.js"), staticURL("/static/images/icon.svg"), staticURL("/manifest.json"), staticURL("/static/offline.html"))
 	_, _ = fmt.Fprint(w, sw)
 }
 
@@ -343,7 +375,7 @@ func (s *Server) handleAPITemplateText(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl, err := s.config.Templates.Get(name)
 	if err != nil {
-		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND", "template not found")
+		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -363,7 +395,7 @@ func (s *Server) handleAPIListText(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPISearchText(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		sendAPIResponseError(w, "BAD_REQUEST", "query parameter 'q' is required")
+		sendAPIResponseErrorLocalized(w, r, "BAD_REQUEST")
 		return
 	}
 	results := s.config.Templates.Search(query)
@@ -400,8 +432,8 @@ func (s *Server) handleAPICategoryTemplatesText(w http.ResponseWriter, r *http.R
 // handleAPIStatsText returns template statistics as text
 func (s *Server) handleAPIStatsText(w http.ResponseWriter, r *http.Request) {
 	stats := s.config.Templates.Stats()
-	w.Header().Set("Content-Type", "text/plain")
-	_, _ = fmt.Fprintf(w, "Total Templates: %d\n", stats["total_templates"])
-	_, _ = fmt.Fprintf(w, "Categories: %d\n", stats["categories"])
-	_, _ = fmt.Fprintf(w, "Total Size: %d bytes\n", stats["total_size_bytes"])
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = fmt.Fprintf(w, "%s\n", i18n.TF(r, "web.stats.total_templates", "count", fmt.Sprint(stats["total_templates"])))
+	_, _ = fmt.Fprintf(w, "%s\n", i18n.TF(r, "web.stats.categories", "count", fmt.Sprint(stats["categories"])))
+	_, _ = fmt.Fprintf(w, "%s\n", i18n.TF(r, "web.stats.total_size", "size", fmt.Sprint(stats["total_size_bytes"])))
 }

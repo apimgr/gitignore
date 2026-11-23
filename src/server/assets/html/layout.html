@@ -19,11 +19,11 @@
 {{end}}
 {{.TrackingMarkup}}
 </head>
-<body>
+<body data-update-available="{{t .Lang "notifications.update_available"}}" data-update-now="{{t .Lang "common.update"}}" data-update-later="{{t .Lang "common.close"}}" data-recovery-title="{{t .Lang "pwa.recovery.title"}}" data-recovery-message="{{t .Lang "pwa.recovery.message"}}">
 {{.TrackingNoscript}}
 <a class="skip-link" href="#main-content">{{t .Lang "nav.skip_to_content"}}</a>
 <a class="skip-link" href="#navigation">{{t .Lang "nav.skip_to_navigation"}}</a>
-<input type="checkbox" id="nav-toggle" class="nav-checkbox" hidden>
+<input type="checkbox" id="nav-toggle" class="nav-checkbox" aria-controls="nav-panel" hidden>
 <header class="header">
 <a href="{{path "/"}}" class="site-brand">GitIgnore</a>
 <nav id="navigation" class="nav-links" aria-label="{{t .Lang "nav.main_navigation"}}">
@@ -36,7 +36,7 @@
 <a href="{{path "/docs"}}"{{if eq .Path "/docs"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.api_docs"}}</a>
 <a href="{{path "/cli"}}"{{if eq .Path "/cli"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.cli"}}</a>
 </nav>
-<label class="nav-toggle" for="nav-toggle" aria-label="{{t .Lang "nav.main_navigation"}}">☰</label>
+<label class="nav-toggle" for="nav-toggle" role="button" tabindex="0" aria-controls="nav-panel" aria-label="{{t .Lang "nav.main_navigation"}}" title="{{t .Lang "nav.main_navigation"}}">☰</label>
 <div class="header-actions">
 <a class="preferences-link" href="{{path "/server/preferences"}}">{{t .Lang "common.preferences"}}</a>
 <form class="theme-form" action="{{path "/server/theme"}}" method="post">
@@ -50,8 +50,20 @@
 <main id="main-content">
 {{template "content" .}}
 </main>
+<nav class="nav-panel" id="nav-panel" aria-label="{{t .Lang "nav.main_navigation"}}">
+<label class="nav-close" for="nav-toggle" role="button" tabindex="0" aria-label="{{t .Lang "common.close"}}" title="{{t .Lang "common.close"}}">✕</label>
+<a href="{{path "/"}}"{{if eq .Path "/"}} aria-current="page"{{end}}>{{t .Lang "nav.home"}}</a>
+<a href="{{path "/search"}}"{{if eq .Path "/search"}} aria-current="page"{{end}}>{{t .Lang "common.search"}}</a>
+<a href="{{path "/list"}}"{{if eq .Path "/list"}} aria-current="page"{{end}}>{{t .Lang "nav.all_templates"}}</a>
+<a href="{{path "/categories"}}"{{if eq .Path "/categories"}} aria-current="page"{{end}}>{{t .Lang "nav.categories"}}</a>
+<a href="{{path "/combine"}}"{{if eq .Path "/combine"}} aria-current="page"{{end}}>{{t .Lang "nav.combine"}}</a>
+<a href="{{path "/stats"}}"{{if eq .Path "/stats"}} aria-current="page"{{end}}>{{t .Lang "nav.stats"}}</a>
+<a href="{{path "/docs"}}"{{if eq .Path "/docs"}} aria-current="page"{{end}}>{{t .Lang "nav.api_docs"}}</a>
+<a href="{{path "/cli"}}"{{if eq .Path "/cli"}} aria-current="page"{{end}}>{{t .Lang "nav.cli"}}</a>
+</nav>
+<label class="nav-overlay" for="nav-toggle" aria-label="{{t .Lang "common.close"}}"></label>
 <footer class="footer">
-<nav class="footer-links" aria-label="Footer">
+<nav class="footer-links" aria-label="{{t .Lang "a11y.footer_navigation"}}">
 <a href="{{path "/server/about"}}">{{t .Lang "nav.about"}}</a>
 <a href="{{path "/server/privacy"}}">{{t .Lang "nav.privacy"}}</a>
 <a href="{{path "/server/help"}}">{{t .Lang "nav.help"}}</a>
@@ -60,7 +72,7 @@
 <a href="{{path "/server/security"}}">{{t .Lang "nav.security"}}</a>
 <a href="https://github.com/apimgr/gitignore" rel="noopener noreferrer">GitHub</a>
 </nav>
-<p class="footer-meta">GitIgnore API Server v{{.Version}} · <a href="{{.APIBase}}">{{.APIBase}}</a> · <a href="{{path "/server/preferences#language"}}">{{.LanguageName}}</a></p>
+<p class="footer-meta">{{tf .Lang "web.layout.server_version" "version" .Version}} · <a href="{{.APIBase}}">{{t .Lang "web.layout.api_endpoint"}}</a> · <a href="{{path "/server/preferences#language"}}">{{tf .Lang "web.layout.language" "language" .LanguageName}}</a></p>
 </footer>
 {{range .PageScripts}}<script src="{{.}}" defer></script>
 {{end}}

@@ -1,13 +1,13 @@
-Subject: Backup Failed - {app_name}
+Subject: {email_subject}
 ---
-BACKUP FAILED
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-Your backup did not complete.
+{email_summary}
 
-Error: {error}
+{email_error_label}: {error}
 
 --
 {app_name}

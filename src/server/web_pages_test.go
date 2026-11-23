@@ -4,11 +4,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/go-chi/chi/v5"
@@ -19,6 +21,274 @@ import (
 // standard pages and error pages (no Templates manager needed).
 func newTestPageServer() *Server {
 	return &Server{config: &Config{Version: "test", Cfg: config.DefaultConfig()}, router: chi.NewRouter()}
+}
+
+func TestServerPageCopyIsLocalized(t *testing.T) {
+	server := newTestPageServer()
+	pageNames := make([]string, 0, len(pageTemplates))
+	for name := range pageTemplates {
+		pageNames = append(pageNames, name)
+	}
+	sort.Strings(pageNames)
+
+	allowedSharedCopy := map[string]struct{}{
+		"API": {}, "CLI": {}, "GitHub": {}, "GitIgnore": {}, "GraphQL": {},
+		"Swagger UI": {}, "OpenAPI JSON": {}, "Documentation": {}, "Server": {},
+		"Version": {}, "Version test ().": {}, "Version: vtest": {}, "API: /api/v1": {},
+		"Tor:": {}, "/server/healthz": {}, "Cache": {}, "Cluster": {}, "Mode": {},
+		"Description": {}, "Cause": {}, "Auto": {}, "Actions": {},
+		"Links": {}, "Export": {}, "Status": {}, "Home": {}, "Privacy": {},
+		"English": {}, "Español": {}, "Français": {}, "العربية": {}, "Deutsch": {},
+		"Italiano": {}, "日本語": {}, "中文": {}, "go,node,macos": {},
+	}
+	for _, page := range pageNames {
+		scenarios := []string{"default"}
+		if page == "contact" {
+			scenarios = []string{"chooser", "abuse", "dmca", "privacy", "security", "review", "success", "error", "recaptcha", "hcaptcha"}
+		}
+		for _, scenario := range scenarios {
+			english := renderPageCopy(t, server, page, "en", scenario)
+			for _, lang := range i18n.SupportedLanguages() {
+				if lang == "en" {
+					continue
+				}
+				localized := renderPageCopy(t, server, page, lang, scenario)
+				for copy := range english {
+					if len([]rune(copy)) <= 3 {
+						continue
+					}
+					if _, ok := allowedSharedCopy[copy]; ok {
+						continue
+					}
+					if _, stillEnglish := localized[copy]; stillEnglish {
+						t.Errorf("page %q scenario %q has untranslated copy %q in locale %q", page, scenario, copy, lang)
+					}
+				}
+			}
+		}
+	}
+}
+
+func renderPageCopy(t *testing.T, server *Server, page, lang, scenario string) map[string]struct{} {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/"+page+"?lang="+lang, nil)
+	response := httptest.NewRecorder()
+	viewData := map[string]interface{}{}
+	if page == "contact" {
+		viewData["type"] = "abuse"
+		viewData["challengeQuestion"] = i18n.TranslateFormat(lang, "contact.captcha.question", map[string]interface{}{"left": 2, "right": 2})
+		viewData["challengeID"] = "test-challenge"
+		viewData["abuseEmail"] = "abuse@example.test"
+		viewData["captchaProvider"] = "simple"
+		switch scenario {
+		case "chooser":
+			viewData["showChooser"], viewData["securityMode"] = true, true
+		case "dmca":
+			viewData["type"] = "dmca"
+		case "privacy":
+			viewData["type"] = "privacy"
+		case "security":
+			viewData["type"], viewData["securityMode"] = "security", true
+		case "review":
+			viewData["review"], viewData["email"], viewData["subject"] = true, "ada@example.test", i18n.Translate(lang, "contact.subject")
+		case "success":
+			viewData["success"] = i18n.Translate(lang, "contact.success")
+		case "error":
+			viewData["error"] = i18n.TranslateFormat(lang, "errors.validation_failed", map[string]string{"details": i18n.Translate(lang, "errors.invalid_email")})
+		case "recaptcha":
+			viewData["captchaProvider"] = "recaptcha"
+		case "hcaptcha":
+			viewData["captchaProvider"] = "hcaptcha"
+		}
+	}
+	if page == "mcp_help" {
+		viewData["project"] = i18n.Translate(lang, "web.mcp.project_description")
+		viewData["tools"] = []mcpTool{{Name: "list_templates", Description: i18n.Translate(lang, "web.mcp.tools_description")}}
+	}
+	if page == "list" {
+		viewData["templates"] = []string{}
+	}
+	data := PageData{
+		Lang: lang, DocumentTitle: "GitIgnore", Description: i18n.Translate(lang, "web.handler.description.default"), Data: viewData,
+		Consent: ConsentView{
+			Show: true, Message: i18n.Translate(lang, "cookie_consent.message"), PolicyURL: "/server/privacy",
+			PolicyText: i18n.Translate(lang, "nav.privacy"), AcceptText: i18n.Translate(lang, "cookie_consent.accept"),
+			DeclineText: i18n.Translate(lang, "cookie_consent.decline"), ManageText: i18n.Translate(lang, "cookie_consent.manage_preferences"),
+		},
+	}
+	if page == "healthz" {
+		data.Health = &healthPageView{
+			HealthResponse: HealthResponse{
+				Project: ProjectInfo{Name: "GitIgnore"}, Status: "healthy", Version: "test", GoVersion: "go1.test",
+				Build: BuildInfo{Commit: "test"}, Mode: "production",
+				Features: FeaturesInfo{Tor: TorInfo{Status: "disabled"}},
+				Checks:   ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Datasets: map[string]string{}},
+			},
+			BannerClass: "status-ok", StatusIcon: "✓", StatusText: i18n.Translate(lang, "health.status.healthy"), TimestampISO: "2026-01-01T00:00:00Z",
+		}
+	}
+	i18n.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.renderPage(w, r, page, data)
+	})).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("page %q locale %q render status = %d", page, lang, response.Code)
+	}
+	root, err := html.Parse(strings.NewReader(response.Body.String()))
+	if err != nil {
+		t.Fatalf("page %q locale %q parse: %v", page, lang, err)
+	}
+	copy := make(map[string]struct{})
+	var visit func(*html.Node, bool)
+	visit = func(node *html.Node, ignored bool) {
+		if node.Type == html.ElementNode {
+			switch node.Data {
+			case "code", "pre", "script", "style":
+				ignored = true
+			}
+			if hasClass(node, "site-brand") || hasClass(node, "status-icon") || hasClass(node, "contact-review-email") || (node.Data == "a" && strings.HasPrefix(attribute(node, "href"), "mailto:")) {
+				ignored = true
+			}
+			if !ignored {
+				for _, attr := range node.Attr {
+					switch attr.Key {
+					case "aria-label", "alt", "placeholder", "title":
+						if value := strings.TrimSpace(attr.Val); value != "" {
+							copy[value] = struct{}{}
+						}
+					case "value":
+						if node.Data == "input" && (attribute(node, "type") == "submit" || attribute(node, "type") == "button" || attribute(node, "type") == "reset") {
+							if value := strings.TrimSpace(attr.Val); value != "" {
+								copy[value] = struct{}{}
+							}
+						}
+					}
+				}
+				if node.Data == "meta" && attribute(node, "name") == "description" {
+					if value := strings.TrimSpace(attribute(node, "content")); value != "" {
+						copy[value] = struct{}{}
+					}
+				}
+			}
+		}
+		if !ignored && node.Type == html.TextNode {
+			if value := strings.Join(strings.Fields(node.Data), " "); value != "" {
+				copy[value] = struct{}{}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			visit(child, ignored)
+		}
+	}
+	visit(root, false)
+	return copy
+}
+
+func TestHandlerResponsesUseRequestLanguage(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	server := newTestPageServer()
+	server.config.Cfg.Server.Pages.Contact.Enabled = true
+	serve := func(handler http.HandlerFunc, method, path, body, contentType string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		if contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		}
+		response := httptest.NewRecorder()
+		i18n.Middleware(handler).ServeHTTP(response, request)
+		return response
+	}
+
+	page := serve(server.handleAboutPage, http.MethodGet, "/server/about?lang=es", "", "")
+	for _, expected := range []string{
+		i18n.Translate("es", "web.handler.title.about"),
+		i18n.Translate("es", "web.handler.description.default"),
+	} {
+		if !strings.Contains(page.Body.String(), expected) {
+			t.Errorf("localized About page omitted %q", expected)
+		}
+	}
+	if strings.Contains(page.Body.String(), i18n.Translate("en", "web.handler.description.default")) {
+		t.Error("localized About page contains the default English meta description")
+	}
+
+	apiAbout := serve(server.handleAPIAbout, http.MethodGet, "/api/v1/server/about?lang=es", "", "")
+	for _, expected := range []string{
+		i18n.Translate("es", "web.handler.title.api_about"),
+		i18n.Translate("es", "web.handler.api_about_description"),
+	} {
+		if !strings.Contains(apiAbout.Body.String(), expected) {
+			t.Errorf("localized About API omitted %q", expected)
+		}
+	}
+
+	helpAPI := serve(server.handleAPIHelp, http.MethodGet, "/api/v1/server/help?lang=es", "", "")
+	if expected := i18n.Translate("es", "web.handler.default_help_content"); !strings.Contains(helpAPI.Body.String(), expected) {
+		t.Errorf("localized Help API omitted default help copy %q", expected)
+	}
+
+	mcpHelp := serve(server.handleMCPHelpPage, http.MethodGet, "/server/help/mcp?lang=es", "", "")
+	if expected := i18n.Translate("es", "web.mcp.project_description"); !strings.Contains(mcpHelp.Body.String(), expected) {
+		t.Errorf("localized MCP help page omitted default project copy %q", expected)
+	}
+
+	mcpHelpAPI := serve(server.handleAPIHelpMCP, http.MethodGet, "/api/v1/server/help/mcp?lang=es", "", "")
+	for _, expected := range []string{
+		i18n.Translate("es", "web.mcp.project_description"),
+		i18n.Translate("es", "web.mcp.tools_description"),
+	} {
+		if !strings.Contains(mcpHelpAPI.Body.String(), expected) {
+			t.Errorf("localized MCP help API omitted %q", expected)
+		}
+	}
+
+	securityPolicy := serve(server.handleAPISecurityPolicy, http.MethodGet, "/api/v1/server/security/policy?lang=es", "", "")
+	if expected := strings.SplitN(i18n.Translate("es", "web.handler.default_security_policy_content"), "\n", 2)[0]; !strings.Contains(securityPolicy.Body.String(), expected) {
+		t.Errorf("localized security policy API omitted default policy content")
+	}
+
+	notFound := serve(server.handleNotFound, http.MethodGet, "/missing?lang=es", "", "")
+	for _, expected := range []string{
+		i18n.Translate("es", "web.handler.error.http_not_found"),
+		i18n.Translate("es", "web.handler.error.not_found"),
+	} {
+		if !strings.Contains(notFound.Body.String(), expected) {
+			t.Errorf("localized not-found response omitted %q", expected)
+		}
+	}
+
+	for _, path := range []string{"/server/contact?lang=es", server.apiBasePath() + "/server/contact?lang=es"} {
+		contactError := serve(server.handleContactSubmit, http.MethodPost, path, "{invalid", "application/json")
+		if contactError.Code != http.StatusBadRequest {
+			t.Errorf("contact error status for %s = %d, want %d", path, contactError.Code, http.StatusBadRequest)
+		}
+		if expected := i18n.Translate("es", "contact.runtime.form_too_large_or_invalid"); !strings.Contains(contactError.Body.String(), expected) {
+			t.Errorf("localized contact error omitted %q: %s", expected, contactError.Body.String())
+		}
+		if strings.Contains(contactError.Body.String(), i18n.Translate("en", "contact.runtime.form_too_large_or_invalid")) {
+			t.Errorf("localized contact response for %s contains the default English error", path)
+		}
+	}
+
+	captcha := serve(server.handleAPIContact, http.MethodGet, server.apiBasePath()+"/server/contact?lang=es", "", "")
+	if expected := "¿Cuánto es "; !strings.Contains(captcha.Body.String(), expected) {
+		t.Errorf("localized contact API omitted Spanish CAPTCHA prompt prefix %q: %s", expected, captcha.Body.String())
+	}
+
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	securityError := serve(func(w http.ResponseWriter, r *http.Request) {
+		server.handleSecurityReportSubmit(w, r, "Ana", "ana@example.test", "security-id")
+	}, http.MethodPost, "/api/v1/server/contact?lang=es", "severity=invalid&component=&summary=", "application/x-www-form-urlencoded")
+	if securityError.Code != http.StatusBadRequest {
+		t.Errorf("security report validation status = %d, want %d", securityError.Code, http.StatusBadRequest)
+	}
+	if expected := i18n.Translate("es", "contact.runtime.security_fields_required"); !strings.Contains(securityError.Body.String(), expected) {
+		t.Errorf("localized security report error omitted %q: %s", expected, securityError.Body.String())
+	}
 }
 
 func TestContactFormSendsOnceAfterCaptcha(t *testing.T) {
@@ -37,9 +307,16 @@ func TestContactFormSendsOnceAfterCaptcha(t *testing.T) {
 		return nil
 	}
 	challengeReq := httptest.NewRequest(http.MethodGet, "/server/contact?type=abuse", nil)
-	challengeID, _, err := s.issueContactChallenge(challengeReq)
+	challengeID, challengeQuestion, err := s.issueContactChallenge(challengeReq)
 	if err != nil {
 		t.Fatal(err)
+	}
+	digitCount := 0
+	for _, digit := range "0123456789" {
+		digitCount += strings.Count(challengeQuestion, string(digit))
+	}
+	if strings.Contains(challengeQuestion, "{left}") || strings.Contains(challengeQuestion, "{right}") || digitCount < 2 {
+		t.Errorf("captcha question did not interpolate its numeric operands: %q", challengeQuestion)
 	}
 	formToken, err := issueContactFormToken(time.Now().Add(-3 * time.Second))
 	if err != nil {
@@ -69,7 +346,7 @@ func TestContactFormSendsOnceAfterCaptcha(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("confirm status = %d, want 303: %s", rec.Code, rec.Body.String())
 	}
-	if gotTo != "abuse@example.test" || gotSubject != "[gitignore contact] Report" || !strings.Contains(gotBody, "Please review this page.") {
+	if gotTo != "abuse@example.test" || gotSubject != "[gitignore Contact] Report" || !strings.Contains(gotBody, "Please review this page.") {
 		t.Fatalf("unexpected mail delivery: to=%q subject=%q body=%q", gotTo, gotSubject, gotBody)
 	}
 }
@@ -134,7 +411,7 @@ func TestStandardPagesRender(t *testing.T) {
 		{"/server/help", s.handleHelpPage, "Help"},
 		{"/server/help/mcp", s.handleMCPHelpPage, "MCP server"},
 		{"/server/terms", s.handleTermsPage, "Terms of Service"},
-		{"/server/security", s.handleSecurityPage, "private vulnerability reporting"},
+		{"/server/security", s.handleSecurityPage, i18n.Translate("en", "web.security.github_private_reporting")},
 		{"/server/security/policy", s.handleSecurityPolicyPage, "Security Disclosure Policy"},
 		{"/server/security/thanks", s.handleSecurityThanksPage, "No acknowledgments are currently published"},
 	}
@@ -171,7 +448,7 @@ func TestRequestPathUsesConfiguredAndTrustedProxyPrefixes(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	s.renderPage(response, trusted, "about", PageData{Title: "About"})
-	for _, want := range []string{`href="/proxy/static/css/main.css"`, `href="/proxy/server/preferences"`, `src="/proxy/static/js/app.js"`} {
+	for _, want := range []string{`href="/proxy/static/css/main.css?v=test-unknown"`, `href="/proxy/server/preferences"`, `src="/proxy/static/js/app.js?v=test-unknown"`} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Errorf("prefixed page is missing %q", want)
 		}

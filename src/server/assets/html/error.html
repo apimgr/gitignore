@@ -4,7 +4,7 @@
 <section class="section-card error-page" aria-labelledby="error-details">
 <h2 id="error-details">{{t .Lang "common.details"}}</h2>
 <p>{{.Data.message}}</p>
-<a class="btn" href="{{path "/"}}">Go Home</a>
+<a class="btn" href="{{path "/"}}">{{t .Lang "nav.home"}}</a>
 </section>
 </div>
 {{end}}

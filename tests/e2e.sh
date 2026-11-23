@@ -22,6 +22,7 @@ trap cleanup EXIT
 
 RANDOM_SUFFIX=$(printf '%04x%04x' "$RANDOM" "$RANDOM")
 CONTAINER_NAME="${PROJECT_NAME}-e2e-${RANDOM_SUFFIX}"
+E2E_IMAGE="${PROJECT_E2E_IMAGE:-casjaysdev/go:latest}"
 
 docker run --rm \
   --name "$CONTAINER_NAME" \
@@ -30,8 +31,11 @@ docker run --rm \
   --workdir /app \
   --env PROJECT_E2E_TMP=/tmp/apimgr/gitignore-e2e \
   --env TMPDIR=/tmp/apimgr/gitignore-e2e \
-  casjaysdev/go:latest sh -ec '
-    apk add --no-cache chromium su-exec >/dev/null
+  --env PROJECT_E2E_TEST_FILTER="${PROJECT_E2E_TEST_FILTER:-}" \
+  "$E2E_IMAGE" sh -ec '
+    if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
+      apk add --no-cache chromium su-exec >/dev/null
+    fi
     mkdir -p /tmp/apimgr/gitignore-e2e/home
     adduser -D -h /tmp/apimgr/gitignore-e2e/home gitignore
     chown -R gitignore:gitignore /tmp/apimgr/gitignore-e2e
@@ -40,6 +44,8 @@ docker run --rm \
       export GOCACHE=/tmp/apimgr/gitignore-e2e/go-build
       export GOMODCACHE=/tmp/apimgr/gitignore-e2e/go-mod
       go mod download
+      go build -buildvcs=false -trimpath -o /tmp/apimgr/gitignore-e2e/gitignore-server ./src
+      export PROJECT_E2E_SERVER_BINARY=/tmp/apimgr/gitignore-e2e/gitignore-server
       export GOPROXY=off
       export HTTP_PROXY=http://127.0.0.1:1
       export HTTPS_PROXY=http://127.0.0.1:1
@@ -49,6 +55,10 @@ docker run --rm \
       export all_proxy=http://127.0.0.1:1
       export NO_PROXY=127.0.0.1,localhost
       export no_proxy=127.0.0.1,localhost
-      go test -buildvcs=false -tags e2e -count=1 ./tests/e2e/...
+      if [ -n \"\$PROJECT_E2E_TEST_FILTER\" ]; then
+        go test -buildvcs=false -tags e2e -count=1 -run \"\$PROJECT_E2E_TEST_FILTER\" ./tests/e2e/...
+      else
+        go test -buildvcs=false -tags e2e -count=1 ./tests/e2e/...
+      fi
     "
   '

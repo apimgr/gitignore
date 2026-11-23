@@ -2,9 +2,17 @@ package server
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 func TestMapAPIErrorCodeToHTTPStatus(t *testing.T) {
@@ -76,34 +84,84 @@ func TestSendAPIResponseError(t *testing.T) {
 	}
 }
 
-func TestSendAPIResponseErrorLocalizedFallback(t *testing.T) {
+func TestSendAPIResponseErrorLocalizedCode(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	// A code with no i18n key mapping falls back to the supplied message.
-	sendAPIResponseErrorLocalized(rec, req, "TOKEN_EXPIRED", "custom fallback message")
+	// Error codes select a translation key rather than using raw text.
+	sendAPIResponseErrorLocalized(rec, req, "TOKEN_EXPIRED")
 
 	var resp APIResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if resp.Message != "custom fallback message" {
-		t.Errorf("Message = %q, want fallback %q", resp.Message, "custom fallback message")
+	if resp.Message != "Token has expired" {
+		t.Errorf("Message = %q, want translated token-expired message", resp.Message)
 	}
 }
 
 func TestSendAPIResponseErrorLocalizedTranslated(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-
-	sendAPIResponseErrorLocalized(rec, req, "NOT_FOUND", "fallback")
-
-	var resp APIResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	for _, tc := range []struct {
+		code, language, want string
+		status               int
+	}{
+		{"NOT_FOUND", "es", "No se encontró el recurso", http.StatusNotFound},
+		{"CSRF_FAILED", "es", "La validación del token CSRF falló", http.StatusForbidden},
+		{"VALIDATION_FAILED", "es", "La validación falló", http.StatusBadRequest},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/?lang="+tc.language, nil)
+			i18n.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sendAPIResponseErrorLocalized(w, r, tc.code)
+			})).ServeHTTP(rec, req)
+			var resp APIResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("invalid JSON: %v", err)
+			}
+			if rec.Code != tc.status || resp.Error != tc.code || resp.Message != tc.want {
+				t.Errorf("response = status %d, code %q, message %q; want %d, %q, %q", rec.Code, resp.Error, resp.Message, tc.status, tc.code, tc.want)
+			}
+		})
 	}
-	if resp.Message == "" {
-		t.Error("expected a non-empty translated or fallback message")
+}
+
+func TestProductionHTTPErrorMessagesAreNotStringLiterals(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate response_test.go")
+	}
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(currentFile), "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) < 2 {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || selector.Sel.Name != "Error" {
+				return true
+			}
+			pkg, ok := selector.X.(*ast.Ident)
+			if !ok || pkg.Name != "http" {
+				return true
+			}
+			if _, translated := call.Args[1].(*ast.CallExpr); !translated {
+				t.Errorf("%s: http.Error message must come from a translation call", fset.Position(call.Pos()))
+			}
+			return true
+		})
 	}
 }
 
@@ -112,7 +170,7 @@ func TestSetCacheHeaders(t *testing.T) {
 		kind string
 		want string
 	}{
-		{"static", "public, max-age=31536000, immutable"},
+		{"static", "no-cache"},
 		{"api", "public, max-age=60"},
 		{"authenticated", "private, no-store"},
 		{"html", "no-store"},

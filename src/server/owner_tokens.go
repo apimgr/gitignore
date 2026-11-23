@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/apimgr/gitignore/src/common/audit"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/go-chi/chi/v5"
 )
@@ -333,24 +334,24 @@ func (s *Server) handleOwnerTokensPage(w http.ResponseWriter, r *http.Request) {
 		if cookieErr == nil && cookie.Value != "" {
 			s.clearOwnerCookie(w, r)
 		}
-		s.renderPage(w, r, "preferences_tokens", PageData{Title: "Owner tokens", Data: map[string]interface{}{"authenticated": false}})
+		s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false}})
 		return
 	}
 	s.setOwnerCookie(w, r, cookie.Value)
 	data, err := s.loadTokenPage(identity.OwnerID, nil, "")
 	if err != nil {
-		s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: "Owner tokens", Data: map[string]interface{}{"message": "Token storage is temporarily unavailable."}})
+		s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"message": i18n.T(r, "errors.server_error")}})
 		return
 	}
 	if value, ok := takeOwnerTokenPageFlash(identity.OwnerID); ok {
 		data, err = s.loadTokenPage(identity.OwnerID, value.Revealed, value.Message)
 		if err != nil {
-			s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: "Owner tokens"})
+			s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title")})
 			return
 		}
 	}
 	data["csrfToken"] = ensureCSRFTokenWithSecure(w, r, preferenceCookieSecure(s, r))
-	s.renderPage(w, r, "preferences_tokens", PageData{Title: "Owner tokens", Data: data})
+	s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: data})
 }
 
 func (s *Server) setOwnerCookie(w http.ResponseWriter, r *http.Request, raw string) {
@@ -402,9 +403,9 @@ func (s *Server) clearOwnerCookie(w http.ResponseWriter, r *http.Request) {
 func (s *Server) tokenActionLimiter(w http.ResponseWriter, r *http.Request) bool {
 	if s.strictTokenLimiter != nil && !s.strictTokenLimiter.allow(s.clientIP(r)) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			sendAPIResponseError(w, "RATE_LIMITED", "too many token requests")
+			sendAPIResponseErrorLocalized(w, r, "RATE_LIMITED")
 		} else {
-			s.renderPageStatus(w, r, "preferences_tokens", http.StatusTooManyRequests, PageData{Title: "Owner tokens", Data: map[string]interface{}{"authenticated": false, "message": "Too many token requests. Try again later."}})
+			s.renderPageStatus(w, r, "preferences_tokens", http.StatusTooManyRequests, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false, "message": i18n.T(r, "errors.rate_limited")}})
 		}
 		return false
 	}
@@ -416,21 +417,21 @@ func (s *Server) handleIssueOwnerTokenWeb(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	if _, err := s.authenticateRequest(r, true); err == nil {
-		s.renderPageStatus(w, r, "preferences_tokens", http.StatusConflict, PageData{Title: "Owner tokens", Data: map[string]interface{}{"authenticated": false, "message": "This browser already has a valid owner token."}})
+		s.renderPageStatus(w, r, "preferences_tokens", http.StatusConflict, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false, "message": i18n.T(r, "errors.conflict")}})
 		return
 	}
 	raw, item, err := s.issueOwnerToken(time.Now(), "web", s.clientIP(r))
 	if err != nil {
-		s.renderPageStatus(w, r, "preferences_tokens", http.StatusServiceUnavailable, PageData{Title: "Owner tokens", Data: map[string]interface{}{"authenticated": false, "message": "A token could not be created."}})
+		s.renderPageStatus(w, r, "preferences_tokens", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false, "message": i18n.T(r, "errors.server_error")}})
 		return
 	}
 	s.setOwnerCookie(w, r, raw)
 	w.Header().Set("Cache-Control", "private, no-store")
-	storeOwnerTokenPageFlash(item.OwnerID, map[int64]string{item.ID: raw}, "Your primary token was created. Copy and store it safely.")
+	storeOwnerTokenPageFlash(item.OwnerID, map[int64]string{item.ID: raw}, i18n.T(r, "owner_tokens_feedback.primary_created"))
 	redirectOwnerTokenPage(w, r, "primary")
 }
 
@@ -440,30 +441,30 @@ func (s *Server) handleRestoreOwnerToken(w http.ResponseWriter, r *http.Request)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		s.renderPageStatus(w, r, "preferences_tokens", http.StatusBadRequest, PageData{Title: "Owner tokens", Data: map[string]interface{}{"authenticated": false, "message": "Enter a valid primary token."}})
+		s.renderPageStatus(w, r, "preferences_tokens", http.StatusBadRequest, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false, "message": i18n.T(r, "errors.token_invalid")}})
 		return
 	}
 	raw := strings.TrimSpace(r.FormValue("token"))
 	identity, err := s.AuthenticateBearerToken(raw)
 	if err != nil || identity.Kind != "primary" {
 		s.logTokenAudit("token.restore_failed", "", "", "web", s.clientIP(r), "", false)
-		s.renderPageStatus(w, r, "preferences_tokens", http.StatusUnauthorized, PageData{Title: "Owner tokens", Data: map[string]interface{}{"authenticated": false, "message": "That primary token is invalid."}})
+		s.renderPageStatus(w, r, "preferences_tokens", http.StatusUnauthorized, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false, "message": i18n.T(r, "errors.token_invalid")}})
 		return
 	}
 	s.setOwnerCookie(w, r, raw)
 	s.logTokenAudit("token.restored", identity.OwnerID, identity.TokenPrefix, "web", s.clientIP(r), "", true)
-	storeOwnerTokenPageFlash(identity.OwnerID, nil, "Identity restored in this browser.")
+	storeOwnerTokenPageFlash(identity.OwnerID, nil, i18n.T(r, "owner_tokens_feedback.restored"))
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.Redirect(w, r, "/server/preferences/tokens#primary", http.StatusSeeOther)
 }
 
 func (s *Server) handleForgetOwnerToken(w http.ResponseWriter, r *http.Request) {
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	s.clearOwnerCookie(w, r)
@@ -480,16 +481,16 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	identity, ok := s.requirePrimaryOwner(w, r, true)
 	if !ok {
-		sendAPIResponseError(w, "FORBIDDEN", "primary owner token required")
+		sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		sendAPIResponseError(w, "BAD_REQUEST", "invalid token action")
+		sendAPIResponseErrorLocalized(w, r, "BAD_REQUEST")
 		return
 	}
 	pathID := chi.URLParam(r, "id")
@@ -499,7 +500,7 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 		var err error
 		target, err = db.GetOwnerToken(identity.OwnerID, tokenID)
 		if err != nil || target.Kind != "linked" {
-			sendAPIResponseError(w, "NOT_FOUND", "token not found")
+			sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 			return
 		}
 	} else {
@@ -512,64 +513,64 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 	case strings.HasSuffix(r.URL.Path, "/reveal"):
 		raw, _ = s.decryptOwnerToken(target.TokenEnc)
 		if raw == "" {
-			sendAPIResponseError(w, "SERVER_ERROR", "token cannot be decrypted")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		s.logTokenAudit("token.revealed", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
-		message = "Token revealed for this page load."
+		message = i18n.T(r, "owner_tokens_feedback.revealed")
 	case strings.HasSuffix(r.URL.Path, "/rotate"):
 		raw, _ = newOwnerToken()
 		encoded, err := s.encryptOwnerToken(raw)
 		if err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token rotation failed")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		hash, prefix := hashOwnerToken(raw)
 		if err := db.RotateOwnerToken(identity.OwnerID, target.ID, hash, prefix, encoded, now); err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token rotation failed")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		if target.Kind == "primary" {
 			s.setOwnerCookie(w, r, raw)
 		}
 		s.logTokenAudit("token.rotated", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
-		message = "Token rotated. The previous value is invalid."
+		message = i18n.T(r, "owner_tokens_feedback.rotated")
 	case strings.HasSuffix(r.URL.Path, "/update"):
 		name := strings.TrimSpace(r.FormValue("name"))
 		if len(name) < 1 || len(name) > 64 {
-			sendAPIResponseError(w, "VALIDATION_FAILED", "token name must contain 1 to 64 characters")
+			sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 			return
 		}
 		expiresAt, err := parseOwnerTokenExpiry(r.FormValue("expiry"), r.FormValue("expires_on"), now)
 		if err != nil {
-			sendAPIResponseError(w, "VALIDATION_FAILED", err.Error())
+			sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 			return
 		}
 		if err := db.UpdateLinkedOwnerToken(identity.OwnerID, target.ID, name, expiresAt); err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token update failed")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
-		message = "Linked token updated."
+		message = i18n.T(r, "owner_tokens_feedback.linked_updated")
 	case strings.HasSuffix(r.URL.Path, "/revoke"):
 		if err := db.RevokeLinkedOwnerToken(identity.OwnerID, target.ID, now); err != nil {
-			sendAPIResponseError(w, "NOT_FOUND", "token not found")
+			sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 			return
 		}
 		s.logTokenAudit("token.revoked", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
-		message = "Linked token revoked."
+		message = i18n.T(r, "owner_tokens_feedback.linked_revoked")
 	default:
-		sendAPIResponseError(w, "NOT_FOUND", "token action not found")
+		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/reveal") {
 		data, err := s.loadTokenPage(identity.OwnerID, map[int64]string{target.ID: raw}, message)
 		if err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token data is unavailable")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		data["csrfToken"] = ensureCSRFTokenWithSecure(w, r, preferenceCookieSecure(s, r))
 		w.Header().Set("Cache-Control", "private, no-store")
-		s.renderPage(w, r, "preferences_tokens", PageData{Title: "Owner tokens", Data: data})
+		s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: data})
 		return
 	}
 	revealed := map[int64]string(nil)
@@ -589,47 +590,47 @@ func (s *Server) handleCreateLinkedOwnerTokenWeb(w http.ResponseWriter, r *http.
 		return
 	}
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	identity, ok := s.requirePrimaryOwner(w, r, true)
 	if !ok {
-		sendAPIResponseError(w, "FORBIDDEN", "primary owner token required")
+		sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		sendAPIResponseError(w, "BAD_REQUEST", "invalid token request")
+		sendAPIResponseErrorLocalized(w, r, "BAD_REQUEST")
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	if len(name) < 1 || len(name) > 64 {
-		sendAPIResponseError(w, "VALIDATION_FAILED", "token name must contain 1 to 64 characters")
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
 	if exists, err := ownerTokenNameExists(identity.OwnerID, name, 0); err != nil || exists {
-		sendAPIResponseError(w, "CONFLICT", "a token with that name already exists")
+		sendAPIResponseErrorLocalized(w, r, "CONFLICT")
 		return
 	}
 	count, err := db.CountActiveLinkedTokens(identity.OwnerID, time.Now())
 	if err != nil {
-		s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: "Owner tokens"})
+		s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title")})
 		return
 	}
 	if count >= s.maxLinkedTokens() {
-		sendAPIResponseError(w, "CONFLICT", "maximum active linked token count reached")
+		sendAPIResponseErrorLocalized(w, r, "CONFLICT")
 		return
 	}
 	expiresAt, err := parseOwnerTokenExpiry(r.FormValue("expiry"), r.FormValue("expires_on"), time.Now())
 	if err != nil {
-		sendAPIResponseError(w, "VALIDATION_FAILED", err.Error())
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
 	raw, item, err := s.issueLinkedToken(identity.OwnerID, name, expiresAt, time.Now(), "web", s.clientIP(r))
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "linked token could not be created")
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 		return
 	}
-	storeOwnerTokenPageFlash(identity.OwnerID, map[int64]string{item.ID: raw}, "Linked token created. Copy and store it safely.")
+	storeOwnerTokenPageFlash(identity.OwnerID, map[int64]string{item.ID: raw}, i18n.T(r, "owner_tokens_feedback.linked_created"))
 	redirectOwnerTokenPage(w, r, "token-"+strconv.FormatInt(item.ID, 10))
 }
 
@@ -662,7 +663,7 @@ func (s *Server) handleAPIOwnerTokens(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		items, err := db.ListOwnerTokens(identity.OwnerID)
 		if err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token data is unavailable")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		result := make([]publicOwnerToken, 0, len(items))
@@ -678,35 +679,35 @@ func (s *Server) handleAPIOwnerTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	request, err := decodeOwnerTokenRequest(w, r)
 	if err != nil {
-		sendAPIResponseError(w, "BAD_REQUEST", "invalid token request")
+		sendAPIResponseErrorLocalized(w, r, "BAD_REQUEST")
 		return
 	}
 	name := strings.TrimSpace(request.Name)
 	if len(name) < 1 || len(name) > 64 {
-		sendAPIResponseError(w, "VALIDATION_FAILED", "token name must contain 1 to 64 characters")
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
 	if exists, err := ownerTokenNameExists(identity.OwnerID, name, 0); err != nil || exists {
-		sendAPIResponseError(w, "CONFLICT", "a token with that name already exists")
+		sendAPIResponseErrorLocalized(w, r, "CONFLICT")
 		return
 	}
 	count, err := db.CountActiveLinkedTokens(identity.OwnerID, time.Now())
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "token data is unavailable")
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 		return
 	}
 	if count >= s.maxLinkedTokens() {
-		sendAPIResponseError(w, "CONFLICT", "maximum active linked token count reached")
+		sendAPIResponseErrorLocalized(w, r, "CONFLICT")
 		return
 	}
 	expiresAt, err := parseOwnerTokenExpiry(request.Expiry, request.ExpiresOn, time.Now())
 	if err != nil {
-		sendAPIResponseError(w, "VALIDATION_FAILED", err.Error())
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
 	raw, item, err := s.issueLinkedToken(identity.OwnerID, name, expiresAt, time.Now(), "api", s.clientIP(r))
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "linked token could not be created")
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 		return
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -737,7 +738,7 @@ func (s *Server) handleAPIPrimaryOwnerToken(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		if _, err := s.AuthenticateBearerToken(raw); err == nil {
-			sendAPIResponseError(w, "CONFLICT", "a valid token is already presented")
+			sendAPIResponseErrorLocalized(w, r, "CONFLICT")
 			return
 		} else {
 			s.sendBearerError(w, r)
@@ -746,7 +747,7 @@ func (s *Server) handleAPIPrimaryOwnerToken(w http.ResponseWriter, r *http.Reque
 	}
 	token, item, err := s.issueOwnerToken(time.Now(), "api", s.clientIP(r))
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "owner token could not be created")
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 		return
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -782,7 +783,7 @@ func (s *Server) handleAPILinkedTokenAction(w http.ResponseWriter, r *http.Reque
 	tokenID, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	item, err := db.GetOwnerToken(identity.OwnerID, tokenID)
 	if err != nil || item.Kind != "linked" {
-		sendAPIResponseError(w, "NOT_FOUND", "token not found")
+		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 		return
 	}
 	s.handleAPITokenAction(w, r, identity, item)
@@ -795,7 +796,7 @@ func (s *Server) handleAPITokenAction(w http.ResponseWriter, r *http.Request, id
 	if strings.HasSuffix(r.URL.Path, "/reveal") {
 		raw, err = s.decryptOwnerToken(item.TokenEnc)
 		if err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token cannot be decrypted")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		s.logTokenAudit("token.revealed", identity.OwnerID, item.TokenPrefix, "api", s.clientIP(r), "", true)
@@ -811,13 +812,13 @@ func (s *Server) handleAPITokenAction(w http.ResponseWriter, r *http.Request, id
 			}
 		}
 		if err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token rotation failed")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		s.logTokenAudit("token.rotated", identity.OwnerID, item.TokenPrefix, "api", s.clientIP(r), "", true)
 	} else if r.Method == http.MethodDelete || strings.HasSuffix(r.URL.Path, "/revoke") {
 		if err := db.RevokeLinkedOwnerToken(identity.OwnerID, item.ID, now); err != nil {
-			sendAPIResponseError(w, "NOT_FOUND", "token not found")
+			sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 			return
 		}
 		s.logTokenAudit("token.revoked", identity.OwnerID, item.TokenPrefix, "api", s.clientIP(r), "", true)
@@ -827,32 +828,32 @@ func (s *Server) handleAPITokenAction(w http.ResponseWriter, r *http.Request, id
 	} else if r.Method == http.MethodPatch {
 		request, err := decodeOwnerTokenRequest(w, r)
 		if err != nil {
-			sendAPIResponseError(w, "BAD_REQUEST", "invalid token update")
+			sendAPIResponseErrorLocalized(w, r, "BAD_REQUEST")
 			return
 		}
 		name := strings.TrimSpace(request.Name)
 		if len(name) < 1 || len(name) > 64 {
-			sendAPIResponseError(w, "VALIDATION_FAILED", "token name must contain 1 to 64 characters")
+			sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 			return
 		}
 		if exists, err := ownerTokenNameExists(identity.OwnerID, name, item.ID); err != nil || exists {
-			sendAPIResponseError(w, "CONFLICT", "a token with that name already exists")
+			sendAPIResponseErrorLocalized(w, r, "CONFLICT")
 			return
 		}
 		expiresAt, err := parseOwnerTokenExpiry(request.Expiry, request.ExpiresOn, now)
 		if err != nil {
-			sendAPIResponseError(w, "VALIDATION_FAILED", err.Error())
+			sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 			return
 		}
 		if err := db.UpdateLinkedOwnerToken(identity.OwnerID, item.ID, name, expiresAt); err != nil {
-			sendAPIResponseError(w, "SERVER_ERROR", "token update failed")
+			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
 		w.Header().Set("Cache-Control", "private, no-store")
 		sendPrivateAPIResponseOK(w, http.StatusOK, map[string]string{"status": "updated"})
 		return
 	} else {
-		sendAPIResponseError(w, "METHOD_NOT_ALLOWED", "unsupported token action")
+		sendAPIResponseErrorLocalized(w, r, "METHOD_NOT_ALLOWED")
 		return
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -871,7 +872,7 @@ func (s *Server) sendBearerError(w http.ResponseWriter, r *http.Request) {
 	if header == "" {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="gitignore"`)
 		w.Header().Set("Cache-Control", "private, no-store")
-		sendAPIResponseError(w, "UNAUTHORIZED", "a primary owner token is required")
+		sendAPIResponseErrorLocalized(w, r, "UNAUTHORIZED")
 		return
 	}
 	value, parsed := parseBearerHeader(header)
@@ -880,13 +881,13 @@ func (s *Server) sendBearerError(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="gitignore", error="insufficient_scope"`)
 			w.Header().Set("Cache-Control", "private, no-store")
-			sendAPIResponseError(w, "FORBIDDEN", "primary owner token required")
+			sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 			return
 		}
 	}
 	w.Header().Set("WWW-Authenticate", `Bearer realm="gitignore", error="invalid_token"`)
 	w.Header().Set("Cache-Control", "private, no-store")
-	sendAPIResponseError(w, "UNAUTHORIZED", "a valid primary owner token is required")
+	sendAPIResponseErrorLocalized(w, r, "UNAUTHORIZED")
 }
 
 func ownerTokenNameExists(ownerID, name string, except int64) (bool, error) {

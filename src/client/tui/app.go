@@ -13,6 +13,7 @@ import (
 	"github.com/apimgr/gitignore/src/client/api"
 	"github.com/apimgr/gitignore/src/client/config"
 	displayformat "github.com/apimgr/gitignore/src/common/format"
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 // screen identifies which part of the TUI is currently active.
@@ -94,12 +95,17 @@ type Model struct {
 func New(client *api.Client, cfg *config.Config, cfgPath string) Model {
 	styles := defaultStyles()
 
-	menuItems := make([]list.Item, len(mainMenuItems))
-	for i, m := range mainMenuItems {
+	lang := i18n.DefaultLang
+	if client != nil {
+		lang = client.Lang
+	}
+	entries := mainMenuItems(lang)
+	menuItems := make([]list.Item, len(entries))
+	for i, m := range entries {
 		menuItems[i] = m
 	}
 	menuList := list.New(menuItems, list.NewDefaultDelegate(), 0, 0)
-	menuList.Title = "gitignore-cli"
+	menuList.Title = i18n.Translate(lang, "cli.client.tui.title")
 	menuList.SetShowStatusBar(false)
 
 	namesList := list.New(nil, list.NewDefaultDelegate(), 0, 0)
@@ -124,11 +130,19 @@ func New(client *api.Client, cfg *config.Config, cfgPath string) Model {
 
 	if cfg == nil || cfg.Server.Primary == "" {
 		m.screen = screenSetup
-		m.input.Placeholder = "https://gitignore.example.com"
+		m.input.Placeholder = i18n.Translate(lang, "cli.client.tui.server_url_placeholder")
 		m.input.Focus()
 	}
 
 	return m
+}
+
+func (m Model) text(key string, args ...interface{}) string {
+	lang := i18n.DefaultLang
+	if m.client != nil {
+		lang = m.client.Lang
+	}
+	return i18n.TranslateFormat(lang, key, args...)
 }
 
 // Init satisfies tea.Model.
@@ -164,7 +178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items[i] = nameItem(n)
 		}
 		m.names.SetItems(items)
-		m.names.Title = namesTitle(msg.mode)
+		m.names.Title = namesTitle(msg.mode, m.lang())
 		m.nameMode = msg.mode
 		m.screen = screenNames
 		return m, nil
@@ -208,10 +222,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case configSavedMsg:
 		if msg.err != nil {
-			m.errMsg = msg.err.Error()
+			m.errMsg = m.text("cli.client.tui.save_failed")
 			return m, nil
 		}
-		m.message = "Server saved."
+		m.message = m.text("cli.client.tui.server_saved")
 		m.screen = screenMenu
 		return m, nil
 	}
@@ -219,15 +233,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func namesTitle(mode nameListMode) string {
+func namesTitle(mode nameListMode, lang string) string {
 	switch mode {
 	case nameModeCategoryDrill:
-		return "Category templates (enter to view)"
+		return i18n.Translate(lang, "cli.client.tui.category_templates_title")
 	case nameModeCombinePick:
-		return "Combine — space to select, enter to combine"
+		return i18n.Translate(lang, "cli.client.tui.combine_title")
 	default:
-		return "Templates (enter to view)"
+		return i18n.Translate(lang, "cli.client.tui.templates_title")
 	}
+}
+
+func (m Model) lang() string {
+	if m.client != nil {
+		return m.client.Lang
+	}
+	return i18n.DefaultLang
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -262,7 +283,7 @@ func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		url := strings.TrimSpace(m.input.Value())
 		if !config.IsValidServerURL(url) {
-			m.errMsg = "enter a valid http(s) URL"
+			m.errMsg = m.text("cli.client.tui.invalid_server_url")
 			return m, nil
 		}
 		m.cfg.Server.Primary = strings.TrimSuffix(url, "/")
@@ -310,7 +331,7 @@ func (m Model) dispatchMenu(id string) (tea.Model, tea.Cmd) {
 		}
 	case "category":
 		m.input = textinput.New()
-		m.input.Placeholder = "category name"
+		m.input.Placeholder = m.text("cli.client.tui.category_placeholder")
 		m.input.Prompt = "> "
 		m.input.Focus()
 		m.categoryInput = true
@@ -334,7 +355,7 @@ func (m Model) dispatchMenu(id string) (tea.Model, tea.Cmd) {
 		}
 	case "search":
 		m.input = textinput.New()
-		m.input.Placeholder = "search term"
+		m.input.Placeholder = m.text("cli.client.tui.search_placeholder")
 		m.input.Prompt = "> "
 		m.input.Focus()
 		m.categoryInput = false
@@ -342,7 +363,7 @@ func (m Model) dispatchMenu(id string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "settings":
 		m.input = textinput.New()
-		m.input.Placeholder = "https://gitignore.example.com"
+		m.input.Placeholder = m.text("cli.client.tui.server_url_placeholder")
 		m.input.SetValue(m.cfg.Server.Primary)
 		m.input.Prompt = "> "
 		m.input.Focus()
@@ -456,10 +477,10 @@ func (m Model) View() string {
 	var body string
 	switch m.screen {
 	case screenSetup:
-		body = m.styles.Title.Render("gitignore-cli setup") + "\n\n" +
-			m.styles.Subtitle.Render("No server is configured yet. Enter the server URL:") + "\n\n" +
+		body = m.styles.Title.Render(m.text("cli.client.tui.setup_title")) + "\n\n" +
+			m.styles.Subtitle.Render(m.text("cli.client.tui.setup_prompt")) + "\n\n" +
 			m.input.View() + "\n\n" +
-			m.styles.Help.Render("enter: save  ·  esc: quit")
+			m.styles.Help.Render(m.text("cli.client.tui.setup_help"))
 	case screenMenu:
 		body = m.menu.View()
 	case screenNames:
@@ -469,21 +490,21 @@ func (m Model) View() string {
 			if m.client != nil {
 				lang = m.client.Lang
 			}
-			body += "\n" + m.styles.Help.Render(fmt.Sprintf("selected: %s", displayformat.Count(int64(len(selectedNames(m.selected))), lang)))
+			body += "\n" + m.styles.Help.Render(m.text("cli.client.tui.selected_count", "count", displayformat.Count(int64(len(selectedNames(m.selected))), lang)))
 		}
 	case screenSearchInput:
-		body = m.styles.Title.Render("Search templates") + "\n\n" +
+		body = m.styles.Title.Render(m.text("cli.client.tui.search_title")) + "\n\n" +
 			m.input.View() + "\n\n" +
-			m.styles.Help.Render("enter: search  ·  esc: back")
+			m.styles.Help.Render(m.text("cli.client.tui.search_help"))
 	case screenView:
 		body = m.styles.Title.Render(m.viewName) + "\n" + m.viewport.View() + "\n" +
-			m.styles.Help.Render("esc: back")
+			m.styles.Help.Render(m.text("cli.client.tui.back_help"))
 	case screenStats:
 		body = m.renderStats()
 	}
 
 	if m.errMsg != "" {
-		body += "\n\n" + m.styles.Error.Render("Error: "+m.errMsg)
+		body += "\n\n" + m.styles.Error.Render(m.text("cli.client.tui.error_prefix", "error", m.errMsg))
 	}
 	if m.message != "" {
 		body += "\n\n" + m.styles.Success.Render(m.message)
@@ -493,7 +514,7 @@ func (m Model) View() string {
 
 func (m Model) renderStats() string {
 	var b strings.Builder
-	b.WriteString(m.styles.Title.Render("Server stats"))
+	b.WriteString(m.styles.Title.Render(m.text("cli.client.tui.stats_title")))
 	b.WriteString("\n\n")
 	keys := make([]string, 0, len(m.stats))
 	for k := range m.stats {
@@ -501,9 +522,9 @@ func (m Model) renderStats() string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s: %s\n", k, api.StatsCount(m.stats[k]))
+		fmt.Fprintf(&b, "%s: %s\n", k, api.StatsCount(m.stats[k], m.lang()))
 	}
-	b.WriteString("\n" + m.styles.Help.Render("esc: back"))
+	b.WriteString("\n" + m.styles.Help.Render(m.text("cli.client.tui.back_help")))
 	return b.String()
 }
 

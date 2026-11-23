@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 //go:embed templates/*.txt
@@ -59,6 +61,139 @@ var KnownVariables = map[string]bool{
 	"next_run":        true,
 	"current_version": true,
 	"new_version":     true,
+	// Pretranslated text passed into the plain-substitution email templates.
+	"email_subject":                true,
+	"email_heading":                true,
+	"email_from_label":             true,
+	"email_time_label":             true,
+	"email_details_label":          true,
+	"email_source_ip_label":        true,
+	"email_summary":                true,
+	"email_filename_label":         true,
+	"email_size_label":             true,
+	"email_error_label":            true,
+	"email_path_full":              true,
+	"email_free_space_label":       true,
+	"email_threshold_label":        true,
+	"email_task_failed":            true,
+	"email_next_run_label":         true,
+	"email_expiry_warning":         true,
+	"email_expiry_date_label":      true,
+	"email_renewal_failed":         true,
+	"email_expires_in_label":       true,
+	"email_next_retry_label":       true,
+	"email_renewed":                true,
+	"email_valid_until_label":      true,
+	"email_smtp_confirmation":      true,
+	"email_notifications_enabled":  true,
+	"email_release_available":      true,
+	"email_running_version_label":  true,
+	"email_new_version_label":      true,
+	"email_install_prompt":         true,
+	"email_updated":                true,
+	"email_previous_version_label": true,
+}
+
+// templateTranslationKeys maps placeholders for static email copy to locale keys.
+// Dynamic values remain in the caller's vars map and are interpolated literally.
+var templateTranslationKeys = map[string]map[string]string{
+	"security_alert": {
+		"email_subject":         "email.templates.security_alert.subject",
+		"email_heading":         "email.templates.security_alert.heading",
+		"email_from_label":      "email.common.from_label",
+		"email_time_label":      "email.common.time_label",
+		"email_details_label":   "email.templates.security_alert.details_label",
+		"email_source_ip_label": "email.templates.security_alert.source_ip_label",
+	},
+	"backup_complete": {
+		"email_subject":        "email.templates.backup_complete.subject",
+		"email_heading":        "email.templates.backup_complete.heading",
+		"email_from_label":     "email.common.from_label",
+		"email_time_label":     "email.common.time_label",
+		"email_summary":        "email.templates.backup_complete.summary",
+		"email_filename_label": "email.templates.backup_complete.filename_label",
+		"email_size_label":     "email.templates.backup_complete.size_label",
+	},
+	"backup_failed": {
+		"email_subject":     "email.templates.backup_failed.subject",
+		"email_heading":     "email.templates.backup_failed.heading",
+		"email_from_label":  "email.common.from_label",
+		"email_time_label":  "email.common.time_label",
+		"email_summary":     "email.templates.backup_failed.summary",
+		"email_error_label": "email.templates.backup_failed.error_label",
+	},
+	"disk_low": {
+		"email_subject":          "email.templates.disk_low.subject",
+		"email_heading":          "email.templates.disk_low.heading",
+		"email_from_label":       "email.common.from_label",
+		"email_time_label":       "email.common.time_label",
+		"email_path_full":        "email.templates.disk_low.path_full",
+		"email_free_space_label": "email.templates.disk_low.free_space_label",
+		"email_threshold_label":  "email.templates.disk_low.threshold_label",
+	},
+	"scheduler_error": {
+		"email_subject":        "email.templates.scheduler_error.subject",
+		"email_heading":        "email.templates.scheduler_error.heading",
+		"email_from_label":     "email.common.from_label",
+		"email_time_label":     "email.common.time_label",
+		"email_task_failed":    "email.templates.scheduler_error.task_failed",
+		"email_error_label":    "email.templates.scheduler_error.error_label",
+		"email_next_run_label": "email.templates.scheduler_error.next_run_label",
+	},
+	"ssl_expiring": {
+		"email_subject":           "email.templates.ssl_expiring.subject",
+		"email_heading":           "email.templates.ssl_expiring.heading",
+		"email_from_label":        "email.common.from_label",
+		"email_time_label":        "email.common.time_label",
+		"email_expiry_warning":    "email.templates.ssl_expiring.expiry_warning",
+		"email_expiry_date_label": "email.templates.ssl_expiring.expiry_date_label",
+	},
+	"ssl_renewal_failed": {
+		"email_subject":           "email.templates.ssl_renewal_failed.subject",
+		"email_heading":           "email.templates.ssl_renewal_failed.heading",
+		"email_from_label":        "email.common.from_label",
+		"email_time_label":        "email.common.time_label",
+		"email_renewal_failed":    "email.templates.ssl_renewal_failed.renewal_failed",
+		"email_error_label":       "email.templates.ssl_renewal_failed.error_label",
+		"email_expires_in_label":  "email.templates.ssl_renewal_failed.expires_in_label",
+		"email_expiry_date_label": "email.templates.ssl_renewal_failed.expiry_date_label",
+		"email_next_retry_label":  "email.templates.ssl_renewal_failed.next_retry_label",
+	},
+	"ssl_renewed": {
+		"email_subject":           "email.templates.ssl_renewed.subject",
+		"email_heading":           "email.templates.ssl_renewed.heading",
+		"email_from_label":        "email.common.from_label",
+		"email_time_label":        "email.common.time_label",
+		"email_renewed":           "email.templates.ssl_renewed.renewed",
+		"email_valid_until_label": "email.templates.ssl_renewed.valid_until_label",
+	},
+	"test": {
+		"email_subject":               "email.templates.test.subject",
+		"email_heading":               "email.templates.test.heading",
+		"email_from_label":            "email.common.from_label",
+		"email_time_label":            "email.common.time_label",
+		"email_smtp_confirmation":     "email.templates.test.smtp_confirmation",
+		"email_notifications_enabled": "email.templates.test.notifications_enabled",
+	},
+	"update_available": {
+		"email_subject":               "email.templates.update_available.subject",
+		"email_heading":               "email.templates.update_available.heading",
+		"email_from_label":            "email.common.from_label",
+		"email_time_label":            "email.common.time_label",
+		"email_release_available":     "email.templates.update_available.release_available",
+		"email_running_version_label": "email.templates.update_available.running_version_label",
+		"email_new_version_label":     "email.templates.update_available.new_version_label",
+		"email_install_prompt":        "email.templates.update_available.install_prompt",
+	},
+	"update_installed": {
+		"email_subject":                "email.templates.update_installed.subject",
+		"email_heading":                "email.templates.update_installed.heading",
+		"email_from_label":             "email.common.from_label",
+		"email_time_label":             "email.common.time_label",
+		"email_updated":                "email.templates.update_installed.updated",
+		"email_previous_version_label": "email.templates.update_installed.previous_version_label",
+		"email_new_version_label":      "email.templates.update_installed.new_version_label",
+	},
 }
 
 // varPattern matches a {variable} token.
@@ -131,6 +266,20 @@ func substitute(s string, vars map[string]string) string {
 // Render resolves the template named name, substitutes vars, and returns the
 // finished subject and body.
 func (r *Renderer) Render(name string, vars map[string]string) (subject, body string, err error) {
+	return r.RenderLocalized(name, i18n.DefaultLang, vars)
+}
+
+// RenderLocalized resolves all built-in translated copy before applying the
+// template engine's plain variable substitution. Custom template text remains
+// literal unless it uses one of the same translated variables.
+func (r *Renderer) RenderLocalized(name, lang string, vars map[string]string) (subject, body string, err error) {
+	renderVars := make(map[string]string, len(vars)+len(templateTranslationKeys[name]))
+	for key, value := range vars {
+		renderVars[key] = value
+	}
+	for variable, key := range templateTranslationKeys[name] {
+		renderVars[variable] = i18n.TranslateFormat(lang, key, renderVars)
+	}
 	raw, err := r.rawTemplate(name)
 	if err != nil {
 		return "", "", err
@@ -139,7 +288,7 @@ func (r *Renderer) Render(name string, vars map[string]string) (subject, body st
 	if err != nil {
 		return "", "", fmt.Errorf("email: template %q: %w", name, err)
 	}
-	return substitute(subject, vars), substitute(body, vars), nil
+	return substitute(subject, renderVars), substitute(body, renderVars), nil
 }
 
 // ValidateTemplate checks raw template source for the errors listed in AI.md

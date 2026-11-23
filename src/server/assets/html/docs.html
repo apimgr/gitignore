@@ -1,7 +1,7 @@
 {{define "content"}}
-<h1>API Documentation</h1>
-<p>Interactive: <a href="{{path "/server/docs/swagger"}}">Swagger UI</a> · <a href="{{path "/api/swagger"}}">OpenAPI JSON</a> · <a href="{{path "/server/docs/graphql"}}">GraphiQL</a></p>
-<h2>Endpoints</h2>
+<h1>{{t .Lang "nav.api_docs"}}</h1>
+<p>{{t .Lang "web.docs.interactive"}} <a href="{{path "/server/docs/swagger"}}">{{t .Lang "web.server.swagger_ui"}}</a> · <a href="{{path "/api/swagger"}}">{{t .Lang "web.docs.openapi_json"}}</a> · <a href="{{path "/server/docs/graphql"}}">{{t .Lang "web.docs.graphiql"}}</a></p>
+<h2>{{t .Lang "web.docs.endpoints"}}</h2>
 <pre>GET {{.APIBase}}/list
 GET {{.APIBase}}/templates/{name}
 GET {{.APIBase}}/search?q={query}
@@ -12,7 +12,7 @@ GET {{.APIBase}}/stats
 GET {{.APIBase}}/templates.json
 GET {{.APIBase}}/templates.tar.gz
 GET /api/autodiscover</pre>
-<h2>gitignore.io compatibility</h2>
+<h2>{{t .Lang "web.docs.compatibility"}}</h2>
 <pre>GET /api/list
 GET /api/{templates}</pre>
 {{end}}

@@ -37,7 +37,7 @@ func writeGeneratedSecretAudit(key string) {
 		Actor:  audit.Actor{Type: "system", IP: "127.0.0.1"},
 		Target: &audit.Target{Type: "config", ID: key}, Result: "success",
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not write configuration audit event for key %s\n", key)
+		fmt.Fprintln(os.Stderr, configText("cli.config.secret_audit_write_warning", "key", key))
 	}
 }
 
@@ -54,7 +54,7 @@ func loadSecretsConfig(configPath string, cfg *Config) error {
 	}
 	data, err := yaml.Marshal(secrets)
 	if err != nil {
-		return fmt.Errorf("encode secrets configuration: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_encode_configuration_failed"), err)
 	}
 	return applyYAMLConfigFile(secretsPath, data, cfg)
 }
@@ -77,7 +77,7 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 		if token == "" {
 			token, err = generateOperatorToken()
 			if err != nil {
-				return false, fmt.Errorf("generate operator token: %w", err)
+				return false, fmt.Errorf("%s: %w", configText("cli.config.secret_generate_failed", "name", "operator token"), err)
 			}
 			generatedKeys = append(generatedKeys, "server.token")
 		}
@@ -137,7 +137,7 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 		}
 		value, err = generatePrefixedToken("mtr_")
 		if err != nil {
-			return false, fmt.Errorf("generate %s metrics token: %w", name, err)
+			return false, fmt.Errorf("%s: %w", configText("cli.config.secret_generate_failed", "name", name+" metrics token"), err)
 		}
 		metricTokens[name] = value
 		metricRuntimeValues[name] = value
@@ -169,7 +169,7 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 			if secret == "" {
 				raw := make([]byte, 32)
 				if _, err := cryptorand.Read(raw); err != nil {
-					return false, fmt.Errorf("generate %s webhook secret: %w", role, err)
+					return false, fmt.Errorf("%s: %w", configText("cli.config.secret_generate_failed", "name", role+" webhook secret"), err)
 				}
 				secret = base64.RawURLEncoding.EncodeToString(raw)
 				webhooks[secretName] = secret
@@ -251,12 +251,12 @@ func readSecrets(path string) (map[string]interface{}, error) {
 	if info, err := os.Stat(path); err == nil && info.Mode().Perm() != 0600 {
 		if err := os.Chmod(path, 0600); err != nil {
 			invalidConfigFiles[configFileCacheKey(path)] = true
-			fmt.Fprintf(os.Stderr, "Warning: secrets file %s permissions could not be secured; using its last good copy or generated defaults\n", filepath.Base(path))
+			fmt.Fprintln(os.Stderr, configText("cli.config.secrets_permissions_warning", "file", filepath.Base(path)))
 			return cachedSecretValues(path), nil
 		}
 	} else if err != nil && !os.IsNotExist(err) {
 		invalidConfigFiles[configFileCacheKey(path)] = true
-		fmt.Fprintf(os.Stderr, "Warning: secrets file %s could not be checked; using its last good copy or generated defaults\n", filepath.Base(path))
+		fmt.Fprintln(os.Stderr, configText("cli.config.secrets_check_warning", "file", filepath.Base(path)))
 		return cachedSecretValues(path), nil
 	}
 	data, err := os.ReadFile(path)
@@ -266,13 +266,13 @@ func readSecrets(path string) (map[string]interface{}, error) {
 	}
 	if err != nil {
 		invalidConfigFiles[configFileCacheKey(path)] = true
-		fmt.Fprintf(os.Stderr, "Warning: secrets file %s could not be read; using its last good copy or generated defaults\n", filepath.Base(path))
+		fmt.Fprintln(os.Stderr, configText("cli.config.secrets_read_warning", "file", filepath.Base(path)))
 		return cachedSecretValues(path), nil
 	}
 	var values map[string]interface{}
 	if err := yaml.Unmarshal(data, &values); err != nil {
 		invalidConfigFiles[configFileCacheKey(path)] = true
-		fmt.Fprintf(os.Stderr, "Warning: secrets file %s could not be parsed; using its last good copy or generated defaults\n", filepath.Base(path))
+		fmt.Fprintln(os.Stderr, configText("cli.config.secrets_parse_warning", "file", filepath.Base(path)))
 		return cachedSecretValues(path), nil
 	}
 	invalidConfigFiles[configFileCacheKey(path)] = false
@@ -307,38 +307,38 @@ func nestedSecretMap(parent map[string]interface{}, key string) map[string]inter
 func writeSecrets(path string, values map[string]interface{}) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create secrets directory: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_directory_create_failed"), err)
 	}
 	content, err := yaml.Marshal(values)
 	if err != nil {
-		return fmt.Errorf("encode secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_encode_failed"), err)
 	}
 	file, err := os.CreateTemp(dir, ".secrets-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create temporary secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_temp_create_failed"), err)
 	}
 	tempPath := file.Name()
 	defer func() { _ = os.Remove(tempPath) }()
 	if err := file.Chmod(0600); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("protect temporary secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_temp_protect_failed"), err)
 	}
 	if _, err := file.Write(content); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("write temporary secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_temp_write_failed"), err)
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("sync temporary secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_temp_sync_failed"), err)
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close temporary secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_temp_close_failed"), err)
 	}
 	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("replace secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_replace_failed"), err)
 	}
 	if err := os.Chmod(path, 0600); err != nil {
-		return fmt.Errorf("protect secrets file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.secrets_protect_failed"), err)
 	}
 	return nil
 }

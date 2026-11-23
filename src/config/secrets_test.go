@@ -275,6 +275,53 @@ func TestLoadSecretsConfigOverridesEarlierValuesAndSecuresPermissions(t *testing
 	}
 }
 
+func TestBackupEncryptionPasswordLoadsAndPersistsOnlyInSecrets(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.yml")
+	secretsPath := filepath.Join(dir, "secrets.yml")
+	password := "configured backup password"
+	if err := os.WriteFile(configPath, []byte("server: {}\n"), 0600); err != nil {
+		t.Fatalf("write server.yml: %v", err)
+	}
+	if err := os.WriteFile(secretsPath, []byte("server:\n  backup:\n    encryption_password: "+password+"\n"), 0600); err != nil {
+		t.Fatalf("write secrets.yml: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Backup.EncryptionPassword != password || !cfg.Server.Backup.Encryption.Enabled {
+		t.Fatal("backup encryption password was not loaded and enabled")
+	}
+
+	cfg.Server.Backup.EncryptionPassword = "updated backup password"
+	if err := saveConfig(cfg, configPath); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	serverYAML, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read server.yml: %v", err)
+	}
+	if strings.Contains(string(serverYAML), "encryption_password") || strings.Contains(string(serverYAML), "updated backup password") {
+		t.Fatal("server.yml contains the backup encryption password")
+	}
+	secrets, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatalf("read secrets.yml: %v", err)
+	}
+	if !strings.Contains(string(secrets), "encryption_password: updated backup password") {
+		t.Fatal("updated backup encryption password was not stored in secrets.yml")
+	}
+	info, err := os.Stat(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("secrets.yml mode = %04o, want 0600", info.Mode().Perm())
+	}
+}
+
 func TestLoadSensitiveSecretsGeneratesAndPersistsWebhookSecret(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "server.yml")

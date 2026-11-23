@@ -1,8 +1,8 @@
 {{define "content"}}
-<h1>Statistics</h1>
+<h1>{{t .Lang "nav.stats"}}</h1>
 <ul>
-<li>Total templates: <strong>{{.Data.total_templates}}</strong></li>
-<li>Categories: <strong>{{.Data.categories}}</strong></li>
-<li>Total size: <strong>{{.Data.total_size_bytes}}</strong> bytes</li>
+<li>{{tf .Lang "web.stats.total_templates" "count" .Data.total_templates}}</li>
+<li>{{tf .Lang "web.stats.categories" "count" .Data.categories}}</li>
+<li>{{tf .Lang "web.stats.total_size" "size" .Data.total_size_bytes}}</li>
 </ul>
 {{end}}

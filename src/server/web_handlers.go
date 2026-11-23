@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +26,7 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 	if query != "" {
 		data["results"] = s.config.Templates.Search(query)
 	}
-	s.renderPage(w, r, "search", PageData{Title: "Search", Data: data})
+	s.renderPage(w, r, "search", PageData{Title: requestTranslation(r, "web.handler.title.search"), Data: data})
 }
 
 // handleTemplatePage serves the template detail page.
@@ -34,8 +35,8 @@ func (s *Server) handleTemplatePage(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := s.config.Templates.Get(name)
 	if err != nil {
 		s.renderPageStatus(w, r, "template", http.StatusNotFound, PageData{
-			Title: "Not found",
-			Data:  map[string]interface{}{"name": name, "content": "template not found"},
+			Title: requestTranslation(r, "web.handler.title.not_found"),
+			Data:  map[string]interface{}{"name": name, "content": requestTranslation(r, "web.handler.error.template_not_found")},
 		})
 		return
 	}
@@ -56,18 +57,18 @@ func (s *Server) handleCombinePage(w http.ResponseWriter, r *http.Request) {
 		}
 		combined, err := s.config.Templates.Combine(names)
 		if err != nil {
-			data["error"] = err.Error()
+			data["error"] = requestTranslation(r, "web.handler.error.combine_failed")
 		} else {
 			data["content"] = combined
 		}
 	}
-	s.renderPage(w, r, "combine", PageData{Title: "Combine", Data: data})
+	s.renderPage(w, r, "combine", PageData{Title: requestTranslation(r, "web.handler.title.combine"), Data: data})
 }
 
 // handleCategoriesPage serves the categories page.
 func (s *Server) handleCategoriesPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, r, "categories", PageData{
-		Title: "Categories",
+		Title: requestTranslation(r, "web.handler.title.categories"),
 		Data:  map[string]interface{}{"categories": s.config.Templates.GetCategories()},
 	})
 }
@@ -84,40 +85,40 @@ func (s *Server) handleListPage(w http.ResponseWriter, r *http.Request) {
 		names = s.config.Templates.List()
 	}
 	s.renderPage(w, r, "list", PageData{
-		Title: "All Templates",
+		Title: requestTranslation(r, "web.handler.title.all_templates"),
 		Data:  map[string]interface{}{"templates": names},
 	})
 }
 
 // handleStatsPage serves the statistics page.
 func (s *Server) handleStatsPage(w http.ResponseWriter, r *http.Request) {
-	s.renderPage(w, r, "stats", PageData{Title: "Statistics", Data: s.config.Templates.Stats()})
+	s.renderPage(w, r, "stats", PageData{Title: requestTranslation(r, "web.handler.title.statistics"), Data: s.config.Templates.Stats()})
 }
 
 // handleDocsPage serves the API documentation page.
 func (s *Server) handleDocsPage(w http.ResponseWriter, r *http.Request) {
-	s.renderPage(w, r, "docs", PageData{Title: "API Documentation"})
+	s.renderPage(w, r, "docs", PageData{Title: requestTranslation(r, "web.handler.title.api_documentation")})
 }
 
 // handleCLIPage serves the CLI customization page.
 func (s *Server) handleCLIPage(w http.ResponseWriter, r *http.Request) {
-	s.renderPage(w, r, "cli", PageData{Title: "CLI"})
+	s.renderPage(w, r, "cli", PageData{Title: requestTranslation(r, "web.handler.title.cli")})
 }
 
 // handleServerPage serves the /server index page.
 func (s *Server) handleServerPage(w http.ResponseWriter, r *http.Request) {
-	s.renderPage(w, r, "server", PageData{Title: "Server"})
+	s.renderPage(w, r, "server", PageData{Title: requestTranslation(r, "web.handler.title.server")})
 }
 
 // handleAboutPage serves the About standard page (AI.md PART 16).
 func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {
-	s.renderPage(w, r, "about", PageData{Title: "About"})
+	s.renderPage(w, r, "about", PageData{Title: requestTranslation(r, "web.handler.title.about")})
 }
 
 func (s *Server) handleAPIAbout(w http.ResponseWriter, r *http.Request) {
 	sendAPIResponseOK(w, map[string]string{
-		"title":   "About GitIgnore",
-		"content": "GitIgnore is a curated .gitignore template service with a public REST API, read-only GraphQL API, MCP tools, server-rendered browser interface, and companion CLI. Templates are embedded in the binary and can be retrieved individually, searched, or combined.",
+		"title":   requestTranslation(r, "web.handler.title.api_about"),
+		"content": requestTranslation(r, "web.handler.api_about_description"),
 		"format":  "markdown",
 	})
 }
@@ -131,7 +132,7 @@ func (s *Server) handleDPOPage(w http.ResponseWriter, r *http.Request) {
 			email = s.currentConfig().Server.Contact.General.Email
 		}
 	}
-	s.renderPage(w, r, "dpo", PageData{Title: "Data Protection Officer", Data: map[string]interface{}{"name": name, "email": email}})
+	s.renderPage(w, r, "dpo", PageData{Title: requestTranslation(r, "web.handler.title.data_protection_officer"), Data: map[string]interface{}{"name": name, "email": email}})
 }
 
 func (s *Server) handleAPIDPO(w http.ResponseWriter, r *http.Request) {
@@ -153,15 +154,16 @@ func (s *Server) handlePrivacyPage(w http.ResponseWriter, r *http.Request) {
 		active = config.DefaultConfig()
 	}
 	cfg := active.Server
-	analytics := cfg.Privacy.Cookies.Analytics.Description
+	privacy := localizedPrivacyDefaults(r, cfg.Privacy)
+	analytics := privacy.Cookies.Analytics.Description
 	if cfg.Tracking.Type != "" {
-		if cfg.Privacy.Data.Sold {
-			analytics += " " + cfg.Privacy.Cookies.Analytics.DescriptionSuffixSold
+		if privacy.Data.Sold {
+			analytics += " " + privacy.Cookies.Analytics.DescriptionSuffixSold
 		} else {
-			analytics += " " + cfg.Privacy.Cookies.Analytics.DescriptionSuffixNotSold
+			analytics += " " + privacy.Cookies.Analytics.DescriptionSuffixNotSold
 		}
 	}
-	stored := cfg.Privacy.Data.StoredOnServer == nil || *cfg.Privacy.Data.StoredOnServer
+	stored := privacy.Data.StoredOnServer == nil || *privacy.Data.StoredOnServer
 	contact := strings.TrimSpace(cfg.Contact.DPO.Email)
 	if contact == "" {
 		contact = strings.TrimSpace(cfg.Contact.General.Email)
@@ -171,13 +173,13 @@ func (s *Server) handlePrivacyPage(w http.ResponseWriter, r *http.Request) {
 		ccpaOptedOut = true
 	}
 	data := map[string]interface{}{
-		"privacy": cfg.Privacy, "storedOnServer": stored, "analyticsDescription": analytics,
+		"privacy": privacy, "storedOnServer": stored, "analyticsDescription": analytics,
 		"trackingType": cfg.Tracking.Type, "trackingName": trackingProviderName(cfg.Tracking.Type),
 		"ccpaOptedOut": ccpaOptedOut, "contactEmail": contact,
-		"extension": s.operatorHTML(r, "privacy"), "dataCollection": renderPublicContent(privacyCollection, "markdown"),
-		"dataUsage": renderPublicContent(privacyDataUsage(cfg.Privacy.Data.Sold), "markdown"), "dataSecurity": renderPublicContent(privacySecurity, "markdown"),
+		"extension": s.operatorHTML(r, "privacy"), "dataCollection": renderPublicContent(i18n.T(r, "web.legal.privacy.data_collection"), "markdown"),
+		"dataUsage": renderPublicContent(privacyDataUsage(r, privacy.Data.Sold), "markdown"), "dataSecurity": renderPublicContent(i18n.T(r, "web.legal.privacy.data_security"), "markdown"),
 	}
-	s.renderPage(w, r, "privacy", PageData{Title: "Privacy", Data: data})
+	s.renderPage(w, r, "privacy", PageData{Title: requestTranslation(r, "web.handler.title.privacy"), Data: data})
 }
 
 func (s *Server) handleAPIPrivacy(w http.ResponseWriter, r *http.Request) {
@@ -186,28 +188,35 @@ func (s *Server) handleAPIPrivacy(w http.ResponseWriter, r *http.Request) {
 		active = config.DefaultConfig()
 	}
 	cfg := active.Server
+	privacy := localizedPrivacyDefaults(r, cfg.Privacy)
 	trackingName := trackingProviderName(cfg.Tracking.Type)
-	analytics := cfg.Privacy.Cookies.Analytics.Description
+	analytics := privacy.Cookies.Analytics.Description
 	if cfg.Tracking.Type != "" {
-		if cfg.Privacy.Data.Sold {
-			analytics += " " + cfg.Privacy.Cookies.Analytics.DescriptionSuffixSold
+		if privacy.Data.Sold {
+			analytics += " " + privacy.Cookies.Analytics.DescriptionSuffixSold
 		} else {
-			analytics += " " + cfg.Privacy.Cookies.Analytics.DescriptionSuffixNotSold
+			analytics += " " + privacy.Cookies.Analytics.DescriptionSuffixNotSold
 		}
 	}
-	stored := cfg.Privacy.Data.StoredOnServer == nil || *cfg.Privacy.Data.StoredOnServer
+	stored := privacy.Data.StoredOnServer == nil || *privacy.Data.StoredOnServer
+	sharing := append([]config.PrivacySharingConfig(nil), privacy.Data.Sharing...)
+	for i := range sharing {
+		if i < len(cfg.Privacy.Data.Sharing) {
+			sharing[i].Condition = cfg.Privacy.Data.Sharing[i].Condition
+		}
+	}
 	optedOut := false
 	if cookie, err := r.Cookie("ccpa_opt_out"); err == nil && cookie.Value == "true" {
 		optedOut = true
 	}
 	sendAPIResponseOK(w, map[string]interface{}{
-		"summary":   map[string]bool{"data_stored_on_server": stored, "data_sold": cfg.Privacy.Data.Sold, "user_control": true},
-		"cookies":   map[string]interface{}{"essential": cfg.Privacy.Cookies.Essential, "preferences": cfg.Privacy.Cookies.Preferences, "analytics": map[string]interface{}{"enabled": cfg.Privacy.Cookies.Analytics.Enabled, "description": analytics}},
-		"data":      map[string]interface{}{"sold": cfg.Privacy.Data.Sold, "stored_on_server": stored, "sharing": cfg.Privacy.Data.Sharing},
+		"summary":   map[string]bool{"data_stored_on_server": stored, "data_sold": privacy.Data.Sold, "user_control": true},
+		"cookies":   map[string]interface{}{"essential": privacy.Cookies.Essential, "preferences": privacy.Cookies.Preferences, "analytics": map[string]interface{}{"enabled": privacy.Cookies.Analytics.Enabled, "description": analytics}},
+		"data":      map[string]interface{}{"sold": privacy.Data.Sold, "stored_on_server": stored, "sharing": sharing},
 		"tracking":  map[string]interface{}{"enabled": cfg.Tracking.Type != "", "type": cfg.Tracking.Type, "type_name": trackingName},
-		"retention": cfg.Privacy.Retention, "third_party": cfg.Privacy.ThirdParty,
-		"ccpa":    map[string]interface{}{"applicable": cfg.Privacy.Data.Sold, "opt_out_url": "/server/privacy#ccpa-opt-out", "user_opted_out": optedOut},
-		"content": map[string]string{"consent_message": privacyConsentMessage(cfg.Privacy), "data_usage": privacyDataUsage(cfg.Privacy.Data.Sold)},
+		"retention": privacy.Retention, "third_party": cfg.Privacy.ThirdParty,
+		"ccpa":    map[string]interface{}{"applicable": privacy.Data.Sold, "opt_out_url": "/server/privacy#ccpa-opt-out", "user_opted_out": optedOut},
+		"content": map[string]string{"consent_message": privacyConsentMessage(r, cfg.Privacy), "data_usage": privacyDataUsage(r, privacy.Data.Sold)},
 	})
 }
 
@@ -226,8 +235,11 @@ func (s *Server) handleHelpPage(w http.ResponseWriter, r *http.Request) {
 	if s.config != nil && s.currentConfig() != nil {
 		content = s.currentConfig().Server.Pages.Help.Content
 	}
+	if content == "" || content == config.DefaultConfig().Server.Pages.Help.Content {
+		content = requestTranslation(r, "web.handler.default_help_content")
+	}
 	lang := i18n.LangFromContext(r.Context())
-	s.renderPage(w, r, "help", PageData{Title: "Help", Data: map[string]interface{}{"project": content, "registeredPages": s.registeredHubPages(false, lang)}})
+	s.renderPage(w, r, "help", PageData{Title: requestTranslation(r, "web.handler.title.help"), Data: map[string]interface{}{"project": content, "registeredPages": s.registeredHubPages(false, lang)}})
 }
 
 func (s *Server) handleAPIHelp(w http.ResponseWriter, r *http.Request) {
@@ -235,8 +247,11 @@ func (s *Server) handleAPIHelp(w http.ResponseWriter, r *http.Request) {
 	if s.config != nil && s.currentConfig() != nil {
 		content = s.currentConfig().Server.Pages.Help.Content
 	}
+	if content == "" || content == config.DefaultConfig().Server.Pages.Help.Content {
+		content = requestTranslation(r, "web.handler.default_help_content")
+	}
 	sendAPIResponseOK(w, map[string]interface{}{
-		"title":   "Help",
+		"title":   requestTranslation(r, "web.handler.title.api_help"),
 		"content": content,
 		"format":  "markdown",
 		"pages":   s.registeredHubPages(false, i18n.LangFromContext(r.Context())),
@@ -245,8 +260,8 @@ func (s *Server) handleAPIHelp(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMCPHelpPage(w http.ResponseWriter, r *http.Request) {
 	serverURL := s.publicServerURL(r)
-	tools := s.mcpTools()
-	project := s.mcpProjectDescription()
+	tools := s.mcpToolsForRequest(r)
+	project := s.mcpProjectDescription(r)
 	data := map[string]interface{}{
 		"url":     serverURL + s.apiBasePath() + "/server/mcp",
 		"apiURL":  serverURL + "/api/mcp",
@@ -254,32 +269,35 @@ func (s *Server) handleMCPHelpPage(w http.ResponseWriter, r *http.Request) {
 		"tools":   tools,
 		"project": project,
 	}
-	s.renderPage(w, r, "mcp_help", PageData{Title: "MCP help", Data: data})
+	s.renderPage(w, r, "mcp_help", PageData{Title: requestTranslation(r, "web.handler.title.mcp_help"), Data: data})
 }
 
 func (s *Server) handleAPIHelpMCP(w http.ResponseWriter, r *http.Request) {
 	serverURL := s.publicServerURL(r)
-	tools := s.mcpTools()
-	project := s.mcpProjectDescription()
+	tools := s.mcpToolsForRequest(r)
+	project := s.mcpProjectDescription(r)
 	descriptions := make([]map[string]string, 0, len(tools))
 	for _, tool := range tools {
 		descriptions = append(descriptions, map[string]string{"name": tool.Name, "description": tool.Description})
 	}
 	sendAPIResponseOK(w, map[string]interface{}{
-		"enabled": true,
-		"url":     serverURL + s.apiBasePath() + "/server/mcp",
-		"aliases": []string{serverURL + "/api/mcp", serverURL + "/mcp"},
-		"auth":    map[string]string{"scheme": "Bearer"},
-		"tools":   descriptions,
-		"project": project,
+		"enabled":           true,
+		"url":               serverURL + s.apiBasePath() + "/server/mcp",
+		"aliases":           []string{serverURL + "/api/mcp", serverURL + "/mcp"},
+		"auth":              map[string]string{"scheme": "Bearer"},
+		"tools":             descriptions,
+		"project":           project,
+		"tools_description": requestTranslation(r, "web.mcp.tools_description"),
 	})
 }
 
-func (s *Server) mcpProjectDescription() string {
+func (s *Server) mcpProjectDescription(r *http.Request) string {
 	if s.config != nil && s.currentConfig() != nil {
-		return s.currentConfig().Server.Pages.Help.MCP
+		if description := strings.TrimSpace(s.currentConfig().Server.Pages.Help.MCP); description != "" && description != config.DefaultConfig().Server.Pages.Help.MCP {
+			return description
+		}
 	}
-	return "Use the public catalog tools to list, search, retrieve, combine, and export curated .gitignore templates. Template names are case-insensitive."
+	return requestTranslation(r, "web.mcp.project_description")
 }
 
 // handleTermsPage serves the Terms standard page.
@@ -290,12 +308,12 @@ func (s *Server) handleTermsPage(w http.ResponseWriter, r *http.Request) {
 		content = string(entry)
 		format = "html"
 	}
-	s.renderPage(w, r, "terms", PageData{Title: "Terms of Service", Data: map[string]interface{}{"content": renderPublicContent(content, format)}})
+	s.renderPage(w, r, "terms", PageData{Title: requestTranslation(r, "web.handler.title.terms"), Data: map[string]interface{}{"content": renderPublicContent(content, format)}})
 }
 
 func (s *Server) handleAPITerms(w http.ResponseWriter, r *http.Request) {
 	content, format := s.termsContent(r)
-	sendAPIResponseOK(w, map[string]string{"title": "Terms of Service", "content": content, "format": format})
+	sendAPIResponseOK(w, map[string]string{"title": requestTranslation(r, "web.handler.title.api_terms"), "content": content, "format": format})
 }
 
 // handleSecurityPage serves the public security reporting guidance.
@@ -322,7 +340,7 @@ func (s *Server) handleSecurityPage(w http.ResponseWriter, r *http.Request) {
 		pgpFingerprint = metadata.Fingerprint
 	}
 	s.renderPage(w, r, "security", PageData{
-		Title: "Security",
+		Title: requestTranslation(r, "web.handler.title.security"),
 		Data: map[string]interface{}{
 			"email":          s.securityContactEmail(),
 			"expires":        expires,
@@ -337,7 +355,7 @@ func (s *Server) handleSecurityPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPISecurity(w http.ResponseWriter, r *http.Request) {
 	id, err := securityID(time.Now())
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "security reporting is unavailable")
+		sendAPIResponseError(w, "SERVER_ERROR", requestTranslation(r, "web.handler.error.security_unavailable"))
 		return
 	}
 	serverURL := s.publicServerURL(r)
@@ -377,18 +395,18 @@ func (s *Server) handleAPISecurity(w http.ResponseWriter, r *http.Request) {
 
 // handleSecurityPolicyPage serves the repository's disclosure policy.
 func (s *Server) handleSecurityPolicyPage(w http.ResponseWriter, r *http.Request) {
-	policy := securityPolicyMarkdown
+	policy := requestTranslation(r, "web.handler.default_security_policy_content")
 	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.Policy) != "" {
 		policy = s.currentConfig().Web.Security.Policy
 	}
 	s.renderPage(w, r, "security_policy", PageData{
-		Title: "Security Policy",
+		Title: requestTranslation(r, "web.handler.title.security_policy"),
 		Data:  map[string]interface{}{"email": s.securityContactEmail(), "policy": policy},
 	})
 }
 
 func (s *Server) handleAPISecurityPolicy(w http.ResponseWriter, r *http.Request) {
-	policy := securityPolicyMarkdown
+	policy := requestTranslation(r, "web.handler.default_security_policy_content")
 	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.Policy) != "" {
 		policy = s.currentConfig().Web.Security.Policy
 	}
@@ -399,22 +417,20 @@ func (s *Server) handleAPISecurityPolicy(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleSecurityThanksPage(w http.ResponseWriter, r *http.Request) {
 	entries, err := db.ListSecurityThanks()
 	if err != nil {
-		s.renderPageStatus(w, r, "security_thanks", http.StatusInternalServerError, PageData{Title: "Security Acknowledgments"})
+		s.renderPageStatus(w, r, "security_thanks", http.StatusInternalServerError, PageData{Title: requestTranslation(r, "web.handler.title.security_acknowledgments")})
 		return
 	}
-	s.renderPage(w, r, "security_thanks", PageData{Title: "Security Acknowledgments", Data: map[string]interface{}{"entries": entries}})
+	s.renderPage(w, r, "security_thanks", PageData{Title: requestTranslation(r, "web.handler.title.security_acknowledgments"), Data: map[string]interface{}{"entries": entries}})
 }
 
 func (s *Server) handleAPISecurityThanks(w http.ResponseWriter, r *http.Request) {
 	entries, err := db.ListSecurityThanks()
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "security acknowledgments are unavailable")
+		sendAPIResponseError(w, "SERVER_ERROR", requestTranslation(r, "web.handler.error.security_acknowledgments_unavailable"))
 		return
 	}
 	sendAPIResponseOK(w, map[string]interface{}{"entries": entries})
 }
-
-const securityPolicyMarkdown = "## Reporting a vulnerability\n\nReport security vulnerabilities privately through GitHub private vulnerability reporting or the security report form. Include the affected version, impact, and reproduction steps. Do not publish vulnerability details before coordinating disclosure.\n\n## Response process\n\nReceipt is acknowledged within 48 hours. Critical vulnerabilities are targeted for a fix within 14 days. The disclosure timeline is coordinated after a fix is available. Only the latest release receives security updates."
 
 // handleSecurityReportStatus consumes the report's researcher status token at
 // most once per UTC day and returns only triage metadata.
@@ -432,7 +448,7 @@ func (s *Server) handleSecurityReportStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.renderPage(w, r, "security_report_status", PageData{
-		Title: "Security Report Status",
+		Title: requestTranslation(r, "web.handler.title.security_report_status"),
 		Data:  map[string]interface{}{"trackingID": trackingID, "status": status, "comment": comment, "disclosureDate": disclosureDate},
 	})
 }
@@ -442,7 +458,7 @@ func (s *Server) handleSecurityReportStatus(w http.ResponseWriter, r *http.Reque
 // change theme via the <noscript> form (AI.md PART 16).
 func (s *Server) handleThemeSet(w http.ResponseWriter, r *http.Request) {
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseError(w, "CSRF_FAILED", requestTranslation(r, "web.handler.error.csrf_invalid"))
 		return
 	}
 	theme := r.FormValue("theme")
@@ -473,7 +489,7 @@ func (s *Server) handlePreferencesPage(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("ccpa_opt_out"); err == nil && cookie.Value == "true" {
 		ccpaSet = true
 	}
-	s.renderPage(w, r, "preferences", PageData{Title: "Preferences", Data: map[string]interface{}{
+	s.renderPage(w, r, "preferences", PageData{Title: requestTranslation(r, "web.handler.title.preferences"), Data: map[string]interface{}{
 		"cancelURL":          safePreferenceRedirect(s, r, "/"),
 		"consentPreferences": consent["preferences"] == true,
 		"consentAnalytics":   consent["analytics"] == true,
@@ -486,7 +502,7 @@ func (s *Server) handlePreferencesPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePreferencesSave(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseError(w, "CSRF_FAILED", requestTranslation(r, "web.handler.error.csrf_invalid"))
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -527,11 +543,11 @@ func validCSRFRequest(r *http.Request) bool {
 
 func (s *Server) handleCCPA(w http.ResponseWriter, r *http.Request) {
 	if !validCSRFRequest(r) {
-		http.Error(w, "invalid request token", http.StatusForbidden)
+		http.Error(w, requestTranslation(r, "web.handler.error.csrf_invalid"), http.StatusForbidden)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
+		http.Error(w, requestTranslation(r, "web.handler.error.form_invalid"), http.StatusBadRequest)
 		return
 	}
 	if s.currentConfig() == nil || !s.currentConfig().Server.Privacy.Data.Sold {
@@ -544,7 +560,7 @@ func (s *Server) handleCCPA(w http.ResponseWriter, r *http.Request) {
 	case "opt-in":
 		expirePreferenceCookie(w, r, "ccpa_opt_out", s)
 	default:
-		http.Error(w, "invalid choice", http.StatusBadRequest)
+		http.Error(w, requestTranslation(r, "web.handler.error.choice_invalid"), http.StatusBadRequest)
 		return
 	}
 	redirect := safePreferenceRedirect(s, r, "/server/privacy")
@@ -554,11 +570,12 @@ func (s *Server) handleCCPA(w http.ResponseWriter, r *http.Request) {
 // renderErrorPage renders a themed error page (AI.md PART 16 "Error Pages").
 // It never leaks stack traces; the message is a short, user-facing string.
 func (s *Server) renderErrorPage(w http.ResponseWriter, r *http.Request, code int, message string) {
+	statusText := localizedHTTPStatus(r, code)
 	s.renderPageStatus(w, r, "error", code, PageData{
-		Title: http.StatusText(code),
+		Title: statusText,
 		Data: map[string]interface{}{
 			"code":    code,
-			"status":  http.StatusText(code),
+			"status":  statusText,
 			"message": message,
 		},
 	})
@@ -566,12 +583,33 @@ func (s *Server) renderErrorPage(w http.ResponseWriter, r *http.Request, code in
 
 // handleNotFound renders the themed 404 page for unmatched routes.
 func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
-	s.renderErrorPage(w, r, http.StatusNotFound, "The page you requested could not be found.")
+	s.renderErrorPage(w, r, http.StatusNotFound, requestTranslation(r, "web.handler.error.not_found"))
 }
 
 // handleMethodNotAllowed renders the themed 405 page.
 func (s *Server) handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
-	s.renderErrorPage(w, r, http.StatusMethodNotAllowed, "That method is not allowed on this resource.")
+	s.renderErrorPage(w, r, http.StatusMethodNotAllowed, requestTranslation(r, "web.handler.error.method_not_allowed"))
+}
+
+func requestTranslation(r *http.Request, key string) string {
+	return i18n.Translate(i18n.LangFromContext(r.Context()), key)
+}
+
+func localizedHTTPStatus(r *http.Request, code int) string {
+	key := map[int]string{
+		http.StatusBadRequest:          "web.handler.error.http_bad_request",
+		http.StatusUnauthorized:        "web.handler.error.http_unauthorized",
+		http.StatusForbidden:           "web.handler.error.http_forbidden",
+		http.StatusNotFound:            "web.handler.error.http_not_found",
+		http.StatusMethodNotAllowed:    "web.handler.error.http_method_not_allowed",
+		http.StatusTooManyRequests:     "web.handler.error.http_too_many_requests",
+		http.StatusInternalServerError: "web.handler.error.http_internal_server_error",
+		http.StatusServiceUnavailable:  "web.handler.error.http_service_unavailable",
+	}[code]
+	if key == "" {
+		return strconv.Itoa(code)
+	}
+	return requestTranslation(r, key)
 }
 
 // handleGraphiQLPage serves the GraphiQL playground.

@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 	"strings"
+
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 func mergeOperations(left, right map[string]interface{}) map[string]interface{} {
@@ -20,6 +22,7 @@ func mergeOperations(left, right map[string]interface{}) map[string]interface{} 
 // surface (AI.md PART 14). The server URL is derived from the request so the
 // document is correct regardless of host or scheme.
 func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
+	text := func(key string) string { return i18n.T(r, key) }
 	base := s.publicServerURL(r)
 	api := s.apiBasePath()
 
@@ -27,7 +30,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 		"name":        "name",
 		"in":          "path",
 		"required":    true,
-		"description": "Template name",
+		"description": text("swagger.openapi.parameter.template_name"),
 		"schema":      map[string]interface{}{"type": "string"},
 	}
 
@@ -49,7 +52,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	}
 
 	jsonOK := map[string]interface{}{
-		"description": "Success",
+		"description": text("swagger.openapi.response.success"),
 		"content": map[string]interface{}{
 			"application/json": map[string]interface{}{
 				"schema": map[string]interface{}{"$ref": "#/components/schemas/APIResponse"},
@@ -57,7 +60,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 		},
 	}
 	jsonErr := map[string]interface{}{
-		"description": "Error",
+		"description": text("swagger.openapi.response.error"),
 		"content": map[string]interface{}{
 			"application/json": map[string]interface{}{
 				"schema": map[string]interface{}{"$ref": "#/components/schemas/APIError"},
@@ -96,23 +99,23 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	}
 	graphQLPost := map[string]interface{}{
 		"post": map[string]interface{}{
-			"summary":     "Execute a read-only GraphQL query",
+			"summary":     text("swagger.openapi.operation.graphql_execute"),
 			"requestBody": graphQLRequestBody,
 			"responses": map[string]interface{}{
 				"200": map[string]interface{}{
-					"description": "GraphQL query result",
+					"description": text("swagger.openapi.response.graphql_result"),
 					"content": map[string]interface{}{
 						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
 					},
 				},
 				"400": map[string]interface{}{
-					"description": "Invalid GraphQL request body",
+					"description": text("swagger.openapi.response.graphql_invalid_request"),
 					"content": map[string]interface{}{
 						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
 					},
 				},
 				"500": map[string]interface{}{
-					"description": "GraphQL schema unavailable",
+					"description": text("swagger.openapi.response.graphql_schema_unavailable"),
 					"content": map[string]interface{}{
 						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
 					},
@@ -120,15 +123,15 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 			},
 		},
 	}
-	preferencesGet := get("Read guest preferences", nil)
+	preferencesGet := get(text("swagger.openapi.operation.preferences_read"), nil)
 	preferencesGet["get"].(map[string]interface{})["operationId"] = "get_api_server_preferences"
-	preferencesSyncGet := get("Export guest preferences", nil)
+	preferencesSyncGet := get(text("swagger.openapi.operation.preferences_export"), nil)
 	preferencesSyncGet["get"].(map[string]interface{})["operationId"] = "get_api_server_preferences_sync"
-	preferencesImportGet := get("Import guest preferences from a shared link", nil)
+	preferencesImportGet := get(text("swagger.openapi.operation.preferences_import"), nil)
 	preferencesImportGet["get"].(map[string]interface{})["operationId"] = "get_api_server_preferences_sync_import"
 	preferencesImportGet["get"].(map[string]interface{})["x-mcp-disabled"] = true
 	preferencesSavePost := map[string]interface{}{"post": map[string]interface{}{
-		"summary":     "Save guest preferences",
+		"summary":     text("swagger.openapi.operation.preferences_save"),
 		"operationId": "post_api_server_preferences",
 		"requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{
 			"application/json":                  map[string]interface{}{"schema": map[string]interface{}{"type": "object", "additionalProperties": map[string]interface{}{"type": "string"}}},
@@ -137,14 +140,14 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 		"responses": map[string]interface{}{"200": jsonOK, "400": jsonErr},
 	}}
 	ownerTokenSecurity := []interface{}{map[string]interface{}{"BearerAuth": []interface{}{}}}
-	ownerTokensGet := get("List owner tokens; token values are always masked", nil)
+	ownerTokensGet := get(text("swagger.openapi.operation.owner_tokens_list"), nil)
 	ownerTokensGetOp := ownerTokensGet["get"].(map[string]interface{})
 	ownerTokensGetOp["operationId"] = "get_api_server_preferences_tokens"
 	ownerTokensGetOp["x-mcp-disabled"] = true
 	ownerTokensGetOp["security"] = ownerTokenSecurity
 	ownerTokensPost := map[string]interface{}{"post": map[string]interface{}{
 		"operationId":    "post_api_server_preferences_tokens",
-		"summary":        "Create a linked owner token",
+		"summary":        text("swagger.openapi.operation.owner_token_create"),
 		"security":       ownerTokenSecurity,
 		"x-mcp-disabled": true,
 		"requestBody": map[string]interface{}{"required": true, "content": map[string]interface{}{
@@ -156,7 +159,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	}}
 	issuePrimaryToken := map[string]interface{}{"post": map[string]interface{}{
 		"operationId":    "post_api_server_preferences_tokens_primary",
-		"summary":        "Issue an anonymous owner and primary token",
+		"summary":        text("swagger.openapi.operation.primary_token_issue"),
 		"x-mcp-disabled": true,
 		"responses":      map[string]interface{}{"201": jsonOK, "401": jsonErr, "409": jsonErr, "429": jsonErr},
 	}}
@@ -183,7 +186,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	mcpPost := map[string]interface{}{
 		"post": map[string]interface{}{
 			"operationId": "mcp",
-			"summary":     "Call the MCP Streamable HTTP endpoint",
+			"summary":     text("swagger.openapi.operation.mcp_call"),
 			"requestBody": map[string]interface{}{
 				"required": true,
 				"content":  map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object", "required": []string{"jsonrpc", "method"}}}},
@@ -193,7 +196,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	}
 	contactPost := map[string]interface{}{
 		"post": map[string]interface{}{
-			"summary": "Submit a contact message or security report",
+			"summary": text("swagger.openapi.operation.contact_submit"),
 			"requestBody": map[string]interface{}{
 				"required": true,
 				"content": map[string]interface{}{
@@ -217,72 +220,72 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	}
 
 	paths := map[string]interface{}{
-		"/api/autodiscover":                        get("Discover server configuration and capabilities", nil),
+		"/api/autodiscover":                        get(text("swagger.openapi.operation.autodiscover"), nil),
 		"/api/graphql":                             graphQLPost,
-		"/api/healthz":                             get("Server health", nil),
-		"/api/healthz.txt":                         get("Server health as text", nil),
+		"/api/healthz":                             get(text("swagger.openapi.operation.health"), nil),
+		"/api/healthz.txt":                         get(text("swagger.openapi.operation.health_text"), nil),
 		"/api/mcp":                                 mcpPost,
-		"/api/list":                                get("List gitignore.io-compatible template names", nil),
-		"/api/{list}":                              get("Compose gitignore.io-compatible templates", []interface{}{map[string]interface{}{"name": "list", "in": "path", "required": true, "description": "Comma-separated template names", "schema": map[string]interface{}{"type": "string"}}}),
-		"/api/swagger":                             get("Current OpenAPI document", nil),
+		"/api/list":                                get(text("swagger.openapi.operation.legacy_list"), nil),
+		"/api/{list}":                              get(text("swagger.openapi.operation.legacy_compose"), []interface{}{map[string]interface{}{"name": "list", "in": "path", "required": true, "description": text("swagger.openapi.parameter.template_names"), "schema": map[string]interface{}{"type": "string"}}}),
+		"/api/swagger":                             get(text("swagger.openapi.operation.current_openapi"), nil),
 		"/mcp":                                     mcpPost,
-		api + "/":                                  get("API information", nil),
-		api + "/server/healthz":                    get("Server health", nil),
-		api + "/server/healthz.txt":                get("Server health as text", nil),
-		api + "/server/swagger":                    get("OpenAPI document", nil),
+		api + "/":                                  get(text("swagger.openapi.operation.api_info"), nil),
+		api + "/server/healthz":                    get(text("swagger.openapi.operation.health"), nil),
+		api + "/server/healthz.txt":                get(text("swagger.openapi.operation.health_text"), nil),
+		api + "/server/swagger":                    get(text("swagger.openapi.operation.openapi_document"), nil),
 		api + "/server/graphql":                    graphQLPost,
 		api + "/server/mcp":                        mcpPost,
-		api + "/server/security":                   get("Security reporting information", nil),
-		api + "/server/security/policy":            get("Security disclosure policy", nil),
-		api + "/server/security/thanks":            get("Security acknowledgments", nil),
-		api + "/server/dpo":                        get("Data protection officer contact", nil),
-		api + "/server/about":                      get("About this service", nil),
-		api + "/server/privacy":                    get("Privacy information", nil),
-		api + "/server/help":                       get("Help content and pages", nil),
-		api + "/server/help/mcp":                   get("MCP setup and tool metadata", nil),
-		api + "/server/terms":                      get("Terms of use", nil),
+		api + "/server/security":                   get(text("swagger.openapi.operation.security_info"), nil),
+		api + "/server/security/policy":            get(text("swagger.openapi.operation.security_policy"), nil),
+		api + "/server/security/thanks":            get(text("swagger.openapi.operation.security_acknowledgments"), nil),
+		api + "/server/dpo":                        get(text("swagger.openapi.operation.dpo_contact"), nil),
+		api + "/server/about":                      get(text("swagger.openapi.operation.about"), nil),
+		api + "/server/privacy":                    get(text("swagger.openapi.operation.privacy"), nil),
+		api + "/server/help":                       get(text("swagger.openapi.operation.help"), nil),
+		api + "/server/help/mcp":                   get(text("swagger.openapi.operation.mcp_help"), nil),
+		api + "/server/terms":                      get(text("swagger.openapi.operation.terms"), nil),
 		api + "/server/contact":                    contactPost,
-		api + "/server/scheduler":                  get("Scheduler status", nil),
+		api + "/server/scheduler":                  get(text("swagger.openapi.operation.scheduler"), nil),
 		api + "/server/preferences":                mergeOperations(preferencesGet, preferencesSavePost),
 		api + "/server/preferences/tokens":         mergeOperations(ownerTokensGet, ownerTokensPost),
 		api + "/server/preferences/tokens/primary": issuePrimaryToken,
-		api + "/server/preferences/tokens/primary/reveal": primaryTokenAction("post_api_server_preferences_tokens_primary_reveal", "Reveal the primary owner token"),
-		api + "/server/preferences/tokens/primary/rotate": primaryTokenAction("post_api_server_preferences_tokens_primary_rotate", "Rotate the primary owner token"),
-		api + "/server/preferences/tokens/{id}/reveal":    linkedTokenPathItem(linkedTokenAction("post", "post_api_server_preferences_tokens_id_reveal", "Reveal a linked owner token")),
-		api + "/server/preferences/tokens/{id}/rotate":    linkedTokenPathItem(linkedTokenAction("post", "post_api_server_preferences_tokens_id_rotate", "Rotate a linked owner token")),
-		api + "/server/preferences/tokens/{id}":           linkedTokenPathItem(linkedTokenAction("patch", "patch_api_server_preferences_tokens_id", "Update a linked owner token"), linkedTokenAction("delete", "delete_api_server_preferences_tokens_id", "Revoke a linked owner token")),
+		api + "/server/preferences/tokens/primary/reveal": primaryTokenAction("post_api_server_preferences_tokens_primary_reveal", text("swagger.openapi.operation.primary_token_reveal")),
+		api + "/server/preferences/tokens/primary/rotate": primaryTokenAction("post_api_server_preferences_tokens_primary_rotate", text("swagger.openapi.operation.primary_token_rotate")),
+		api + "/server/preferences/tokens/{id}/reveal":    linkedTokenPathItem(linkedTokenAction("post", "post_api_server_preferences_tokens_id_reveal", text("swagger.openapi.operation.linked_token_reveal"))),
+		api + "/server/preferences/tokens/{id}/rotate":    linkedTokenPathItem(linkedTokenAction("post", "post_api_server_preferences_tokens_id_rotate", text("swagger.openapi.operation.linked_token_rotate"))),
+		api + "/server/preferences/tokens/{id}":           linkedTokenPathItem(linkedTokenAction("patch", "patch_api_server_preferences_tokens_id", text("swagger.openapi.operation.linked_token_update")), linkedTokenAction("delete", "delete_api_server_preferences_tokens_id", text("swagger.openapi.operation.linked_token_revoke"))),
 		api + "/server/preferences/sync":                  preferencesSyncGet,
 		api + "/server/preferences/sync/import":           preferencesImportGet,
-		api + "/list":                                     get("List all templates", nil),
-		api + "/list.txt":                                 get("List all template names as text", nil),
-		api + "/categories":                               get("List all categories", nil),
-		api + "/categories.txt":                           get("List categories as text", nil),
-		api + "/categories/{name}":                        get("List templates in a category", []interface{}{templateName}),
-		api + "/categories/{name}.txt":                    get("List category templates as text", []interface{}{templateName}),
-		api + "/stats":                                    get("Template statistics", nil),
-		api + "/stats.txt":                                get("Template statistics as text", nil),
-		api + "/templates/{name}":                         get("Get a template by name", []interface{}{templateName}),
-		api + "/templates/{name}.txt":                     get("Get a template as text", []interface{}{templateName}),
-		api + "/templates/{name}.json":                    get("Get a template as JSON", []interface{}{templateName}),
-		api + "/templates.json":                           get("Export all templates as JSON", nil),
-		api + "/templates.tar.gz":                         get("Download all templates as a gzip archive", nil),
-		api + "/search": get("Search templates", []interface{}{
-			map[string]interface{}{"name": "q", "in": "query", "required": true, "description": "Search query", "schema": map[string]interface{}{"type": "string"}},
+		api + "/list":                                     get(text("swagger.openapi.operation.templates_list"), nil),
+		api + "/list.txt":                                 get(text("swagger.openapi.operation.templates_list_text"), nil),
+		api + "/categories":                               get(text("swagger.openapi.operation.categories_list"), nil),
+		api + "/categories.txt":                           get(text("swagger.openapi.operation.categories_list_text"), nil),
+		api + "/categories/{name}":                        get(text("swagger.openapi.operation.category_templates_list"), []interface{}{templateName}),
+		api + "/categories/{name}.txt":                    get(text("swagger.openapi.operation.category_templates_text"), []interface{}{templateName}),
+		api + "/stats":                                    get(text("swagger.openapi.operation.template_stats"), nil),
+		api + "/stats.txt":                                get(text("swagger.openapi.operation.template_stats_text"), nil),
+		api + "/templates/{name}":                         get(text("swagger.openapi.operation.template_get"), []interface{}{templateName}),
+		api + "/templates/{name}.txt":                     get(text("swagger.openapi.operation.template_get_text"), []interface{}{templateName}),
+		api + "/templates/{name}.json":                    get(text("swagger.openapi.operation.template_get_json"), []interface{}{templateName}),
+		api + "/templates.json":                           get(text("swagger.openapi.operation.templates_export"), nil),
+		api + "/templates.tar.gz":                         get(text("swagger.openapi.operation.templates_archive"), nil),
+		api + "/search": get(text("swagger.openapi.operation.search"), []interface{}{
+			map[string]interface{}{"name": "q", "in": "query", "required": true, "description": text("swagger.openapi.parameter.search_query"), "schema": map[string]interface{}{"type": "string"}},
 		}),
-		api + "/search.txt": get("Search templates and return names as text", []interface{}{
-			map[string]interface{}{"name": "q", "in": "query", "required": true, "description": "Search query", "schema": map[string]interface{}{"type": "string"}},
+		api + "/search.txt": get(text("swagger.openapi.operation.search_text"), []interface{}{
+			map[string]interface{}{"name": "q", "in": "query", "required": true, "description": text("swagger.openapi.parameter.search_query"), "schema": map[string]interface{}{"type": "string"}},
 		}),
-		api + "/combine": get("Combine multiple templates", []interface{}{
-			map[string]interface{}{"name": "templates", "in": "query", "required": true, "description": "Comma-separated template names", "schema": map[string]interface{}{"type": "string"}},
+		api + "/combine": get(text("swagger.openapi.operation.combine"), []interface{}{
+			map[string]interface{}{"name": "templates", "in": "query", "required": true, "description": text("swagger.openapi.parameter.template_names"), "schema": map[string]interface{}{"type": "string"}},
 		}),
-		api + "/combine.txt": get("Combine templates and return text", []interface{}{
-			map[string]interface{}{"name": "templates", "in": "query", "required": true, "description": "Comma-separated template names", "schema": map[string]interface{}{"type": "string"}},
+		api + "/combine.txt": get(text("swagger.openapi.operation.combine_text"), []interface{}{
+			map[string]interface{}{"name": "templates", "in": "query", "required": true, "description": text("swagger.openapi.parameter.template_names"), "schema": map[string]interface{}{"type": "string"}},
 		}),
-		api + "/cli/sh":              get("Generated POSIX shell helper", nil),
-		api + "/cli/ps":              get("Generated PowerShell helper", nil),
-		api + "/cli/completion/bash": get("Bash completion script", nil),
-		api + "/cli/completion/zsh":  get("Zsh completion script", nil),
-		api + "/cli/completion/fish": get("Fish completion script", nil),
+		api + "/cli/sh":              get(text("swagger.openapi.operation.cli_posix"), nil),
+		api + "/cli/ps":              get(text("swagger.openapi.operation.cli_powershell"), nil),
+		api + "/cli/completion/bash": get(text("swagger.openapi.operation.completion_bash"), nil),
+		api + "/cli/completion/zsh":  get(text("swagger.openapi.operation.completion_zsh"), nil),
+		api + "/cli/completion/fish": get(text("swagger.openapi.operation.completion_fish"), nil),
 	}
 	for path, raw := range paths {
 		if !strings.HasPrefix(path, api+"/") {
@@ -300,8 +303,8 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	return map[string]interface{}{
 		"openapi": "3.0.3",
 		"info": map[string]interface{}{
-			"title":       "GitIgnore API",
-			"description": "Comprehensive .gitignore template API.",
+			"title":       text("swagger.openapi.info.title"),
+			"description": text("swagger.openapi.info.description"),
 			"version":     s.config.Version,
 		},
 		"servers": []interface{}{

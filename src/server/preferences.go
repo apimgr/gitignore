@@ -309,10 +309,11 @@ func (s *Server) handlePreferencesSyncPage(w http.ResponseWriter, r *http.Reques
 	if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/plain") {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = fmt.Fprintf(w, "URL: %s\nCode: %s\n", state.URL, state.Code)
+		_, _ = fmt.Fprintf(w, "%s: %s\n%s: %s\n", i18n.T(r, "preferences_page.export_url"), state.URL,
+			i18n.T(r, "preferences_page.export_code"), state.Code)
 		return
 	}
-	s.renderPage(w, r, "preferences_sync", PageData{Title: "Sync preferences", Data: map[string]interface{}{"url": state.URL, "code": state.Code, "cancelURL": "/server/preferences"}})
+	s.renderPage(w, r, "preferences_sync", PageData{Title: i18n.T(r, "preferences_page.sync_title"), Data: map[string]interface{}{"url": state.URL, "code": state.Code, "cancelURL": "/server/preferences"}})
 }
 
 func (s *Server) handlePreferencesSyncImport(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +329,7 @@ func (s *Server) handlePreferencesSyncImport(w http.ResponseWriter, r *http.Requ
 func (s *Server) handlePreferencesSyncSubmit(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -369,12 +370,12 @@ func (s *Server) handleAPIPreferencesSave(w http.ResponseWriter, r *http.Request
 		values = r.Form
 	}
 	if err != nil {
-		sendAPIResponseError(w, "VALIDATION_FAILED", "invalid preference input")
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
 	state := s.applyPreferences(w, r, values, false)
 	if len(state.Applied) == 0 {
-		sendAPIResponseError(w, "VALIDATION_FAILED", "no valid preference values supplied")
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
 	writePreferenceAPI(w, state)

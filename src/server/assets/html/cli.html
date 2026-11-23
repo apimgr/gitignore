@@ -1,10 +1,10 @@
 {{define "content"}}
-<h1>CLI Script Generator</h1>
-<p>Download a shell function to fetch templates from your terminal.</p>
+<h1>{{t .Lang "web.cli.title"}}</h1>
+<p>{{t .Lang "web.cli.description"}}</p>
 <pre>curl -sL {{.BaseURL}}{{.APIBase}}/cli/sh > gi.sh
 source gi.sh
 gi go node macos</pre>
-<h2>Shell completions</h2>
+<h2>{{t .Lang "web.cli.completions"}}</h2>
 <pre>{{.BaseURL}}{{.APIBase}}/cli/completion/bash
 {{.BaseURL}}{{.APIBase}}/cli/completion/zsh
 {{.BaseURL}}{{.APIBase}}/cli/completion/fish</pre>

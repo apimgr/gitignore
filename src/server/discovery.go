@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -17,7 +18,7 @@ func (s *Server) handleLLMSTxt(w http.ResponseWriter, r *http.Request) {
 	name := "GitIgnore API"
 	description := "A curated catalog of .gitignore templates with a versioned REST API and server-rendered browser."
 	apiContact, securityContact := "", ""
-	rateLimit := "disabled"
+	rateLimit := i18n.T(r, "llms.rate_limit_disabled")
 	if cfg := s.currentConfig(); cfg != nil {
 		if value := strings.TrimSpace(cfg.Server.Branding.Title); value != "" {
 			name = value
@@ -33,25 +34,32 @@ func (s *Server) handleLLMSTxt(w http.ResponseWriter, r *http.Request) {
 				window = 60
 			}
 			requests := cfg.Server.RateLimit.Requests * 60 / window
-			rateLimit = fmt.Sprintf("%d requests/minute", requests)
+			rateLimit = i18n.TF(r, "llms.requests_per_minute", "count", fmt.Sprint(requests))
 		}
 	}
 	baseURL := s.publicServerURL(r)
 	apiURL := baseURL + s.apiBasePath()
 	_, _ = fmt.Fprintf(&body, "# %s\n> %s\n\n", name, description)
-	_, _ = fmt.Fprintf(&body, "## API\nBase URL: %s\nAuthentication: none for the REST API; a Bearer token links what you create to you and is REQUIRED for MCP (get one from POST %s/server/preferences/tokens/primary or the New token button on %s/server/preferences/tokens, then create one linked token per MCP client there)\nRate limit: %s\nMCP: %s/mcp (Streamable HTTP; Bearer token required)\n\n", apiURL, apiURL, baseURL, rateLimit, baseURL)
+	_, _ = fmt.Fprintf(&body, "## %s\n%s\n%s\n%s\n%s\n\n",
+		i18n.T(r, "llms.api"),
+		i18n.TF(r, "llms.base_url", "url", apiURL),
+		i18n.TF(r, "llms.authentication", "primary_url", "POST "+apiURL+"/server/preferences/tokens/primary", "tokens_url", baseURL+"/server/preferences/tokens"),
+		i18n.TF(r, "llms.rate_limit", "value", rateLimit),
+		i18n.TF(r, "llms.mcp", "url", baseURL))
 	if cfg := s.currentConfig(); cfg == nil || cfg.Web.LLMS.IncludeEndpoints {
-		_, _ = fmt.Fprintln(&body, "## Endpoints")
-		for _, endpoint := range s.llmsEndpoints() {
+		_, _ = fmt.Fprintf(&body, "## %s\n", i18n.T(r, "llms.endpoints"))
+		for _, endpoint := range s.llmsEndpoints(i18n.LangFromContext(r.Context())) {
 			_, _ = fmt.Fprintf(&body, "- %s\n", endpoint)
 		}
 		_, _ = fmt.Fprintln(&body)
 	}
-	_, _ = fmt.Fprintln(&body, "## Capabilities\n- Browse and search curated .gitignore templates\n- Retrieve templates as text or JSON\n- Combine multiple templates\n- Use the versioned REST API, GraphQL, or MCP")
+	_, _ = fmt.Fprintf(&body, "## %s\n- %s\n- %s\n- %s\n- %s\n",
+		i18n.T(r, "llms.capabilities"), i18n.T(r, "llms.browse"), i18n.T(r, "llms.retrieve"),
+		i18n.T(r, "llms.combine"), i18n.T(r, "llms.protocols"))
 	if cfg := s.currentConfig(); cfg != nil {
 		if cfg.Web.LLMS.IncludeSchemas {
 			if schema, err := json.MarshalIndent(s.openAPISpec(r), "", "  "); err == nil {
-				_, _ = fmt.Fprintf(&body, "\n## OpenAPI request and response schemas\n```json\n%s\n```\n", schema)
+				_, _ = fmt.Fprintf(&body, "\n## %s\n```json\n%s\n```\n", i18n.T(r, "llms.schemas"), schema)
 			}
 		}
 		for _, section := range cfg.Web.LLMS.CustomSections {
@@ -61,13 +69,14 @@ func (s *Server) handleLLMSTxt(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	_, _ = fmt.Fprintf(&body, "\n## Contact\nAPI issues: %s\nSecurity: %s\n", emptyLabel(apiContact), emptyLabel(securityContact))
+	_, _ = fmt.Fprintf(&body, "\n## %s\n%s: %s\n%s: %s\n", i18n.T(r, "llms.contact"),
+		i18n.T(r, "llms.api_issues"), emptyLabel(r, apiContact), i18n.T(r, "llms.security"), emptyLabel(r, securityContact))
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body.Bytes())
 	}
 }
 
-func (s *Server) llmsEndpoints() []string {
+func (s *Server) llmsEndpoints(lang string) []string {
 	endpoints := make([]string, 0, 64)
 	_ = chi.Walk(s.router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if !strings.HasPrefix(route, s.apiBasePath()) {
@@ -78,7 +87,7 @@ func (s *Server) llmsEndpoints() []string {
 		}
 		auth := ""
 		if strings.Contains(route, "/preferences/tokens") || strings.HasSuffix(route, "/server/mcp") {
-			auth = " (Bearer token required)"
+			auth = i18n.Translate(lang, "llms.bearer_required")
 		}
 		endpoints = append(endpoints, fmt.Sprintf("%s %s%s", method, route, auth))
 		return nil
@@ -87,9 +96,9 @@ func (s *Server) llmsEndpoints() []string {
 	return endpoints
 }
 
-func emptyLabel(value string) string {
+func emptyLabel(r *http.Request, value string) string {
 	if value == "" {
-		return "not configured"
+		return i18n.T(r, "llms.not_configured")
 	}
 	return value
 }

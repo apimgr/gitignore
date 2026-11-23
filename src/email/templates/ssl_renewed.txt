@@ -1,13 +1,13 @@
-Subject: SSL Certificate Renewed - {app_name}
+Subject: {email_subject}
 ---
-SSL CERTIFICATE RENEWED
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-The TLS certificate for {fqdn} was renewed successfully.
+{email_renewed}
 
-Valid until: {valid_until}
+{email_valid_until_label}: {valid_until}
 
 --
 {app_name}

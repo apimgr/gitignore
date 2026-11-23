@@ -1,9 +1,11 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -61,10 +63,48 @@ func TestDetectServiceManagerReturnsKnownType(t *testing.T) {
 	got := DetectServiceManager()
 	switch got {
 	case ServiceUnknown, ServiceSystemd, ServiceRunit, ServiceOpenRC,
-		ServiceSysVinit, ServiceLaunchd, ServiceWindows, ServiceBSDRC:
+		ServiceS6, ServiceSysVinit, ServiceLaunchd, ServiceWindows, ServiceBSDRC:
 		// ok
 	default:
 		t.Errorf("DetectServiceManager() = %v, not a known ServiceType", got)
+	}
+}
+
+func TestIsS6ManagerRequiresExecutableAndRunningScanner(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		executable bool
+		running    bool
+		want       bool
+	}{
+		{name: "both available", executable: true, running: true, want: true},
+		{name: "missing executable", running: true},
+		{name: "scanner not running", executable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isS6Manager(tc.executable, tc.running); got != tc.want {
+				t.Errorf("isS6Manager(%v, %v) = %v, want %v", tc.executable, tc.running, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestS6ScanDirectoryFromCmdline(t *testing.T) {
+	if got, want := s6ScanDirectoryFromCmdline([]byte("s6-svscan\x00/run/s6/services\x00")), "/run/s6/services"; got != want {
+		t.Errorf("s6 scan directory = %q, want %q", got, want)
+	}
+	if got := s6ScanDirectoryFromCmdline([]byte("s6-svscan\x00")); got != "" {
+		t.Errorf("s6 scan directory without an argument = %q, want empty for fallback", got)
+	}
+}
+
+func TestSystemdServiceContentUsesRequiredProtectSystem(t *testing.T) {
+	content := systemdServiceContent("/usr/local/bin/gitignore")
+	if !strings.Contains(content, "ProtectSystem=true") {
+		t.Fatal("systemd service content omits ProtectSystem=true")
+	}
+	if strings.Contains(content, "ProtectSystem=strict") {
+		t.Error("systemd service content uses forbidden ProtectSystem=strict")
 	}
 }
 
@@ -290,6 +330,80 @@ func TestConfirmPrompt(t *testing.T) {
 				t.Errorf("confirmPrompt(%q) = %v, want %v", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEnableAndStartServiceUsesCommandsInOrder(t *testing.T) {
+	oldRunner := serviceCommandRunner
+	defer func() { serviceCommandRunner = oldRunner }()
+
+	var calls []string
+	serviceCommandRunner = func(name string, args ...string) error {
+		calls = append(calls, strings.Join(append([]string{name}, args...), " "))
+		return nil
+	}
+	if err := enableAndStartService("systemd", []string{"systemctl", "enable", appName}, []string{"systemctl", "start", appName}); err != nil {
+		t.Fatalf("enableAndStartService() error = %v", err)
+	}
+	want := []string{"systemctl enable " + appName, "systemctl start " + appName}
+	if len(calls) != len(want) {
+		t.Fatalf("service command calls = %v, want %v", calls, want)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Errorf("service command call %d = %q, want %q", i, calls[i], want[i])
+		}
+	}
+}
+
+func TestEnableAndStartServiceStopsAfterEnableFailure(t *testing.T) {
+	oldRunner := serviceCommandRunner
+	defer func() { serviceCommandRunner = oldRunner }()
+
+	wantErr := errors.New("enable failed")
+	var calls int
+	serviceCommandRunner = func(string, ...string) error {
+		calls++
+		return wantErr
+	}
+	err := enableAndStartService("systemd", []string{"systemctl", "enable", appName}, []string{"systemctl", "start", appName})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("enableAndStartService() error = %v, want wrapped enable error", err)
+	}
+	if calls != 1 {
+		t.Errorf("service command calls = %d, want 1 after enable failure", calls)
+	}
+}
+
+func TestEnableAndStartServicePropagatesStartFailure(t *testing.T) {
+	oldRunner := serviceCommandRunner
+	defer func() { serviceCommandRunner = oldRunner }()
+
+	wantErr := errors.New("start failed")
+	var calls int
+	serviceCommandRunner = func(string, ...string) error {
+		calls++
+		if calls == 2 {
+			return wantErr
+		}
+		return nil
+	}
+	err := enableAndStartService("systemd", []string{"systemctl", "enable", appName}, []string{"systemctl", "start", appName})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("enableAndStartService() error = %v, want wrapped start error", err)
+	}
+	if calls != 2 {
+		t.Errorf("service command calls = %d, want 2", calls)
+	}
+}
+
+func TestSetLanguageLocalizesServiceMessages(t *testing.T) {
+	oldLanguage := serviceLanguage
+	defer SetLanguage(oldLanguage)
+
+	SetLanguage("es")
+	if got, want := serviceText("cli.error_unsupported_shell", "shell", "zsh"), "Shell no soportado: zsh"; got != want {
+		t.Errorf("serviceText() = %q, want %q", got, want)
 	}
 }
 

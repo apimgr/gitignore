@@ -29,35 +29,35 @@ type securityReportContact struct {
 func handleSecurityMaintenance(configPath, dataDir, logsDir string, args []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return fmt.Errorf("load operator credentials: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.security.load_config_failed"), err)
 	}
 	if !service.IsElevated() && !authenticateSecurityMaintenance(cfg.Server.Token) {
-		return errors.New("security report maintenance requires the operator token or root privileges")
+		return errors.New(cliText("cli.security.operator_required"))
 	}
 	if err := db.Init(dataDir); err != nil {
-		return fmt.Errorf("initialize report database: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.security.database_init_failed"), err)
 	}
 	defer func() { _ = db.Close() }()
 	if len(args) == 0 {
-		return errors.New("usage: --maintenance security {list|show|update}")
+		return errors.New(cliText("cli.security.usage"))
 	}
 	switch args[0] {
 	case "list":
 		return listSecurityReports(args[1:])
 	case "show":
 		if len(args) != 2 || !validSecurityTrackingID(args[1]) {
-			return errors.New("usage: --maintenance security show TRACKING_ID")
+			return errors.New(cliText("cli.security.usage_show"))
 		}
 		report, err := db.GetSecurityReport(args[1])
 		if err != nil {
-			return fmt.Errorf("load report metadata: %w", err)
+			return fmt.Errorf("%s: %w", cliText("cli.security.load_report_failed"), err)
 		}
 		printSecurityReport(report)
 		return nil
 	case "update":
 		return updateSecurityReport(cfg, logsDir, args[1:])
 	default:
-		return errors.New("usage: --maintenance security {list|show|update}")
+		return errors.New(cliText("cli.security.usage"))
 	}
 }
 
@@ -65,7 +65,7 @@ func authenticateSecurityMaintenance(operatorToken string) bool {
 	if operatorToken == "" || !term.IsTerminal(int(os.Stdin.Fd())) {
 		return false
 	}
-	fmt.Fprint(os.Stderr, "Operator token: ")
+	fmt.Fprint(os.Stderr, cliText("cli.security.operator_token_prompt"))
 	supplied, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Fprintln(os.Stderr)
 	return err == nil && subtle.ConstantTimeCompare(supplied, []byte(operatorToken)) == 1
@@ -75,27 +75,27 @@ func listSecurityReports(args []string) error {
 	status := ""
 	for i := 0; i < len(args); i++ {
 		if args[i] != "--status" || status != "" || i+1 == len(args) {
-			return errors.New("usage: --maintenance security list [--status STATUS]")
+			return errors.New(cliText("cli.security.usage_list"))
 		}
 		status = args[i+1]
 		i++
 	}
 	if status != "" && !validMaintenanceSecurityStatus(status) {
-		return fmt.Errorf("invalid status %q", status)
+		return errors.New(cliText("cli.security.invalid_status", "status", status))
 	}
 	reports, err := db.ListSecurityReports(status)
 	if err != nil {
 		return err
 	}
 	for _, report := range reports {
-		fmt.Printf("%s\t%s\t%s\t%q\t%s\t%s\n", report.TrackingID, report.Status, report.Severity, report.Component, report.CreatedAt, report.UpdatedAt)
+		fmt.Printf("%s\t%s\t%s\t%q\t%s\t%s\n", report.TrackingID, securityStatusLabel(report.Status), securitySeverityLabel(report.Severity), report.Component, report.CreatedAt, report.UpdatedAt)
 	}
 	return nil
 }
 
 func updateSecurityReport(cfg *config.Config, logsDir string, args []string) error {
 	if len(args) == 0 || !validSecurityTrackingID(args[0]) {
-		return errors.New("usage: --maintenance security update TRACKING_ID [--status STATUS] [--comment TEXT] [--disclosure-date YYYY-MM-DD] [--severity LEVEL]")
+		return errors.New(cliText("cli.security.usage_update"))
 	}
 	trackingID := args[0]
 	values := map[string]string{}
@@ -103,10 +103,10 @@ func updateSecurityReport(cfg *config.Config, logsDir string, args []string) err
 	for i := 1; i < len(args); i++ {
 		key := args[i]
 		if key != "--status" && key != "--comment" && key != "--disclosure-date" && key != "--severity" {
-			return fmt.Errorf("unknown update option %q", key)
+			return errors.New(cliText("cli.security.unknown_option", "option", key))
 		}
 		if i+1 == len(args) || seen[key] {
-			return fmt.Errorf("option %s requires one value and may be supplied once", key)
+			return errors.New(cliText("cli.security.option_value_required", "option", key))
 		}
 		seen[key] = true
 		values[key] = args[i+1]
@@ -114,22 +114,22 @@ func updateSecurityReport(cfg *config.Config, logsDir string, args []string) err
 	}
 	status := values["--status"]
 	if status != "" && !validMaintenanceSecurityStatus(status) {
-		return fmt.Errorf("invalid status %q", status)
+		return errors.New(cliText("cli.security.invalid_status", "status", status))
 	}
 	severity := values["--severity"]
 	if severity != "" && !validMaintenanceSecuritySeverity(severity) {
-		return fmt.Errorf("invalid severity %q", severity)
+		return errors.New(cliText("cli.security.invalid_severity", "severity", severity))
 	}
 	oldStatus, report, err := db.UpdateSecurityReport(trackingID, status, values["--comment"], seen["--comment"], values["--disclosure-date"], severity)
 	if err != nil {
 		return err
 	}
 	if err := appendSecurityMaintenanceLog(logsDir, trackingID, oldStatus, report.Status); err != nil {
-		return fmt.Errorf("report updated but security event could not be logged: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.security.updated_log_failed"), err)
 	}
 	if status != "" || values["--comment"] != "" || values["--disclosure-date"] != "" {
 		if err := notifySecurityResearcher(cfg, report); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: report updated; researcher notification was not sent: %v\n", err)
+			fmt.Fprintln(os.Stderr, cliText("cli.security.notification_warning", "error", err))
 		}
 	}
 	printSecurityReport(report)
@@ -202,13 +202,26 @@ func appendSecurityMaintenanceLog(logsDir, trackingID, oldStatus, newStatus stri
 }
 
 func printSecurityReport(report db.SecurityReport) {
-	fmt.Printf("Tracking ID: %s\nStatus: %s\nSeverity: %s\nComponent: %q\nCreated: %s\nUpdated: %s\n", report.TrackingID, report.Status, report.Severity, report.Component, report.CreatedAt, report.UpdatedAt)
+	fmt.Println(cliText("cli.security.field.tracking_id", "value", report.TrackingID))
+	fmt.Println(cliText("cli.security.field.status", "value", securityStatusLabel(report.Status)))
+	fmt.Println(cliText("cli.security.field.severity", "value", securitySeverityLabel(report.Severity)))
+	fmt.Println(cliText("cli.security.field.component", "value", report.Component))
+	fmt.Println(cliText("cli.security.field.created", "value", report.CreatedAt))
+	fmt.Println(cliText("cli.security.field.updated", "value", report.UpdatedAt))
 	if report.StatusComment != "" {
-		fmt.Printf("Researcher comment: %q\n", report.StatusComment)
+		fmt.Println(cliText("cli.security.field.researcher_comment", "value", report.StatusComment))
 	}
 	if report.DisclosureDate != "" {
-		fmt.Printf("Disclosure date: %s\n", report.DisclosureDate)
+		fmt.Println(cliText("cli.security.field.disclosure_date", "value", report.DisclosureDate))
 	}
+}
+
+func securityStatusLabel(status string) string {
+	return cliText("cli.security.status." + status)
+}
+
+func securitySeverityLabel(severity string) string {
+	return cliText("cli.security.severity." + severity)
 }
 
 func validSecurityTrackingID(value string) bool {

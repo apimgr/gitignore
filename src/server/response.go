@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/apimgr/gitignore/src/common/i18n"
 )
@@ -72,26 +73,31 @@ func sendAPIResponseErrorDetails(w http.ResponseWriter, code, message string, de
 // messages can be localized to the request language (AI.md PART 30).
 var apiErrorI18nKey = map[string]string{
 	"BAD_REQUEST":        "errors.bad_request",
-	"VALIDATION_FAILED":  "errors.validation_failed",
+	"VALIDATION_FAILED":  "errors.validation_error",
+	"UNAUTHORIZED":       "errors.unauthorized",
+	"TOKEN_EXPIRED":      "errors.token_expired",
+	"TOKEN_INVALID":      "errors.token_invalid",
 	"FORBIDDEN":          "errors.forbidden",
 	"ACCOUNT_LOCKED":     "errors.account_locked",
+	"CSRF_FAILED":        "errors.csrf_failed",
 	"NOT_FOUND":          "errors.not_found",
 	"METHOD_NOT_ALLOWED": "errors.method_not_allowed",
 	"CONFLICT":           "errors.conflict",
 	"RATE_LIMITED":       "errors.rate_limited",
 	"SERVER_ERROR":       "errors.server_error",
+	"NOT_IMPLEMENTED":    "errors.not_implemented",
 	"MAINTENANCE":        "errors.maintenance_mode",
+	"scheduler_error":    "errors.scheduler_error",
 }
 
-// sendAPIResponseErrorLocalized writes an error envelope whose Message is
-// translated to the request language when a translation key exists for the
-// code; otherwise it falls back to the supplied message (AI.md PART 30).
-func sendAPIResponseErrorLocalized(w http.ResponseWriter, r *http.Request, code, fallback string) {
-	message := fallback
-	if key, ok := apiErrorI18nKey[code]; ok {
-		message = i18n.T(r, key)
+// sendAPIResponseErrorLocalized writes an error envelope with a request-language
+// message derived from the stable error code (AI.md PART 30).
+func sendAPIResponseErrorLocalized(w http.ResponseWriter, r *http.Request, code string) {
+	key, ok := apiErrorI18nKey[code]
+	if !ok {
+		key = "errors.server_error"
 	}
-	sendAPIResponseError(w, code, message)
+	sendAPIResponseError(w, code, i18n.T(r, key))
 }
 
 // setCacheHeaders applies the spec's Cache-Control policy per response class
@@ -101,14 +107,44 @@ func sendAPIResponseErrorLocalized(w http.ResponseWriter, r *http.Request, code,
 func setCacheHeaders(w http.ResponseWriter, kind string) {
 	switch kind {
 	case "static":
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("Cache-Control", "no-cache")
 	case "api":
 		w.Header().Set("Cache-Control", "public, max-age=60")
 	case "authenticated":
 		w.Header().Set("Cache-Control", "private, no-store")
 	case "html", "error":
 		w.Header().Set("Cache-Control", "no-store")
+	case "sw":
+		w.Header().Set("Cache-Control", "no-cache")
 	default:
 		w.Header().Set("Cache-Control", "no-store")
 	}
+}
+
+func setVersionedCacheHeaders(w http.ResponseWriter, r *http.Request, stamp string) {
+	w.Header().Set("ETag", `"`+stamp+`"`)
+	if r != nil && r.URL.Query().Get("v") == stamp {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+}
+
+func versionPurge(w http.ResponseWriter, r *http.Request, stamp string, status int) {
+	if cookie, err := r.Cookie("gitignore_build"); err == nil && cookie.Value != stamp && status >= http.StatusOK && status < http.StatusMultipleChoices && isTopLevelDocument(r) {
+		w.Header().Set("Clear-Site-Data", `"cache", "storage"`)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: "gitignore_build", Value: stamp, Path: "/", MaxAge: 31536000,
+		Secure: true, SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func isTopLevelDocument(r *http.Request) bool {
+	if r == nil || r.Method == http.MethodHead {
+		return false
+	}
+	destination := strings.TrimSpace(r.Header.Get("Sec-Fetch-Dest"))
+	mode := strings.TrimSpace(r.Header.Get("Sec-Fetch-Mode"))
+	return destination == "" && mode == "" || destination == "document" && mode == "navigate"
 }

@@ -17,9 +17,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	apppath "github.com/apimgr/gitignore/src/path"
 	"gopkg.in/yaml.v3"
 )
+
+var configLanguage struct {
+	sync.RWMutex
+	value string
+}
+
+// SetLanguage selects the language used by configuration diagnostics.
+func SetLanguage(language string) {
+	configLanguage.Lock()
+	configLanguage.value = language
+	configLanguage.Unlock()
+}
+
+func configText(key string, values ...interface{}) string {
+	configLanguage.RLock()
+	language := configLanguage.value
+	configLanguage.RUnlock()
+	if language == "" {
+		language = i18n.DefaultLang
+	}
+	return i18n.TranslateFormat(language, key, values...)
+}
 
 // Config represents the complete server configuration
 type Config struct {
@@ -272,6 +295,7 @@ func DefaultPrivacyConfig() PrivacyConfig {
 }
 
 type ComplianceConfig struct {
+	Enabled  bool `yaml:"enabled"`
 	GDPR     bool `yaml:"gdpr"`
 	CCPA     bool `yaml:"ccpa"`
 	HIPAA    bool `yaml:"hipaa"`
@@ -857,12 +881,11 @@ type NotifyConfig struct {
 
 // BackupConfig contains backup settings (AI.md PART 21).
 type BackupConfig struct {
-	Encryption BackupEncryptionConfig `yaml:"encryption"`
+	Encryption         BackupEncryptionConfig `yaml:"encryption"`
+	EncryptionPassword string                 `yaml:"encryption_password"`
 }
 
-// BackupEncryptionConfig controls backup-at-rest encryption. The password is
-// NEVER stored — it is prompted interactively when Enabled is true (AI.md
-// PART 21 → "Backup Encryption").
+// BackupEncryptionConfig controls whether backup encryption is configured.
 type BackupEncryptionConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
@@ -870,10 +893,17 @@ type BackupEncryptionConfig struct {
 // WebConfig contains frontend/web settings
 type WebConfig struct {
 	UI         WebUIConfig       `yaml:"ui"`
+	Reports    WebReportsConfig  `yaml:"reports"`
 	CORS       string            `yaml:"cors"`
 	Security   WebSecurityConfig `yaml:"security"`
 	APIContact string            `yaml:"api_contact"`
 	LLMS       LLMSConfig        `yaml:"llms"`
+}
+
+// WebReportsConfig limits public browser reporting endpoints.
+type WebReportsConfig struct {
+	RateLimitPerMinute  int `yaml:"rate_limit_per_minute"`
+	RateLimitPerIPBurst int `yaml:"rate_limit_per_ip_burst"`
 }
 
 type LLMSConfig struct {
@@ -1035,7 +1065,9 @@ func DefaultConfig() *Config {
 				Encryption: BackupEncryptionConfig{
 					Enabled: false,
 				},
+				EncryptionPassword: "",
 			},
+			Compliance: ComplianceConfig{Enabled: false},
 			I18n: I18nConfig{
 				Enabled:            true,
 				DefaultLanguage:    "en",
@@ -1069,6 +1101,10 @@ func DefaultConfig() *Config {
 			UI: WebUIConfig{
 				Theme: "dark",
 			},
+			Reports: WebReportsConfig{
+				RateLimitPerMinute:  60,
+				RateLimitPerIPBurst: 10,
+			},
 			CORS: "*",
 			LLMS: LLMSConfig{IncludeEndpoints: true},
 			Security: WebSecurityConfig{
@@ -1101,7 +1137,7 @@ func migrateYamlToYml(path string) {
 	if _, err := os.Stat(oldPath); err == nil {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			if err := os.Rename(oldPath, path); err == nil {
-				fmt.Printf("Migrated config file: %s -> %s\n", oldPath, path)
+				fmt.Println(configText("cli.config.file_migrated", "old_path", oldPath, "new_path", path))
 			}
 		}
 	}
@@ -1114,10 +1150,10 @@ func Load(path string) (*Config, error) {
 
 	migrateYamlToYml(path)
 	if err := migrateLegacyServerConfig(path); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: legacy configuration keys could not be migrated; using the merged configuration")
+		fmt.Fprintln(os.Stderr, configText("cli.config.legacy_migration_warning"))
 	}
 	if err := migrateAreaConfig(path); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: configuration areas could not be split; using the merged configuration")
+		fmt.Fprintln(os.Stderr, configText("cli.config.area_migration_warning"))
 	}
 	configPath = path
 	configValueLocations = make(map[string]configValueLocation)
@@ -1131,6 +1167,7 @@ func Load(path string) (*Config, error) {
 		if err := loadSecretsConfig(path, cfg); err != nil {
 			return nil, err
 		}
+		validateBackupConfig(cfg)
 		warnIgnoredConnectionEnvironment(cfg)
 		applyConnectionURLTypes(cfg)
 		if err := applyI2PEnvironment(cfg); err != nil {
@@ -1152,10 +1189,10 @@ func Load(path string) (*Config, error) {
 			cfg.Server.SSL.LetsEncrypt.Email = cfg.Server.Admin.Email
 		}
 		if err := saveConfig(cfg, path); err != nil {
-			return nil, fmt.Errorf("failed to create default config: %w", err)
+			return nil, fmt.Errorf("%s: %w", configText("cli.config.default_create_failed"), err)
 		}
 		if err := migrateAreaConfig(path); err != nil {
-			fmt.Fprintln(os.Stderr, "Warning: configuration areas could not be split; using the merged configuration")
+			fmt.Fprintln(os.Stderr, configText("cli.config.area_migration_warning"))
 		}
 		expandConfigEnvironment(cfg)
 		current = cfg
@@ -1164,14 +1201,14 @@ func Load(path string) (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("%s: %w", configText("cli.config.file_read_failed"), err)
 	}
 
 	cfg := DefaultConfig()
 	mainConfigInvalid := false
 	if err := applyYAMLConfigFile(path, data, cfg); err != nil {
 		mainConfigInvalid = true
-		fmt.Fprintf(os.Stderr, "Warning: configuration file %s could not be parsed; using its last good copy or built-in defaults\n", filepath.Base(path))
+		fmt.Fprintln(os.Stderr, configText("cli.config.file_parse_warning", "file", filepath.Base(path)))
 		if lastGood, ok := lastGoodConfigYAML[configFileCacheKey(path)]; ok {
 			if applyErr := applyYAMLConfigFile(path, lastGood, cfg); applyErr != nil {
 				cfg = DefaultConfig()
@@ -1184,6 +1221,7 @@ func Load(path string) (*Config, error) {
 	if err := loadSecretsConfig(path, cfg); err != nil {
 		return nil, err
 	}
+	validateBackupConfig(cfg)
 	warnIgnoredConnectionEnvironment(cfg)
 	applyConnectionURLTypes(cfg)
 	if err := applyI2PEnvironment(cfg); err != nil {
@@ -1205,7 +1243,7 @@ func Load(path string) (*Config, error) {
 	}
 	if (needsSecurityKey || legacySecurityKey) && !mainConfigInvalid {
 		if err := saveConfig(cfg, path); err != nil {
-			return nil, fmt.Errorf("failed to persist migrated security configuration: %w", err)
+			return nil, fmt.Errorf("%s: %w", configText("cli.config.migrated_security_save_failed"), err)
 		}
 	}
 	branch, ok := NormalizeUpdateBranch(cfg.Server.Update.Branch)
@@ -1217,10 +1255,10 @@ func Load(path string) (*Config, error) {
 	if branch != cfg.Server.Update.Branch && !mainConfigInvalid {
 		cfg.Server.Update.Branch = branch
 		if err := saveConfig(cfg, path); err != nil {
-			return nil, fmt.Errorf("failed to normalize update branch: %w", err)
+			return nil, fmt.Errorf("%s: %w", configText("cli.config.update_branch_normalize_failed"), err)
 		}
 		if err := writeConfigArea(path, "maintenance", cfg); err != nil {
-			return nil, fmt.Errorf("failed to persist normalized update branch: %w", err)
+			return nil, fmt.Errorf("%s: %w", configText("cli.config.update_branch_save_failed"), err)
 		}
 	}
 
@@ -1350,7 +1388,7 @@ func migrateAreaConfig(path string) error {
 	if secretData, err := os.ReadFile(secretsPath); err == nil {
 		var secretDocument yaml.Node
 		if yaml.Unmarshal(secretData, &secretDocument) != nil || len(secretDocument.Content) == 0 || secretDocument.Content[0].Kind != yaml.MappingNode {
-			return errors.New("invalid existing secrets file")
+			return fmt.Errorf("%s", configText("cli.config.existing_secrets_invalid"))
 		}
 		secrets = secretDocument.Content[0]
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -1847,11 +1885,11 @@ func loadYAMLDropins(configPath string, cfg *Config) error {
 		return nil
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: configuration drop-in directory could not be read; using the remaining configuration")
+		fmt.Fprintln(os.Stderr, configText("cli.config.dropin_directory_read_warning"))
 		return nil
 	}
 	if err := os.Chmod(dir, 0700); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: configuration drop-in directory permissions could not be secured")
+		fmt.Fprintln(os.Stderr, configText("cli.config.dropin_directory_permissions_warning"))
 	}
 	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -1882,10 +1920,10 @@ func loadYAMLDropins(configPath string, cfg *Config) error {
 		}
 		if err := os.Chmod(path, 0600); err != nil {
 			if info.Mode().Perm()&0022 != 0 {
-				fmt.Fprintf(os.Stderr, "Warning: unsafe configuration drop-in %s was ignored\n", name)
+				fmt.Fprintln(os.Stderr, configText("cli.config.dropin_unsafe_warning", "file", name))
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "Warning: configuration drop-in %s permissions could not be corrected\n", name)
+			fmt.Fprintln(os.Stderr, configText("cli.config.dropin_permissions_warning", "file", name))
 		}
 		paths = append(paths, path)
 	}
@@ -1893,14 +1931,14 @@ func loadYAMLDropins(configPath string, cfg *Config) error {
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: configuration drop-in %s could not be read; using its last good copy or defaults\n", filepath.Base(path))
+			fmt.Fprintln(os.Stderr, configText("cli.config.dropin_read_warning", "file", filepath.Base(path)))
 			data, _ = lastGoodConfigYAML[configFileCacheKey(path)]
 			if len(data) == 0 {
 				continue
 			}
 		}
 		if err := applyYAMLConfigFile(path, data, cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: configuration drop-in %s could not be parsed; using its last good copy or defaults\n", filepath.Base(path))
+			fmt.Fprintln(os.Stderr, configText("cli.config.dropin_parse_warning", "file", filepath.Base(path)))
 			lastGood, ok := lastGoodConfigYAML[configFileCacheKey(path)]
 			if !ok || applyYAMLConfigFile(path, lastGood, cfg) != nil {
 				continue
@@ -1937,7 +1975,7 @@ func applyYAMLConfigFile(path string, data []byte, current *Config) error {
 		return err
 	}
 	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
-		return errors.New("configuration document must be a mapping")
+		return fmt.Errorf("%s", configText("cli.config.document_mapping_required"))
 	}
 	defaults := reflect.ValueOf(DefaultConfig()).Elem()
 	target := reflect.ValueOf(current).Elem()
@@ -2062,7 +2100,7 @@ func containsString(values []string, want string) bool {
 }
 
 func warnInvalidConfigValue(path string, line int, key string) {
-	fmt.Fprintf(os.Stderr, "Warning: invalid configuration %s:%d key %s; using the built-in default\n", filepath.Base(path), line, key)
+	fmt.Fprintln(os.Stderr, configText("cli.config.invalid_value_warning", "file", filepath.Base(path), "line", line, "key", key))
 }
 
 func warnInvalidConfigKey(key string) {
@@ -2070,7 +2108,7 @@ func warnInvalidConfigKey(key string) {
 		warnInvalidConfigValue(location.file, location.line, key)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "Warning: invalid configuration key %s; using the built-in default\n", key)
+	fmt.Fprintln(os.Stderr, configText("cli.config.invalid_key_warning", "key", key))
 }
 
 func expandConfigEnvironment(cfg *Config) {
@@ -2223,7 +2261,7 @@ func Save() error {
 	mu.Lock()
 	defer mu.Unlock()
 	if current == nil || configPath == "" {
-		return fmt.Errorf("no configuration loaded")
+		return fmt.Errorf("%s", configText("cli.config.not_loaded"))
 	}
 	if err := saveConfig(current, configPath); err != nil {
 		return err
@@ -2236,7 +2274,7 @@ func Update(fn func(*Config)) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if current == nil {
-		return fmt.Errorf("no configuration loaded")
+		return fmt.Errorf("%s", configText("cli.config.not_loaded"))
 	}
 	previous := cloneConfig(current)
 	previousBranch := current.Server.Update.Branch
@@ -2245,7 +2283,7 @@ func Update(fn func(*Config)) error {
 	if !ok {
 		invalidBranch := current.Server.Update.Branch
 		current.Server.Update.Branch = previousBranch
-		return fmt.Errorf("invalid server.update.branch %q", invalidBranch)
+		return fmt.Errorf("%s", configText("cli.config.update_branch_invalid", "branch", invalidBranch))
 	}
 	current.Server.Update.Branch = branch
 	if err := saveConfig(current, configPath); err != nil {
@@ -2355,7 +2393,7 @@ func writeConfigArea(configPath, area string, cfg *Config) error {
 	case "maintenance":
 		value = map[string]interface{}{"server": map[string]interface{}{"maintenance": cfg.Server.Maintenance, "scheduler": cfg.Server.Schedule, "update": cfg.Server.Update, "backup": cfg.Server.Backup}}
 	default:
-		return fmt.Errorf("unknown configuration area %q", area)
+		return fmt.Errorf("%s", configText("cli.config.area_unknown", "area", area))
 	}
 	encoded, err := yaml.Marshal(value)
 	if err != nil {
@@ -2363,7 +2401,7 @@ func writeConfigArea(configPath, area string, cfg *Config) error {
 	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(encoded, &document); err != nil || len(document.Content) == 0 {
-		return errors.New("encode configuration area")
+		return fmt.Errorf("%s", configText("cli.config.area_encode_failed"))
 	}
 	for _, secretPath := range [][]string{
 		{"server", "security", "encryption_key"},
@@ -2416,12 +2454,12 @@ func NormalizeUpdateBranch(branch string) (string, bool) {
 func saveConfig(cfg *Config, path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.directory_create_failed"), err)
 	}
 	if err := os.Chmod(dir, 0700); err != nil {
-		return fmt.Errorf("failed to secure config directory: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.directory_secure_failed"), err)
 	}
-	if cfg.Server.Security.EncryptionKey != "" {
+	if cfg.Server.Security.EncryptionKey != "" || cfg.Server.Backup.EncryptionPassword != "" {
 		secrets, err := readSecrets(filepath.Join(dir, "secrets.yml"))
 		if err != nil {
 			return err
@@ -2430,9 +2468,16 @@ func saveConfig(cfg *Config, path string) error {
 		if cfg.Server.Token != "" {
 			server["token"] = cfg.Server.Token
 		}
-		security := nestedSecretMap(server, "security")
-		security["encryption_key"] = cfg.Server.Security.EncryptionKey
-		server["security"] = security
+		if cfg.Server.Security.EncryptionKey != "" {
+			security := nestedSecretMap(server, "security")
+			security["encryption_key"] = cfg.Server.Security.EncryptionKey
+			server["security"] = security
+		}
+		if cfg.Server.Backup.EncryptionPassword != "" {
+			backup := nestedSecretMap(server, "backup")
+			backup["encryption_password"] = cfg.Server.Backup.EncryptionPassword
+			server["backup"] = backup
+		}
 		if cfg.Server.Database.Token != "" || urlContainsCredentials(cfg.Server.Database.URL) {
 			database := nestedSecretMap(server, "database")
 			if cfg.Server.Database.Token != "" {
@@ -2461,9 +2506,13 @@ func saveConfig(cfg *Config, path string) error {
 
 	content := generateConfigYAML(cfg)
 	if err := writeConfigAtomically(path, []byte(content)); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.file_write_failed"), err)
 	}
 	return nil
+}
+
+func validateBackupConfig(cfg *Config) {
+	cfg.Server.Backup.Encryption.Enabled = cfg.Server.Backup.EncryptionPassword != ""
 }
 
 func applyI2PEnvironment(cfg *Config) error {
@@ -2474,7 +2523,7 @@ func applyI2PEnvironment(cfg *Config) error {
 	enabled, err := strconv.ParseBool(strings.TrimSpace(value))
 	if err != nil {
 		cfg.Server.I2P.Enabled = DefaultConfig().Server.I2P.Enabled
-		fmt.Fprintln(os.Stderr, "Warning: invalid I2P_ENABLED; using the built-in default")
+		fmt.Fprintln(os.Stderr, configText("cli.config.i2p_env_invalid_warning"))
 		return nil
 	}
 	cfg.Server.I2P.Enabled = enabled
@@ -2507,11 +2556,11 @@ func warnIgnoredConnectionEnvironment(cfg *Config) {
 		value := strings.TrimSpace(os.Getenv(entry.name))
 		saved := strings.TrimSpace(entry.saved)
 		if value != "" && saved != "" && !strings.Contains(saved, "${") && value != saved {
-			fmt.Fprintf(os.Stderr, "Warning: %s differs from the saved connection and was ignored\n", entry.name)
+			fmt.Fprintln(os.Stderr, configText("cli.config.connection_env_ignored_warning", "name", entry.name))
 		}
 	}
 	if value := strings.TrimSpace(os.Getenv("DATABASE_DRIVER")); value != "" && cfg.Server.Database.URL == "" && normalizeDatabaseDriver(value) != normalizeDatabaseDriver(cfg.Server.Database.Driver) {
-		fmt.Fprintln(os.Stderr, "Warning: DATABASE_DRIVER differs from the saved database driver and was ignored")
+		fmt.Fprintln(os.Stderr, configText("cli.config.database_driver_env_ignored_warning"))
 	}
 }
 
@@ -2539,7 +2588,7 @@ func applyConnectionURLTypes(cfg *Config) {
 			}
 			if driver != "" {
 				if normalizeDatabaseDriver(cfg.Server.Database.Driver) != driver {
-					fmt.Fprintln(os.Stderr, "Warning: server.database.url scheme overrides server.database.driver")
+					fmt.Fprintln(os.Stderr, configText("cli.config.database_url_scheme_warning"))
 				}
 				cfg.Server.Database.Driver = driver
 			}
@@ -2604,13 +2653,13 @@ func ensureEncryptionKey(cfg *Config) error {
 	if strings.TrimSpace(cfg.Server.Security.EncryptionKey) != "" {
 		key, err := base64.StdEncoding.DecodeString(cfg.Server.Security.EncryptionKey)
 		if err != nil || len(key) != 32 {
-			return fmt.Errorf("server.security.encryption_key must be base64-encoded 32-byte key material")
+			return fmt.Errorf("%s", configText("cli.config.encryption_key_invalid"))
 		}
 		return nil
 	}
 	key := make([]byte, 32)
 	if _, err := cryptorand.Read(key); err != nil {
-		return fmt.Errorf("failed to generate server security encryption key: %w", err)
+		return fmt.Errorf("%s: %w", configText("cli.config.encryption_key_generate_failed"), err)
 	}
 	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(key)
 	return nil
@@ -2821,7 +2870,7 @@ func ParseBool(s string, defaultVal bool) (bool, error) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("invalid boolean value: %q", s)
+	return false, fmt.Errorf("%s", configText("cli.config.boolean_invalid", "value", s))
 }
 
 // MustParseBool parses a string into a boolean, panicking on invalid value.

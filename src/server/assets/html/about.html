@@ -2,38 +2,38 @@
 <div class="container container-md">
 <header class="page-header"><h1 class="page-title">{{t .Lang "about.title"}}</h1><p class="page-lead">{{t .Lang "about.description"}}</p></header>
 <section class="section-card" aria-labelledby="overview">
-<h2 id="overview">Overview</h2>
-<p>GitIgnore provides a curated library of templates for languages, frameworks, editors, and tools through a versioned REST API, a GraphQL endpoint, and a server-rendered web interface.</p>
+<h2 id="overview">{{t .Lang "web.about.overview"}}</h2>
+<p>{{t .Lang "web.about.intro"}}</p>
 <ul>
-<li>Curated <code>.gitignore</code> templates for languages, editors, frameworks, and OS patterns.</li>
-<li>Single template retrieval by name (case-insensitive).</li>
-<li>Template composition — merge multiple templates into one output.</li>
-<li>A companion CLI, <code>gitignore-cli</code>, for shell-pipeline use.</li>
-<li>A drop-in compatible replacement for the gitignore.io / Toptal gitignore API.</li>
-<li>Browse templates by category, search by name, and view template statistics.</li>
-<li>OpenAPI and GraphQL documentation for API clients.</li>
+<li>{{t .Lang "web.about.feature_curated"}}</li>
+<li>{{t .Lang "web.about.feature_retrieve"}}</li>
+<li>{{t .Lang "web.about.feature_combine"}}</li>
+<li>{{t .Lang "web.about.feature_cli"}}</li>
+<li>{{t .Lang "web.about.feature_compatibility"}}</li>
+<li>{{t .Lang "web.about.feature_browse"}}</li>
+<li>{{t .Lang "web.about.feature_docs"}}</li>
 </ul>
-<p>Templates are embedded in the binary at build time, so no separate template service is needed. Optional GeoIP support downloads its database files and refreshes them through the scheduler.</p>
+<p>{{t .Lang "web.about.embedded"}}</p>
 </section>
 <section class="section-card" aria-labelledby="data-handling">
-<h2 id="data-handling">Data handling</h2>
-<p>GitIgnore has no user registration or profile pages. Owners are anonymous identities represented by owner tokens; operator actions require an operator token. Catalog endpoints are public. Contact and security reports may include the identity, contact details, and report information their sender submits. Request metadata may be processed for abuse prevention, rate limiting, and optional GeoIP lookup; instance operators control their own access logs.</p>
+<h2 id="data-handling">{{t .Lang "web.about.data_handling"}}</h2>
+<p>{{t .Lang "web.about.data_handling_description"}}</p>
 </section>
 <section class="section-card" aria-labelledby="version">
-<h2 id="version">Version</h2>
-<p>Version {{.Version}} ({{.BuildDate}}).</p>
+<h2 id="version">{{t .Lang "about.version"}}</h2>
+<p>{{tf .Lang "web.about.version_value" "version" .Version "build_date" .BuildDate}}</p>
 </section>
 <section class="section-card" aria-labelledby="links">
-<h2 id="links">Links</h2>
+<h2 id="links">{{t .Lang "about.links"}}</h2>
 <ul>
-<li><a href="https://github.com/apimgr/gitignore" rel="noopener noreferrer">Source code and issue tracker</a></li>
-<li><a href="{{path "/docs"}}">API documentation</a></li>
+<li><a href="https://github.com/apimgr/gitignore" rel="noopener noreferrer">{{t .Lang "web.about.source"}}</a></li>
+<li><a href="{{path "/docs"}}">{{t .Lang "nav.api_docs"}}</a></li>
 </ul>
 </section>
 <section class="section-card" aria-labelledby="attribution">
-<h2 id="attribution">Third-party attribution</h2>
-<p>GitIgnore uses open-source dependencies. Their license notices are listed in the repository's <a href="https://github.com/apimgr/gitignore/blob/main/LICENSE.md" rel="noopener noreferrer">license file</a>.</p>
-<p><a href="https://db-ip.com/">IP Geolocation by DB-IP</a></p>
+<h2 id="attribution">{{t .Lang "web.about.attribution"}}</h2>
+<p>{{t .Lang "web.about.attribution_description"}} <a href="https://github.com/apimgr/gitignore/blob/main/LICENSE.md" rel="noopener noreferrer">{{t .Lang "web.about.license_file"}}</a>.</p>
+<p><a href="https://db-ip.com/">{{t .Lang "web.about.ip_geolocation"}}</a></p>
 </section>
 </div>
 {{end}}

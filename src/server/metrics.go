@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -113,12 +114,12 @@ func (s *Server) metricsServiceHandler(service string) http.Handler {
 			authorization := r.Header.Get("Authorization")
 			want := "Bearer " + token
 			if token == "" {
-				http.Error(w, "forbidden", http.StatusForbidden)
+				http.Error(w, i18n.T(r, "errors.forbidden"), http.StatusForbidden)
 				return
 			}
 			if len(authorization) != len(want) || subtle.ConstantTimeCompare([]byte(authorization), []byte(want)) != 1 {
 				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				http.Error(w, i18n.T(r, "errors.unauthorized"), http.StatusUnauthorized)
 				return
 			}
 		}

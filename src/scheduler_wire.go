@@ -9,6 +9,7 @@ import (
 	"time"
 
 	displayformat "github.com/apimgr/gitignore/src/common/format"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/geoip"
@@ -142,6 +143,33 @@ func backupFileSize(path, lang string) string {
 	return displayformat.Size(fi.Size(), lang)
 }
 
+func schedulerText(lang, key string, values ...interface{}) string {
+	return i18n.TranslateFormat(lang, "cli.scheduler."+key, values...)
+}
+
+func schedulerTaskName(lang string, task scheduler.TaskInfo) string {
+	key := "cli.scheduler.task." + task.ID
+	name := i18n.Translate(lang, key)
+	if name == key {
+		return task.Name
+	}
+	return name
+}
+
+func schedulerStatusText(lang, status string) string {
+	key := map[string]string{
+		scheduler.StatusSuccess: "status_success",
+		scheduler.StatusFailed:  "status_failed",
+		"running":               "status_running",
+		"pending":               "status_pending",
+		scheduler.StatusSkipped: "status_skipped",
+	}[status]
+	if key == "" {
+		return status
+	}
+	return schedulerText(lang, key)
+}
+
 // humanizeBytes formats a byte count with a binary unit suffix.
 func humanizeBytes(n int64) string {
 	return displayformat.Size(n, "en")
@@ -152,12 +180,12 @@ func humanizeBytes(n int64) string {
 // state, and operates without starting the background loop.
 func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDir, logsDir string, color bool) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler {list|show|run|enable|disable|history} [id]")
+		fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "usage"))
 		os.Exit(exUsage)
 	}
 
 	if err := db.Init(dataDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
+		fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "database_init_failed", "error", err))
 		os.Exit(exUnavailable)
 	}
 	defer func() { _ = db.Close() }()
@@ -165,7 +193,7 @@ func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDi
 	gm := newGeoIP(cfg, dataDir)
 	sched, err := buildScheduler(cfg, configDir, dataDir, logsDir, gm)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to build scheduler: %v\n", err)
+		fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "build_failed", "error", err))
 		os.Exit(exConfig)
 	}
 	sched.LoadPersisted()
@@ -178,46 +206,50 @@ func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDi
 
 	switch sub {
 	case "list":
-		schedulerList(sched, cfg.Server.I18n.DefaultLanguage)
+		schedulerList(sched, outputLanguage)
 	case "show":
 		if id == "" {
-			fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler show <id>")
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "usage_show"))
 			os.Exit(exUsage)
 		}
-		schedulerShow(sched, id, cfg.Server.I18n.DefaultLanguage)
+		schedulerShow(sched, id, outputLanguage)
 	case "run":
 		if id == "" {
-			fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler run <id>")
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "usage_run"))
 			os.Exit(exUsage)
 		}
-		fmt.Printf("Running task %q...\n", id)
+		fmt.Println(schedulerText(outputLanguage, "running_task", "id", id))
 		if err := sched.RunNow(context.Background(), id); err != nil {
-			fmt.Fprintf(os.Stderr, "Task failed: %v\n", err)
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "task_failed", "error", err))
 			os.Exit(exOSErr)
 		}
-		fmt.Println("Done.")
+		fmt.Println(schedulerText(outputLanguage, "done"))
 	case "enable", "disable":
 		if id == "" {
-			fmt.Fprintf(os.Stderr, "Usage: gitignore scheduler %s <id>\n", sub)
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "usage_action", "action", sub))
 			os.Exit(exUsage)
 		}
 		if _, ok := sched.Task(id); !ok {
-			fmt.Fprintf(os.Stderr, "Unknown task: %s\n", id)
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "unknown_task", "id", id))
 			os.Exit(exUsage)
 		}
 		if err := sched.SetEnabled(id, sub == "enable"); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to update task: %v\n", err)
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "task_update_failed", "error", err))
 			os.Exit(exIOErr)
 		}
-		fmt.Printf("Task %q %sd.\n", id, sub)
+		key := "task_enabled"
+		if sub == "disable" {
+			key = "task_disabled"
+		}
+		fmt.Println(schedulerText(outputLanguage, key, "id", id))
 	case "history":
 		if id == "" {
-			fmt.Fprintln(os.Stderr, "Usage: gitignore scheduler history <id>")
+			fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "usage_history"))
 			os.Exit(exUsage)
 		}
-		schedulerHistory(sched, id, cfg.Server.I18n.DefaultLanguage)
+		schedulerHistory(sched, id, outputLanguage)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown scheduler command: %s\n", sub)
+		fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "unknown_command", "command", sub))
 		os.Exit(exUsage)
 	}
 }
@@ -249,41 +281,51 @@ func fmtTime(t time.Time) string {
 func schedulerList(s *scheduler.Scheduler, lang string) {
 	tasks := s.Tasks()
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "  \tTASK\tSCHEDULE\tLAST RUN\tNEXT RUN\tSTATUS")
+	_, _ = fmt.Fprintf(w, "  \t%s\t%s\t%s\t%s\t%s\n",
+		schedulerText(lang, "column_task"), schedulerText(lang, "column_schedule"),
+		schedulerText(lang, "column_last_run"), schedulerText(lang, "column_next_run"),
+		schedulerText(lang, "column_status"))
 	for _, t := range tasks {
-		state := "enabled"
+		state := schedulerText(lang, "enabled")
 		if !t.Enabled {
-			state = "disabled"
+			state = schedulerText(lang, "disabled")
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			schedulerStatusGlyph(t), t.Name, t.Schedule,
+			schedulerStatusGlyph(t), schedulerTaskName(lang, t), t.Schedule,
 			fmtTime(t.LastRun), fmtTime(t.NextRun), state)
 	}
 	_ = w.Flush()
-	fmt.Println("\nLegend: ✓ Success  ● Running  ✗ Failed  ○ Pending  ◐ Skipped")
+	fmt.Printf("\n%s: ✓ %s  ● %s  ✗ %s  ○ %s  ◐ %s\n",
+		schedulerText(lang, "legend"), schedulerText(lang, "status_success"),
+		schedulerText(lang, "status_running"), schedulerText(lang, "status_failed"),
+		schedulerText(lang, "status_pending"), schedulerText(lang, "status_skipped"))
 }
 
 func schedulerShow(s *scheduler.Scheduler, id, lang string) {
 	t, ok := s.Task(id)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Unknown task: %s\n", id)
+		fmt.Fprintln(os.Stderr, schedulerText(lang, "unknown_task", "id", id))
 		os.Exit(exUsage)
 	}
-	state := "Enabled"
+	state := schedulerText(lang, "enabled")
 	if !t.Enabled {
-		state = "Disabled"
+		state = schedulerText(lang, "disabled")
 	}
-	fmt.Printf("TASK: %s (%s)\n", t.Name, t.ID)
-	fmt.Printf("  Status:     %s %s\n", schedulerStatusGlyph(t), state)
-	fmt.Printf("  Schedule:   %s\n", t.Schedule)
-	fmt.Printf("  Last Run:   %s\n", fmtTime(t.LastRun))
-	fmt.Printf("  Next Run:   %s\n", fmtTime(t.NextRun))
-	fmt.Printf("  Last State: %s\n", nonEmpty(t.LastStatus, "pending"))
+	fmt.Printf("%s: %s (%s)\n", schedulerText(lang, "task_heading"), schedulerTaskName(lang, t), t.ID)
+	fmt.Printf("  %s: %s %s\n", schedulerText(lang, "field_status"), schedulerStatusGlyph(t), state)
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_schedule"), t.Schedule)
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_last_run"), fmtTime(t.LastRun))
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_next_run"), fmtTime(t.NextRun))
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_last_state"), schedulerStatusText(lang, nonEmpty(t.LastStatus, "pending")))
 	if t.LastError != "" {
-		fmt.Printf("  Last Error: %s\n", t.LastError)
+		fmt.Printf("  %s: %s\n", schedulerText(lang, "field_last_error"), t.LastError)
 	}
-	fmt.Printf("  Run Count:  %s successful, %s failed\n", displayformat.Count(t.RunCount, lang), displayformat.Count(t.FailCount, lang))
-	fmt.Printf("  Skippable:  %v\n", t.Skippable)
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_run_count"), schedulerText(lang, "run_counts", "success_count", displayformat.Count(t.RunCount, lang), "fail_count", displayformat.Count(t.FailCount, lang)))
+	skippable := schedulerText(lang, "no")
+	if t.Skippable {
+		skippable = schedulerText(lang, "yes")
+	}
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_skippable"), skippable)
 }
 
 // schedulerHistory prints the most recent execution summary. The mandated
@@ -293,17 +335,17 @@ func schedulerShow(s *scheduler.Scheduler, id, lang string) {
 func schedulerHistory(s *scheduler.Scheduler, id, lang string) {
 	t, ok := s.Task(id)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Unknown task: %s\n", id)
+		fmt.Fprintln(os.Stderr, schedulerText(lang, "unknown_task", "id", id))
 		os.Exit(exUsage)
 	}
-	fmt.Printf("HISTORY: %s (%s)\n", t.Name, t.ID)
+	fmt.Printf("%s: %s (%s)\n", schedulerText(lang, "history_heading"), schedulerTaskName(lang, t), t.ID)
 	if t.LastRun.IsZero() {
-		fmt.Println("  No recorded executions yet.")
+		fmt.Println("  " + schedulerText(lang, "no_executions"))
 		return
 	}
 	fmt.Printf("  %s  %-8s  %s\n", fmtTime(t.LastRun),
-		nonEmpty(t.LastStatus, "pending"), t.LastError)
-	fmt.Printf("  Totals: %s successful, %s failed\n", displayformat.Count(t.RunCount, lang), displayformat.Count(t.FailCount, lang))
+		schedulerStatusText(lang, nonEmpty(t.LastStatus, "pending")), t.LastError)
+	fmt.Printf("  %s: %s\n", schedulerText(lang, "totals"), schedulerText(lang, "run_counts", "success_count", displayformat.Count(t.RunCount, lang), "fail_count", displayformat.Count(t.FailCount, lang)))
 }
 
 func nonEmpty(s, fallback string) string {

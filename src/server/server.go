@@ -118,6 +118,7 @@ type Server struct {
 	server               *http.Server
 	baseHandler          atomic.Value
 	limiter              *rateLimiter
+	reportLimiter        *reportRateLimiter
 	strictTokenLimiter   *rateLimiter
 	metrics              *metrics.Metrics
 	graphQL              map[string]*graphapi.Schema
@@ -162,6 +163,7 @@ func New(config *Config) *Server {
 		healthRegistry:     health.NewRegistry(),
 		startTime:          time.Now(),
 		trustedProxyStop:   make(chan struct{}),
+		reportLimiter:      newReportRateLimiter(),
 		stats:              newStatsCollector(),
 		strictTokenLimiter: newRateLimiter(5, 60),
 		contactChallenges:  map[string]contactChallenge{},
@@ -520,6 +522,9 @@ func (s *Server) setupRoutes() {
 		r.Get("/server/healthz", s.handleHealthz)
 		r.Get("/server/healthz.txt", s.handleHealthz)
 		r.Get("/server/swagger", s.handleOpenAPIJSON)
+		r.Post("/server/reports/csp", s.handleCSPReport)
+		r.Post("/server/reports/default", s.handleDefaultReport)
+		r.Post("/server/reports/nel", s.handleNELReport)
 		r.Post("/server/graphql", s.handleGraphQL)
 		r.Handle("/server/mcp", http.HandlerFunc(s.handleMCP))
 

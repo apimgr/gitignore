@@ -203,7 +203,7 @@ func TestPrintHelpAndVersion(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"gitignore-cli 1.2.3", "Commands:", "--server URL", "gitignore-cli 1.2.3 (abc123) built today"} {
+	for _, want := range []string{"gitignore-cli 1.2.3", "Commands:", "--server URL", "gitignore-cli 1.2.3 (abc123)", "Built: today", "Go:", "OS/Arch:"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("help/version output missing %q", want)
 		}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/apimgr/gitignore/src/client/api"
 	clientconfig "github.com/apimgr/gitignore/src/client/config"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -18,7 +19,7 @@ func applyUpdate(model Model, msg tea.Msg) Model {
 
 func TestModelScreensAndMessages(t *testing.T) {
 	setup := New(nil, nil, "")
-	if setup.Init() != nil || !strings.Contains(setup.View(), "setup") {
+	if setup.Init() != nil || !strings.Contains(setup.View(), i18n.Translate("en", "cli.client.tui.setup_title")) {
 		t.Fatal("setup model did not initialize")
 	}
 	updated, _ := setup.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -28,7 +29,7 @@ func TestModelScreensAndMessages(t *testing.T) {
 	}
 	updated, _ = setup.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	setup = updated.(Model)
-	if !strings.Contains(setup.View(), "valid http") {
+	if !strings.Contains(setup.View(), i18n.Translate("en", "cli.client.tui.invalid_server_url")) {
 		t.Fatal("invalid setup URL was accepted")
 	}
 	updated, command := setup.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -41,7 +42,7 @@ func TestModelScreensAndMessages(t *testing.T) {
 	cfg.Server.Primary = "https://example.test"
 	model := New(api.New(cfg.Server.Primary), cfg, "config.yml")
 	model = applyUpdate(model, tea.WindowSizeMsg{Width: 100, Height: 30})
-	if !strings.Contains(model.View(), "gitignore-cli") {
+	if !strings.Contains(model.View(), i18n.Translate("en", "cli.client.tui.title")) {
 		t.Fatal("menu view is empty")
 	}
 	search, _ := model.dispatchMenu("search")
@@ -53,7 +54,7 @@ func TestModelScreensAndMessages(t *testing.T) {
 	if settings.(Model).screen != screenSetup {
 		t.Fatal("settings menu did not open setup")
 	}
-	if namesTitle(nameModeBrowse) != "Templates (enter to view)" || !strings.Contains(namesTitle(nameModeCategoryDrill), "Category") || !strings.Contains(namesTitle(nameModeCombinePick), "Combine") {
+	if namesTitle(nameModeBrowse, "en") != i18n.Translate("en", "cli.client.tui.templates_title") || namesTitle(nameModeCategoryDrill, "en") != i18n.Translate("en", "cli.client.tui.category_templates_title") || namesTitle(nameModeCombinePick, "en") != i18n.Translate("en", "cli.client.tui.combine_title") {
 		t.Fatal("name list titles mismatch")
 	}
 
@@ -85,11 +86,11 @@ func TestModelScreensAndMessages(t *testing.T) {
 		t.Fatal("stats error state mismatch")
 	}
 	model = applyUpdate(model, configSavedMsg{err: errors.New("write failed")})
-	if model.errMsg != "write failed" {
+	if model.errMsg != i18n.Translate("en", "cli.client.tui.save_failed") {
 		t.Fatal("config save error missing")
 	}
 	model = applyUpdate(model, configSavedMsg{})
-	if model.screen != screenMenu || model.message != "Server saved." {
+	if model.screen != screenMenu || model.message != i18n.Translate("en", "cli.client.tui.server_saved") {
 		t.Fatal("config save success state mismatch")
 	}
 }

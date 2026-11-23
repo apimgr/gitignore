@@ -264,7 +264,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 			s.writeHealthFrontendText(w, r, resp)
 		}
 	case "application/json":
-		s.writeHealthJSON(w, resp)
+		s.writeHealthJSON(w, r, resp)
 	default:
 		s.writeHealthHTML(w, r, resp)
 	}
@@ -418,14 +418,14 @@ func (s *Server) diskWritable() bool {
 
 // writeHealthJSON emits the health response as indented JSON with a trailing
 // newline (AI.md PART 13 JSON format).
-func (s *Server) writeHealthJSON(w http.ResponseWriter, resp HealthResponse) {
+func (s *Server) writeHealthJSON(w http.ResponseWriter, r *http.Request, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if resp.Status == "unhealthy" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	data, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, i18n.Translate(i18n.LangFromContext(r.Context()), "health.error.internal"), http.StatusInternalServerError)
 		return
 	}
 	_, _ = w.Write(append(data, '\n'))
@@ -523,11 +523,11 @@ func (s *Server) writeHealthFrontendText(w http.ResponseWriter, r *http.Request,
 	fmt.Fprintf(&b, "%s\n\n", title)
 	fmt.Fprintf(&b, "%s:    %s\n", t("field.status"), t("status."+resp.Status))
 	fmt.Fprintf(&b, "%s:   %s\n", t("field.version"), resp.Version)
-	fmt.Fprintf(&b, "%s:     %s (%s)\n", t("field.build"), resp.Build.Commit, humanTimestampString(resp.Build.Date))
+	fmt.Fprintf(&b, "%s:     %s (%s)\n", t("field.build"), resp.Build.Commit, humanTimestampString(lang, resp.Build.Date))
 	fmt.Fprintf(&b, "%s:        %s\n", t("field.go_version"), resp.GoVersion)
 	fmt.Fprintf(&b, "%s:    %s\n", t("field.uptime"), displayformat.Duration(time.Since(s.startTime), lang))
 	fmt.Fprintf(&b, "%s:      %s\n", t("field.mode"), t("mode."+resp.Mode))
-	fmt.Fprintf(&b, "%s:    %s\n", t("field.checked"), humanTimestamp(resp.Timestamp))
+	fmt.Fprintf(&b, "%s:    %s\n", t("field.checked"), humanTimestamp(lang, resp.Timestamp))
 	fmt.Fprintf(&b, "%s:   %s\n\n", t("field.cluster"), translatedBool(lang, resp.Cluster.Enabled))
 
 	fmt.Fprintf(&b, "%s\n", t("section.features"))
@@ -571,16 +571,6 @@ func healthCheckLabel(lang, key string) string {
 	for _, prefix := range []struct{ key, kind string }{{"geoip_", "geoip"}, {"blocklist_", "blocklist"}, {"data_", "data"}} {
 		if strings.HasPrefix(key, prefix.key) {
 			label := i18n.Translate(lang, "health.check_kind."+prefix.kind)
-			if label == "health.check_kind."+prefix.kind {
-				switch prefix.kind {
-				case "geoip":
-					label = "GeoIP"
-				case "blocklist":
-					label = "Blocklist"
-				default:
-					label = "Data"
-				}
-			}
 			return label + ": " + strings.ReplaceAll(strings.TrimPrefix(key, prefix.key), "_", " ")
 		}
 	}
@@ -603,16 +593,24 @@ func translatedCheckState(lang, state string) string {
 	return i18n.Translate(lang, "health.check_state."+state)
 }
 
-func humanTimestamp(value time.Time) string {
-	return value.UTC().Format("January 2, 2006 at 15:04:05 MST")
+func humanTimestamp(lang string, value time.Time) string {
+	utc := value.UTC()
+	month := i18n.Translate(lang, "health.month."+strings.ToLower(utc.Month().String()))
+	return i18n.TranslateFormat(lang, "health.timestamp.format", map[string]string{
+		"month": month,
+		"day":   fmt.Sprintf("%d", utc.Day()),
+		"year":  fmt.Sprintf("%d", utc.Year()),
+		"time":  utc.Format("15:04:05"),
+		"zone":  "UTC",
+	})
 }
 
-func humanTimestampString(value string) string {
+func humanTimestampString(lang, value string) string {
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		return value
 	}
-	return humanTimestamp(parsed)
+	return humanTimestamp(lang, parsed)
 }
 
 type healthPageView struct {
@@ -666,8 +664,8 @@ func (s *Server) writeHealthHTML(w http.ResponseWriter, r *http.Request, resp He
 		StatusIcon:     statusIcon(resp.Status),
 		StatusText:     i18n.Translate(lang, "health.status."+resp.Status),
 		TimestampISO:   resp.Timestamp.Format(time.RFC3339),
-		TimestampHuman: humanTimestamp(resp.Timestamp),
-		BuildDateHuman: humanTimestampString(resp.Build.Date),
+		TimestampHuman: humanTimestamp(lang, resp.Timestamp),
+		BuildDateHuman: humanTimestampString(lang, resp.Build.Date),
 		UptimeHuman:    displayformat.Duration(time.Since(s.startTime), lang),
 	}
 	status := http.StatusOK
@@ -753,13 +751,6 @@ func statusIcon(status string) string {
 	}
 }
 
-func statusText(status string) string {
-	switch status {
-	case "healthy":
-		return "All Systems Operational"
-	case "degraded":
-		return "Degraded Performance"
-	default:
-		return "Service Unavailable"
-	}
+func statusText(lang, status string) string {
+	return i18n.Translate(lang, "health.status."+status)
 }

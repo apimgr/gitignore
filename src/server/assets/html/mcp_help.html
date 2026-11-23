@@ -1,49 +1,49 @@
 {{define "content"}}
 <div class="container container-md">
-<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/help"}}">{{t .Lang "help.back"}}</a></nav><h1 class="page-title">{{t .Lang "help.mcp_title"}}</h1><p class="page-lead">{{t .Lang "help.mcp_description"}}</p></header>
+<header class="page-header"><nav class="breadcrumb" aria-label="{{t .Lang "a11y.breadcrumb"}}"><a href="{{path "/server/help"}}">{{t .Lang "help.back"}}</a></nav><h1 class="page-title">{{t .Lang "help.mcp_title"}}</h1><p class="page-lead">{{t .Lang "help.mcp_description"}}</p></header>
 <section class="section-card" id="overview" aria-labelledby="overview-title">
-<h2 id="overview-title">What this is</h2>
-<p>This application exposes its API operations as tools over remote Streamable HTTP. Each request uses the same Bearer token and authorization rules as the REST API.</p>
+<h2 id="overview-title">{{t .Lang "web.mcp.overview_title"}}</h2>
+<p>{{t .Lang "web.mcp.overview_description"}}</p>
 </section>
 <section class="section-card" id="endpoint" aria-labelledby="endpoint-title">
-<h2 id="endpoint-title">Endpoint</h2>
+<h2 id="endpoint-title">{{t .Lang "web.mcp.endpoint_title"}}</h2>
 <pre class="code-block"><code id="mcp-url">{{.Data.url}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
 <p>{{t .Lang "common.aliases"}}</p><pre class="code-block"><code id="mcp-api-url">{{.Data.apiURL}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-api-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button><pre class="code-block"><code id="mcp-root-url">{{.Data.rootURL}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-root-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
-<p>Select the URL to copy it. The endpoint accepts JSON-RPC requests with HTTP POST.</p>
+<p>{{t .Lang "web.mcp.endpoint_instructions"}}</p>
 </section>
 <section class="section-card" id="authentication" aria-labelledby="authentication-title">
-<h2 id="authentication-title">Authentication</h2>
-<p>MCP requires <code>Authorization: Bearer &lt;token&gt;</code>. The REST catalog remains public, but MCP requests without a valid token receive <code>401</code>. Use a linked owner token for each MCP client; create and manage it at <a href="{{path "/server/preferences/tokens"}}">Token Management</a>. Do not give an MCP client the primary owner token or the operator token.</p>
+<h2 id="authentication-title">{{t .Lang "web.mcp.authentication_title"}}</h2>
+<p>{{t .Lang "web.mcp.authentication_requirement"}} <code>Authorization: Bearer &lt;token&gt;</code>. {{t .Lang "web.mcp.authentication_public_catalog"}} <code>401</code>. {{t .Lang "web.mcp.authentication_linked_token"}} <a href="{{path "/server/preferences/tokens"}}">{{t .Lang "web.mcp.token_management"}}</a>. {{t .Lang "web.mcp.authentication_warning"}}</p>
 </section>
 <section class="section-card" id="connect" aria-labelledby="connect-title">
-<h2 id="connect-title">Connect a client</h2>
-<p>Configure your MCP client to use the endpoint above with Streamable HTTP transport. For a direct protocol check:</p>
+<h2 id="connect-title">{{t .Lang "web.mcp.connect_title"}}</h2>
+<p>{{t .Lang "web.mcp.connect_description"}}</p>
 <pre class="code-block"><code id="mcp-curl">curl -X POST '{{.Data.url}}' -H 'Authorization: Bearer YOUR_LINKED_TOKEN' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: initialize' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}'</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-curl" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
 </section>
 <section class="section-card" id="tools" aria-labelledby="tools-title">
-<h2 id="tools-title">Tools</h2>
-<p>Available tools are filtered by the supplied token. Token management and token issuance are never MCP tools.</p>
-<div class="table-wrapper"><table class="data-table"><caption>Available tools</caption><thead><tr><th scope="col">Tool</th><th scope="col">Description</th></tr></thead><tbody>
+<h2 id="tools-title">{{t .Lang "web.mcp.tools_title"}}</h2>
+<p>{{t .Lang "web.mcp.tools_description"}}</p>
+<div class="table-wrapper"><table class="data-table"><caption>{{t .Lang "web.mcp.tools_caption"}}</caption><thead><tr><th scope="col">{{t .Lang "web.mcp.tool_name"}}</th><th scope="col">{{t .Lang "web.mcp.tool_description"}}</th></tr></thead><tbody>
 {{range .Data.tools}}<tr><td><code>{{.Name}}</code></td><td>{{.Description}}</td></tr>{{end}}
 </tbody></table></div>
 </section>
 <section class="section-card" id="limits" aria-labelledby="limits-title">
-<h2 id="limits-title">Behavior and limits</h2>
-<p>The endpoint is stateless, accepts POST only, applies the same request middleware and rate limits as the API, and validates browser Origin headers.</p>
+<h2 id="limits-title">{{t .Lang "web.mcp.limits_title"}}</h2>
+<p>{{t .Lang "web.mcp.limits_description"}}</p>
 </section>
 <section class="section-card" id="troubleshooting" aria-labelledby="troubleshooting-title">
-<h2 id="troubleshooting-title">Troubleshooting</h2>
-<div class="table-wrapper"><table class="data-table"><caption>Troubleshooting responses</caption><thead><tr><th scope="col">Status</th><th scope="col">Cause</th><th scope="col">Resolution</th></tr></thead><tbody>
-<tr><td>400</td><td>Malformed JSON-RPC request, invalid headers, or unsupported protocol version</td><td>Send valid JSON-RPC with matching MCP headers and protocol version 2026-07-28.</td></tr>
-<tr><td>401</td><td>Missing or invalid Bearer token</td><td>Create a linked token at <code>/server/preferences/tokens</code> and send it in the Authorization header.</td></tr>
-<tr><td>403</td><td>Origin rejected</td><td>Send requests from this site's own origin.</td></tr>
-<tr><td>405</td><td>Method is not POST</td><td>Send the JSON-RPC request using POST.</td></tr>
+<h2 id="troubleshooting-title">{{t .Lang "web.mcp.troubleshooting_title"}}</h2>
+<div class="table-wrapper"><table class="data-table"><caption>{{t .Lang "web.mcp.troubleshooting_caption"}}</caption><thead><tr><th scope="col">{{t .Lang "web.mcp.status"}}</th><th scope="col">{{t .Lang "web.mcp.cause"}}</th><th scope="col">{{t .Lang "web.mcp.resolution"}}</th></tr></thead><tbody>
+<tr><td>400</td><td>{{t .Lang "web.mcp.bad_request_cause"}}</td><td>{{t .Lang "web.mcp.bad_request_resolution"}}</td></tr>
+<tr><td>401</td><td>{{t .Lang "web.mcp.unauthorized_cause"}}</td><td>{{t .Lang "web.mcp.unauthorized_resolution"}}</td></tr>
+<tr><td>403</td><td>{{t .Lang "web.mcp.forbidden_cause"}}</td><td>{{t .Lang "web.mcp.forbidden_resolution"}}</td></tr>
+<tr><td>405</td><td>{{t .Lang "web.mcp.method_cause"}}</td><td>{{t .Lang "web.mcp.method_resolution"}}</td></tr>
 </tbody></table></div>
 </section>
 <section class="section-card" id="project" aria-labelledby="project-title">
-<h2 id="project-title">GitIgnore catalog</h2>
+<h2 id="project-title">{{t .Lang "web.mcp.project_title"}}</h2>
 <p>{{.Data.project}}</p>
-<p>Use the REST catalog anonymously, or connect an MCP client with its own linked Bearer token to call the operations allowed to that token.</p>
+<p>{{t .Lang "web.mcp.project_description"}}</p>
 </section>
 </div>
 {{end}}

@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -33,6 +34,17 @@ var (
 	BuildEpoch = "0"
 )
 
+var clientLanguage = i18n.DefaultLang
+
+func clientText(key string, values ...interface{}) string {
+	return i18n.TranslateFormat(clientLanguage, key, values...)
+}
+
+func setClientLanguage(flagLang, configLang string) {
+	clientLanguage = i18n.ResolveCLILang(flagLang, configLang)
+	cmd.SetLanguage(clientLanguage)
+}
+
 func init() {
 	if epoch, err := strconv.ParseInt(BuildEpoch, 10, 64); err == nil && epoch > 0 {
 		BuildDate = buildDate(epoch)
@@ -47,6 +59,7 @@ func main() {
 	cmd.BinaryName = filepath.Base(os.Args[0])
 	api.ProjectName = "gitignore"
 	api.Version = Version
+	flag.CommandLine = flag.NewFlagSet(cmd.BinaryName, flag.ContinueOnError)
 
 	showHelp := flag.Bool("help", false, "Show help")
 	flag.BoolVar(showHelp, "h", false, "Show help (shorthand)")
@@ -63,7 +76,13 @@ func main() {
 	shellFlag := flag.Bool("shell", false, "Shell integration: --shell {completions|init|help} [SHELL]")
 
 	flag.Usage = func() { cmd.PrintHelp(Version) }
-	flag.Parse()
+	flag.CommandLine.SetOutput(io.Discard)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		setClientLanguage(*langFlag, "")
+		fmt.Fprintln(os.Stderr, clientText("cli.client.main.invalid_arguments"))
+		os.Exit(output.ExitUsage)
+	}
+	setClientLanguage(*langFlag, "")
 
 	args := flag.Args()
 
@@ -79,17 +98,20 @@ func main() {
 	}
 
 	printer := output.New(output.ResolveColor(*colorFlag))
+	printer.SetLanguage(clientLanguage)
 
 	if err := clipath.EnsureDirs(); err != nil {
-		printer.Error("creating config/data directories: %v", err)
+		printer.ErrorText(clientText("cli.client.main.ensure_directories_failed", "error", err))
 		os.Exit(output.ExitConfig)
 	}
 
-	cfg, cfgPath, err := config.Load(*configFlag)
+	cfg, cfgPath, err := config.Load(*configFlag, clientLanguage)
 	if err != nil {
-		printer.Error("loading config: %v", err)
+		printer.ErrorText(clientText("cli.client.main.load_config_failed", "error", err))
 		os.Exit(output.ExitConfig)
 	}
+	setClientLanguage(*langFlag, cfg.Lang)
+	printer.SetLanguage(clientLanguage)
 
 	// Flag-to-config persistence: --server/--color/--output only get
 	// written back to cli.yml when the stored value is empty or invalid
@@ -113,13 +135,13 @@ func main() {
 		cfg.Output = result
 		changed = true
 	}
-	if result, save := config.SaveIfEmptyOrInvalid(cfg.Lang, *langFlag, func(s string) bool { return s != "" }); save {
+	if result, save := config.SaveIfEmptyOrInvalid(cfg.Lang, *langFlag, i18n.IsSupported); save {
 		cfg.Lang = result
 		changed = true
 	}
 	if changed {
 		if err := config.Save(cfgPath, cfg); err != nil {
-			printer.Warn("could not persist config: %v", err)
+			printer.WarnText(clientText("cli.client.main.persist_config_failed", "error", err))
 		}
 	}
 
@@ -131,14 +153,15 @@ func main() {
 		format = "text"
 	}
 	if format != "text" && format != "json" && format != "table" {
-		printer.Error("invalid --output value %q: expected text, json, or table", format)
+		printer.ErrorText(clientText("cli.client.main.invalid_output", "format", format))
 		os.Exit(output.ExitUsage)
 	}
 
 	if *debugFlag {
-		fmt.Fprintf(os.Stderr, "debug: config=%s server-flag=%q output=%s color=%s\n",
-			cfgPath, *serverFlag, format, *colorFlag)
+		fmt.Fprintln(os.Stderr, clientText("cli.client.main.debug", "config", cfgPath, "server", *serverFlag, "output", format, "color", *colorFlag))
 	}
+	client := api.New("")
+	client.Lang = clientLanguage
 
 	serverURL, err := config.ResolveServer(*serverFlag, cfg)
 	if err != nil {
@@ -152,19 +175,19 @@ func main() {
 		if len(args) == 0 {
 			mode, modeErr := selectInteractiveMode(cfg.Display.Mode)
 			if modeErr != nil {
-				printer.Error("%v", modeErr)
+				printer.ErrorText(modeErr.Error())
 				os.Exit(output.ExitConfig)
 			}
-			os.Exit(runInteractive(mode, api.New(""), cfg, cfgPath))
+			os.Exit(runInteractive(mode, client, cfg, cfgPath))
 		}
-		printer.Error("%v", err)
+		printer.ErrorText(clientText("cli.client.main.no_server_configured"))
 		os.Exit(output.ExitConfig)
 	}
 
-	client := api.New(serverURL)
+	client.BaseURL = serverURL
 	// Resolve the output language (--lang → config → LC_ALL/LANG → en) and
 	// advertise it so the server localizes error messages (AI.md PART 30).
-	client.Lang = i18n.ResolveCLILang(*langFlag, cfg.Lang)
+	client.Lang = clientLanguage
 
 	if *showVersion {
 		cmd.PrintVersion(Version, CommitID, BuildDate, client)
@@ -176,7 +199,7 @@ func main() {
 	if len(args) == 0 {
 		mode, modeErr := selectInteractiveMode(cfg.Display.Mode)
 		if modeErr != nil {
-			printer.Error("%v", modeErr)
+			printer.ErrorText(modeErr.Error())
 			os.Exit(output.ExitConfig)
 		}
 		os.Exit(runInteractive(mode, client, cfg, cfgPath))
@@ -205,10 +228,10 @@ func selectInteractiveMode(preference string) (interactiveMode, error) {
 	env := display.DetectDisplayEnv()
 	if env.IsSSH || env.IsMosh {
 		if !isTUIEligible() {
-			return 0, fmt.Errorf("interactive mode unavailable: remote sessions require an interactive terminal")
+			return 0, fmt.Errorf("%s", clientText("cli.client.main.remote_requires_terminal"))
 		}
 		if preference == "gui" {
-			return 0, fmt.Errorf("GUI unavailable in remote SSH or Mosh sessions")
+			return 0, fmt.Errorf("%s", clientText("cli.client.main.gui_unavailable_remote"))
 		}
 		return interactiveTUI, nil
 	}
@@ -216,12 +239,12 @@ func selectInteractiveMode(preference string) (interactiveMode, error) {
 	switch preference {
 	case "gui":
 		if !gui.IsGUIAvailable() {
-			return 0, fmt.Errorf("GUI unavailable: no supported local display or GUI build is available")
+			return 0, fmt.Errorf("%s", clientText("cli.client.main.gui_unavailable"))
 		}
 		return interactiveGUI, nil
 	case "tui":
 		if !isTUIEligible() {
-			return 0, fmt.Errorf("TUI unavailable: an interactive terminal is required")
+			return 0, fmt.Errorf("%s", clientText("cli.client.main.tui_requires_terminal"))
 		}
 		return interactiveTUI, nil
 	case "", "auto":
@@ -231,9 +254,9 @@ func selectInteractiveMode(preference string) (interactiveMode, error) {
 		if isTUIEligible() {
 			return interactiveTUI, nil
 		}
-		return 0, fmt.Errorf("interactive mode unavailable: connect a display or interactive terminal")
+		return 0, fmt.Errorf("%s", clientText("cli.client.main.interactive_unavailable"))
 	default:
-		return 0, fmt.Errorf("invalid display.mode %q: expected auto, gui, or tui", preference)
+		return 0, fmt.Errorf("%s", clientText("cli.client.main.invalid_display_mode", "mode", preference))
 	}
 }
 
@@ -241,13 +264,13 @@ func selectInteractiveMode(preference string) (interactiveMode, error) {
 func runInteractive(mode interactiveMode, client *api.Client, cfg *config.Config, cfgPath string) int {
 	if mode == interactiveGUI {
 		if err := gui.LaunchGUI(client, cfg, cfgPath); err != nil {
-			fmt.Fprintf(os.Stderr, "gui error: %v\n", err)
+			fmt.Fprintln(os.Stderr, clientText("cli.client.main.gui_error", "error", err))
 			return output.ExitGeneral
 		}
 		return output.ExitSuccess
 	}
 	if err := tui.Run(client, cfg, cfgPath); err != nil {
-		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+		fmt.Fprintln(os.Stderr, clientText("cli.client.main.tui_error", "error", err))
 		return output.ExitGeneral
 	}
 	return output.ExitSuccess

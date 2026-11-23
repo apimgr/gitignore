@@ -1,13 +1,13 @@
-Subject: Disk Space Low - {app_name}
+Subject: {email_subject}
 ---
-DISK SPACE LOW
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-The filesystem containing {path} is {used_percent}% full.
-Free space: {free}
-Alert threshold: {threshold_percent}%
+{email_path_full}
+{email_free_space_label}: {free}
+{email_threshold_label}: {threshold_percent}%
 
 --
 {app_name}

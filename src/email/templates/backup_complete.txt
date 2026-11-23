@@ -1,14 +1,14 @@
-Subject: Backup Complete - {app_name}
+Subject: {email_subject}
 ---
-BACKUP COMPLETE
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-Your backup completed successfully.
+{email_summary}
 
-Filename: {filename}
-Size: {size}
+{email_filename_label}: {filename}
+{email_size_label}: {size}
 
 --
 {app_name}

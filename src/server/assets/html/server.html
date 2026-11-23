@@ -1,36 +1,36 @@
 {{define "content"}}
 <div class="container container-md">
-<header class="page-header"><h1 class="page-title">Server</h1><p class="page-lead">Information and public documentation for this GitIgnore instance.</p></header>
+<header class="page-header"><h1 class="page-title">{{t .Lang "web.server.title"}}</h1><p class="page-lead">{{t .Lang "web.server.description"}}</p></header>
 <section class="section-card" aria-labelledby="server-information">
-<h2 id="server-information">Server information</h2>
+<h2 id="server-information">{{t .Lang "web.server.information"}}</h2>
 <ul>
-<li><strong>Version:</strong> v{{.Version}}</li>
-<li><strong>Base URL:</strong> <code>{{.BaseURL}}</code></li>
-<li><strong>API:</strong> <a href="{{.APIBase}}">{{.APIBase}}</a></li>
-<li><strong>Health:</strong> <a href="{{path "/server/healthz"}}">/server/healthz</a></li>
+<li>{{tf .Lang "web.server.version" "version" .Version}}</li>
+<li>{{tf .Lang "web.server.base_url" "url" .BaseURL}}</li>
+<li>{{tf .Lang "web.server.api" "url" .APIBase}}</li>
+<li>{{tf .Lang "web.server.health" "path" "/server/healthz"}}</li>
 </ul>
-<p>Server administration is performed through the configuration file and CLI. There is no web management interface.</p>
+<p>{{t .Lang "web.server.administration"}}</p>
 </section>
 <section class="section-card" aria-labelledby="server-documentation">
-<h2 id="server-documentation">Documentation</h2>
+<h2 id="server-documentation">{{t .Lang "nav.docs"}}</h2>
 <ul>
-<li><a href="{{path "/server/about"}}">About</a></li>
-<li><a href="{{path "/server/help"}}">Help</a></li>
-<li><a href="{{path "/server/privacy"}}">Privacy</a></li>
-<li><a href="{{path "/server/terms"}}">Terms</a></li>
-<li><a href="{{path "/server/security"}}">Security</a></li>
-<li><a href="{{path "/server/dpo"}}">Data Protection Officer</a></li>
-<li><a href="{{path "/server/preferences"}}">Preferences</a></li>
-<li><a href="{{path "/server/help/mcp"}}">MCP help</a></li>
-<li><a href="{{path "/server/security/policy"}}">Security disclosure policy</a></li>
-<li><a href="{{path "/server/security/thanks"}}">Security researcher acknowledgments</a></li>
+<li><a href="{{path "/server/about"}}">{{t .Lang "nav.about"}}</a></li>
+<li><a href="{{path "/server/help"}}">{{t .Lang "nav.help"}}</a></li>
+<li><a href="{{path "/server/privacy"}}">{{t .Lang "nav.privacy"}}</a></li>
+<li><a href="{{path "/server/terms"}}">{{t .Lang "nav.terms"}}</a></li>
+<li><a href="{{path "/server/security"}}">{{t .Lang "nav.security"}}</a></li>
+<li><a href="{{path "/server/dpo"}}">{{t .Lang "security_page.dpo_title"}}</a></li>
+<li><a href="{{path "/server/preferences"}}">{{t .Lang "common.preferences"}}</a></li>
+<li><a href="{{path "/server/help/mcp"}}">{{t .Lang "web.server.mcp_help"}}</a></li>
+<li><a href="{{path "/server/security/policy"}}">{{t .Lang "security_page.policy_title"}}</a></li>
+<li><a href="{{path "/server/security/thanks"}}">{{t .Lang "security_page.thanks_title"}}</a></li>
 </ul>
 </section>
 <section class="section-card" aria-labelledby="server-tools">
-<h2 id="server-tools">Developer tools</h2>
+<h2 id="server-tools">{{t .Lang "web.server.developer_tools"}}</h2>
 <ul>
-<li><a href="{{path "/server/docs/swagger"}}">Swagger UI</a></li>
-<li><a href="{{path "/server/docs/graphql"}}">GraphQL playground</a></li>
+<li><a href="{{path "/server/docs/swagger"}}">{{t .Lang "web.server.swagger_ui"}}</a></li>
+<li><a href="{{path "/server/docs/graphql"}}">{{t .Lang "web.server.graphql_playground"}}</a></li>
 </ul>
 </section>
 </div>

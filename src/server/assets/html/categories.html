@@ -1,5 +1,5 @@
 {{define "content"}}
-<h1>Categories</h1>
+<h1>{{t .Lang "nav.categories"}}</h1>
 <ul class="templates">
 {{range .Data.categories}}<li><a href="{{path "/list"}}?category={{.}}">{{.}}</a></li>{{end}}
 </ul>

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,7 +102,7 @@ func TestMCPRequiresBearerAndRejectsLegacyProtocol(t *testing.T) {
 	request.Header.Set("Mcp-Method", "initialize")
 	recorder = httptest.NewRecorder()
 	s.router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "UnsupportedProtocolVersionError") {
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "Unsupported protocol version") {
 		t.Fatalf("legacy initialize status/body = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -389,5 +390,73 @@ func TestShutdownOnUnstartedServer(t *testing.T) {
 	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {
 		t.Errorf("Shutdown() returned error: %v", err)
+	}
+}
+
+func TestOpenAPIAndMCPTextUseRequestLanguage(t *testing.T) {
+	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	var spec map[string]interface{}
+	openAPIHandler := i18n.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		spec = s.openAPISpec(r)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/server/swagger", nil)
+	request.Header.Set("Accept-Language", "es")
+	openAPIHandler.ServeHTTP(httptest.NewRecorder(), request)
+
+	info := spec["info"].(map[string]interface{})
+	wantTitle := i18n.Translate("es", "swagger.openapi.info.title")
+	if info["title"] != wantTitle || wantTitle == i18n.Translate("en", "swagger.openapi.info.title") {
+		t.Errorf("OpenAPI title = %v, want Spanish translation %q", info["title"], wantTitle)
+	}
+	paths := spec["paths"].(map[string]interface{})
+	list := paths["/api/v1/list"].(map[string]interface{})["get"].(map[string]interface{})
+	wantSummary := i18n.Translate("es", "swagger.openapi.operation.templates_list")
+	if list["summary"] != wantSummary || wantSummary == i18n.Translate("en", "swagger.openapi.operation.templates_list") {
+		t.Errorf("OpenAPI summary = %v, want Spanish translation %q", list["summary"], wantSummary)
+	}
+
+	var tools []mcpTool
+	toolsHandler := i18n.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tools = s.mcpToolsForRequest(r)
+	}))
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/server/mcp", nil)
+	request.Header.Set("Accept-Language", "es")
+	toolsHandler.ServeHTTP(httptest.NewRecorder(), request)
+	wantDescription := i18n.Translate("es", "swagger.openapi.operation.templates_list")
+	for _, tool := range tools {
+		if tool.Name == "get_api_v1_list" {
+			if tool.Description != wantDescription || wantDescription == i18n.Translate("en", "swagger.openapi.operation.templates_list") {
+				t.Errorf("MCP tool description = %q, want Spanish translation %q", tool.Description, wantDescription)
+			}
+			return
+		}
+	}
+	t.Fatal("localized MCP tools did not include get_api_v1_list")
+}
+
+func TestMCPErrorUsesRequestLanguage(t *testing.T) {
+	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	request.Header.Set("Accept-Language", "es")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	recorder := httptest.NewRecorder()
+	s.router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized || recorder.Header().Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("unauthorized MCP status/header = %d/%q", recorder.Code, recorder.Header().Get("WWW-Authenticate"))
+	}
+	var response struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode MCP error response: %v", err)
+	}
+	want := i18n.Translate("es", "mcp.errors.unauthorized")
+	if response.Error.Code != -32001 || response.Error.Message != want || want == i18n.Translate("en", "mcp.errors.unauthorized") {
+		t.Fatalf("MCP error = %#v, want localized code -32001 and message %q", response.Error, want)
 	}
 }

@@ -1,19 +1,19 @@
 {{define "content"}}
 <div class="container container-md">
-<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/security"}}">{{t .Lang "security_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "security_page.policy_title"}}</h1><p class="page-lead">{{t .Lang "security_page.policy_description"}}</p></header>
+<header class="page-header"><nav class="breadcrumb" aria-label="{{t .Lang "a11y.breadcrumb"}}"><a href="{{path "/server/security"}}">{{t .Lang "security_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "security_page.policy_title"}}</h1><p class="page-lead">{{t .Lang "security_page.policy_description"}}</p></header>
 <section class="section-card" aria-labelledby="reporting">
-<h2 id="reporting">Reporting a vulnerability</h2>
-<p>If that is unavailable, email <a href="mailto:{{.Data.email}}">{{.Data.email}}</a>.</p>
-<p>Please include the affected version, a description of the issue and its impact, and steps to reproduce it. Do not publish vulnerability details before coordinating with the maintainers.</p>
+<h2 id="reporting">{{t .Lang "web.security.report"}}</h2>
+<p>{{tf .Lang "web.security_policy.email_if_unavailable" "email" .Data.email}}</p>
+<p>{{t .Lang "web.security_policy.include_details"}}</p>
 </section>
 <section class="section-card" aria-labelledby="response-process">
-<h2 id="response-process">Response process</h2>
+<h2 id="response-process">{{t .Lang "web.security.response_process_title"}}</h2>
 <ul>
-<li>Receipt is acknowledged within 48 hours.</li>
-<li>Critical vulnerabilities are targeted for a fix within 14 days.</li>
-<li>The disclosure timeline is coordinated after a fix is available.</li>
+<li>{{t .Lang "web.security_policy.receipt"}}</li>
+<li>{{t .Lang "web.security_policy.critical_fix"}}</li>
+<li>{{t .Lang "web.security_policy.disclosure_timeline"}}</li>
 </ul>
-<p>Only the latest release receives security updates. See the <a href="{{path "/server/security"}}">security overview</a> for reporting links.</p>
+<p>{{t .Lang "web.security_policy.latest_release"}} <a href="{{path "/server/security"}}">{{t .Lang "web.security_policy.security_overview"}}</a> {{t .Lang "web.security_policy.reporting_links"}}</p>
 </section>
 </div>
 {{end}}

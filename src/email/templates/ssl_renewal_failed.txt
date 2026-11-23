@@ -1,16 +1,16 @@
-Subject: SSL Renewal Failed - {app_name}
+Subject: {email_subject}
 ---
-SSL RENEWAL FAILED
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-Renewal of the TLS certificate for {fqdn} failed.
+{email_renewal_failed}
 
-Error: {error}
-Expires in: {expires_in} days
-Expiry date: {expiry_date}
-Next retry: {next_retry}
+{email_error_label}: {error}
+{email_expires_in_label}: {expires_in} days
+{email_expiry_date_label}: {expiry_date}
+{email_next_retry_label}: {next_retry}
 
 --
 {app_name}

@@ -1,0 +1,116 @@
+#swagger-ui .swagger-ui {
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.theme-dark #swagger-ui .swagger-ui .topbar {
+  background: #1e1f29;
+}
+
+.theme-dark #swagger-ui .swagger-ui .info .title,
+.theme-dark #swagger-ui .swagger-ui .opblock-tag {
+  color: #f8f8f2;
+}
+
+.theme-dark #swagger-ui .swagger-ui .opblock.opblock-get {
+  background: rgb(139 233 253 / 10%);
+  border-color: #8be9fd;
+}
+
+.theme-dark #swagger-ui .swagger-ui .opblock.opblock-post {
+  background: rgb(80 250 123 / 10%);
+  border-color: #50fa7b;
+}
+
+.theme-dark #swagger-ui .swagger-ui .opblock.opblock-put {
+  background: rgb(255 184 108 / 10%);
+  border-color: #ffb86c;
+}
+
+.theme-dark #swagger-ui .swagger-ui .opblock.opblock-delete {
+  background: rgb(255 85 85 / 10%);
+  border-color: #ff5555;
+}
+
+.theme-dark #swagger-ui .swagger-ui input,
+.theme-dark #swagger-ui .swagger-ui textarea,
+.theme-dark #swagger-ui .swagger-ui select {
+  color: #f8f8f2;
+  background: #44475a;
+  border-color: #6272a4;
+}
+
+.theme-dark #swagger-ui .swagger-ui .btn {
+  color: #f8f8f2;
+  background: #6272a4;
+}
+
+.theme-light #swagger-ui .swagger-ui .topbar {
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.theme-light #swagger-ui .swagger-ui .info .title,
+.theme-light #swagger-ui .swagger-ui .opblock-tag {
+  color: #1a1a1a;
+}
+
+.theme-light #swagger-ui .swagger-ui .opblock.opblock-get {
+  background: rgb(0 102 204 / 5%);
+  border-color: #0066cc;
+}
+
+.theme-light #swagger-ui .swagger-ui .opblock.opblock-post {
+  background: rgb(0 128 0 / 5%);
+  border-color: #008000;
+}
+
+.theme-light #swagger-ui .swagger-ui .opblock.opblock-put {
+  background: rgb(255 140 0 / 5%);
+  border-color: #ff8c00;
+}
+
+.theme-light #swagger-ui .swagger-ui .opblock.opblock-delete {
+  background: rgb(204 0 0 / 5%);
+  border-color: #cc0000;
+}
+
+.theme-light #swagger-ui .swagger-ui input,
+.theme-light #swagger-ui .swagger-ui textarea,
+.theme-light #swagger-ui .swagger-ui select {
+  color: #1a1a1a;
+  background: #fff;
+  border-color: #ccc;
+}
+
+.theme-light #swagger-ui .swagger-ui .btn {
+  color: #fff;
+  background: #0066cc;
+}
+
+#swagger-ui .swagger-ui a[href],
+#swagger-ui .swagger-ui button,
+#swagger-ui .swagger-ui .btn,
+#swagger-ui .swagger-ui .opblock-tag {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+#swagger-ui .swagger-ui a[href] {
+  display: inline-flex;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+
+#swagger-ui .swagger-ui button,
+#swagger-ui .swagger-ui .btn,
+#swagger-ui .swagger-ui .opblock-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#swagger-ui .swagger-ui .info .title,
+#swagger-ui .swagger-ui .opblock-tag {
+  overflow-wrap: anywhere;
+}

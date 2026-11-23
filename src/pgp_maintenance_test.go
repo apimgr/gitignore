@@ -36,6 +36,15 @@ func TestPGPKeyserverEndpoint(t *testing.T) {
 	}
 }
 
+func TestPGPMaintenanceOutputUsesOutputLanguage(t *testing.T) {
+	previous := outputLanguage
+	setOutputLanguage("es", "")
+	t.Cleanup(func() { outputLanguage = previous })
+	if got := cliText("cli.pgp.usage_generate"); got != "Uso: --maintenance pgp generate" {
+		t.Errorf("PGP usage = %q, want Spanish translation", got)
+	}
+}
+
 func TestProjectPGPIdentityUsesConfiguredValuesAndFallbacks(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.Branding.Title = " Example Service "

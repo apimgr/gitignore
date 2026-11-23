@@ -4,3 +4,39 @@ body,
   height: 100%;
   margin: 0;
 }
+#graphiql,
+.graphiql-container,
+.CodeMirror {
+  min-width: 0;
+  max-width: 100%;
+}
+#graphiql {
+  direction: ltr;
+  overflow: hidden;
+  contain: paint;
+}
+.graphiql-container {
+  direction: ltr !important;
+}
+.graphiql-container .graphiql-editor.hidden {
+  display: none !important;
+}
+.graphiql-container button,
+.graphiql-container a[role="button"] {
+  min-width: 44px;
+  min-height: 44px;
+}
+.CodeMirror-scroll {
+  overflow: auto !important;
+}
+.graphiql-container textarea {
+  max-width: 100%;
+}
+.graphiql-container a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+}
+.section-card:has(#graphiql) {
+  overflow: clip;
+}

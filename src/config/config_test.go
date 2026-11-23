@@ -229,6 +229,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Web.UI.Theme == "" {
 		t.Error("expected non-empty default theme")
 	}
+	if cfg.Web.Reports.RateLimitPerMinute != 60 || cfg.Web.Reports.RateLimitPerIPBurst != 10 {
+		t.Errorf("web report limits = %d/minute with burst %d, want 60/minute and 10 burst", cfg.Web.Reports.RateLimitPerMinute, cfg.Web.Reports.RateLimitPerIPBurst)
+	}
 }
 
 func TestGeneratedConfigUsesCanonicalSchedulerAndLogs(t *testing.T) {

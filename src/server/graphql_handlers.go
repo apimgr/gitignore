@@ -39,18 +39,18 @@ func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGraphQLRequestBytes))
 	var request graphQLRequest
 	if err := decoder.Decode(&request); err != nil {
-		writeGraphQLError(w, http.StatusBadRequest, "request body must be a valid GraphQL JSON object")
+		writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		writeGraphQLError(w, http.StatusBadRequest, "request body must contain exactly one JSON object")
+		writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
 		return
 	}
 
 	lang := i18n.LangFromContext(r.Context())
 	schema, err := s.graphQLSchema(lang)
 	if err != nil {
-		writeGraphQLError(w, http.StatusInternalServerError, "GraphQL schema is unavailable")
+		writeGraphQLError(w, r, http.StatusInternalServerError, "errors.server_error")
 		return
 	}
 
@@ -59,6 +59,11 @@ func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", "Cookie")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	response := schema.Execute(r.Context(), request.Query, request.OperationName, request.Variables)
+	for _, queryError := range response.Errors {
+		if queryError != nil {
+			queryError.Message = i18n.T(r, "graphql.errors.query_failed")
+		}
+	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		return
 	}
@@ -68,7 +73,7 @@ func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGraphQLSchema(w http.ResponseWriter, r *http.Request) {
 	sdl, err := graphapi.SDLForLanguage(i18n.LangFromContext(r.Context()))
 	if err != nil {
-		writeGraphQLError(w, http.StatusInternalServerError, "GraphQL schema is unavailable")
+		writeGraphQLError(w, r, http.StatusInternalServerError, "errors.server_error")
 		return
 	}
 
@@ -79,11 +84,11 @@ func (s *Server) handleGraphQLSchema(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, sdl)
 }
 
-func writeGraphQLError(w http.ResponseWriter, status int, message string) {
+func writeGraphQLError(w http.ResponseWriter, r *http.Request, status int, key string) {
 	setCacheHeaders(w, "api")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"errors": []map[string]string{{"message": message}},
+		"errors": []map[string]string{{"message": i18n.T(r, key)}},
 	})
 }

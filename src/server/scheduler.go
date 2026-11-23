@@ -13,7 +13,7 @@ import (
 func (s *Server) handleAPISchedulerStatus(w http.ResponseWriter, r *http.Request) {
 	states, err := db.LoadSchedulerStates()
 	if err != nil {
-		sendAPIResponseError(w, "scheduler_error", "failed to load scheduler state")
+		sendAPIResponseErrorLocalized(w, r, "scheduler_error")
 		return
 	}
 

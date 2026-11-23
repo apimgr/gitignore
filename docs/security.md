@@ -21,6 +21,7 @@ The contact page accepts reports from visitors. It validates field sizes and add
 | `/server/security/report/{tracking_id}` | Researcher report status; emailed token allows one access per day and expires 30 days after closure |
 | `/api/{api_version}/server/security` | JSON mirror of public security contact metadata |
 | `/api/{api_version}/server/contact` | Contact form description (GET) and confirmed submission (POST) |
+| `/api/{api_version}/server/reports/{default,csp,nel}` | Public browser report endpoints; return `204 No Content` and share a per-IP limit of 60 reports per minute with a burst capacity of 10 |
 | `/server/healthz` | Canonical HTML/API health endpoint, negotiated by request |
 | `/api/{api_version}/server/healthz` | Versioned API health |
 | `/api/healthz` and `/api/healthz.txt` | Unversioned API health aliases |
@@ -35,6 +36,8 @@ The contact page accepts reports from visitors. It validates field sizes and add
 Repository-source vulnerabilities should be reported through [GitHub private vulnerability reporting](https://github.com/apimgr/gitignore/security/advisories/new), as described in [.github/SECURITY.md](https://github.com/apimgr/gitignore/blob/main/.github/SECURITY.md). A deployed-instance vulnerability can be reported through the security form linked from `/server/security` and `security.txt`. Do not file vulnerability details in a public issue.
 
 The security form is enabled by `server.pages.contact.enabled`. It requires the rotating `security_id`, which is valid for the current and previous 48-hour period. The form asks for impact, reproduction steps, severity, and disclosure preferences. Report bodies are encrypted with the project PGP key when available, otherwise with AES-256-GCM using the generated at-rest key. Researcher contact details and any submitted public key are stored separately under AES-256-GCM. Report content is not included in logs or the public status page. The researcher receives a tracking ID and an emailed status token that permits one status-page access per day; access expires 30 days after the report closes. Operators manage report metadata through the `--maintenance security` commands; there is no admin web interface or route for reading report contents.
+
+Browser security reports use a separate flow from vulnerability reports. CSP violations are written to the private `security.log` with query strings, fragments, internal IPs, filesystem URIs, and oversized fields removed. The default Reporting API and NEL endpoints do not echo report data to callers; NEL report bodies are not retained. The `Reporting-Endpoints` and `Report-To` headers advertise `/api/{api_version}/server/reports/default`.
 
 ### Project OpenPGP key
 

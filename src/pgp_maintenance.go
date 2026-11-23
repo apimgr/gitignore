@@ -43,55 +43,55 @@ type pgpPublishRecord struct {
 func handlePGPMaintenance(configDir, configPath, dataDir, logsDir string, args []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return fmt.Errorf("load operator credentials: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.pgp.load_config_failed"), err)
 	}
 	if !service.IsElevated() && !authenticateSecurityMaintenance(cfg.Server.Token) {
-		return errors.New("PGP maintenance requires the operator token or root privileges")
+		return errors.New(cliText("cli.pgp.operator_required"))
 	}
 	if err := db.Init(dataDir); err != nil {
-		return fmt.Errorf("initialize PGP database: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.pgp.database_init_failed"), err)
 	}
 	defer func() { _ = db.Close() }()
 	if len(args) == 0 {
-		return errors.New("usage: --maintenance pgp {generate|rotate|publish|export|import|delete}")
+		return errors.New(cliText("cli.pgp.usage"))
 	}
 	dir := filepath.Join(configDir, "security")
 	switch args[0] {
 	case "generate":
 		if len(args) != 1 {
-			return errors.New("usage: --maintenance pgp generate")
+			return errors.New(cliText("cli.pgp.usage_generate"))
 		}
 		return generateProjectPGP(cfg, dir, logsDir)
 	case "rotate":
 		if len(args) != 1 {
-			return errors.New("usage: --maintenance pgp rotate")
+			return errors.New(cliText("cli.pgp.usage_rotate"))
 		}
 		return rotateProjectPGP(cfg, dir, logsDir)
 	case "publish":
 		if len(args) != 1 {
-			return errors.New("usage: --maintenance pgp publish")
+			return errors.New(cliText("cli.pgp.usage_publish"))
 		}
 		return publishProjectPGP(cfg, dir)
 	case "export":
 		return exportProjectPGP(cfg, dir, logsDir, args[1:])
 	case "import":
 		if len(args) != 2 {
-			return errors.New("usage: --maintenance pgp import <file>")
+			return errors.New(cliText("cli.pgp.usage_import"))
 		}
 		return importProjectPGP(cfg, dir, logsDir, args[1])
 	case "delete":
 		if len(args) != 1 {
-			return errors.New("usage: --maintenance pgp delete")
+			return errors.New(cliText("cli.pgp.usage_delete"))
 		}
 		return deleteProjectPGP(cfg, dir, logsDir)
 	default:
-		return errors.New("usage: --maintenance pgp {generate|rotate|publish|export|import|delete}")
+		return errors.New(cliText("cli.pgp.usage"))
 	}
 }
 
 func generateProjectPGP(cfg *config.Config, dir, logsDir string) error {
 	if _, err := os.Stat(filepath.Join(dir, pgpPublicFilename)); err == nil {
-		return errors.New("PGP keypair already exists; use --maintenance pgp rotate")
+		return errors.New(cliText("cli.pgp.keypair_exists"))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -125,19 +125,19 @@ func generateProjectPGP(cfg *config.Config, dir, logsDir string) error {
 		return err
 	}
 	if err := publishProjectPGP(cfg, dir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: PGP keypair generated; keyserver publication is pending: %v\n", err)
+		fmt.Fprintln(os.Stderr, cliText("cli.pgp.publication_pending_generated", "error", err))
 	}
 	if err := appendPGPAudit(logsDir, "security.pgp_generated", fingerprint, ""); err != nil {
-		return fmt.Errorf("keypair generated but audit event failed: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.pgp.audit_failed_generated"), err)
 	}
-	fmt.Printf("OpenPGP keypair generated: %s\n", fingerprint)
+	fmt.Println(cliText("cli.pgp.generated", "fingerprint", fingerprint))
 	return nil
 }
 
 func rotateProjectPGP(cfg *config.Config, dir, logsDir string) error {
 	oldEncrypted, err := os.ReadFile(filepath.Join(dir, pgpPrivateFilename))
 	if err != nil {
-		return fmt.Errorf("load current private key: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.pgp.load_private_failed"), err)
 	}
 	secret, err := db.InstallationSecret()
 	if err != nil {
@@ -188,25 +188,25 @@ func rotateProjectPGP(cfg *config.Config, dir, logsDir string) error {
 		return rollback, nil
 	}); err != nil {
 		_ = os.Remove(oldPrivatePath)
-		return fmt.Errorf("PGP rotation failed: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.pgp.rotation_failed"), err)
 	}
 	if err := config.Update(func(current *config.Config) { current.Web.Security.PublishPGPKey = true }); err != nil {
 		return err
 	}
 	if err := publishProjectPGP(cfg, dir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: PGP rotation succeeded; keyserver publication is pending: %v\n", err)
+		fmt.Fprintln(os.Stderr, cliText("cli.pgp.publication_pending_rotated", "error", err))
 	}
 	if err := appendPGPAudit(logsDir, "security.pgp_rotated", fingerprint, ""); err != nil {
-		return fmt.Errorf("keypair rotated but audit event failed: %w", err)
+		return fmt.Errorf("%s: %w", cliText("cli.pgp.audit_failed_rotated"), err)
 	}
-	fmt.Printf("OpenPGP keypair rotated: %s\n", fingerprint)
+	fmt.Println(cliText("cli.pgp.rotated", "fingerprint", fingerprint))
 	return nil
 }
 
 func exportProjectPGP(cfg *config.Config, dir, logsDir string, args []string) error {
 	if len(args) == 0 || args[0] == "public" {
 		if len(args) > 2 || len(args) == 2 && args[0] != "public" {
-			return errors.New("usage: --maintenance pgp export public [path] | private <path>")
+			return errors.New(cliText("cli.pgp.usage_export"))
 		}
 		key, err := os.ReadFile(filepath.Join(dir, pgpPublicFilename))
 		if err != nil {
@@ -219,9 +219,9 @@ func exportProjectPGP(cfg *config.Config, dir, logsDir string, args []string) er
 		return err
 	}
 	if args[0] != "private" || len(args) != 2 {
-		return errors.New("usage: --maintenance pgp export public [path] | private <path>")
+		return errors.New(cliText("cli.pgp.usage_export"))
 	}
-	reason, err := confirmPGPSensitive(cfg, "export private key", true)
+	reason, err := confirmPGPSensitive(cfg, cliText("cli.pgp.action.export_private"), true)
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func exportProjectPGP(cfg *config.Config, dir, logsDir string, args []string) er
 }
 
 func importProjectPGP(cfg *config.Config, dir, logsDir, source string) error {
-	reason, err := confirmPGPSensitive(cfg, "import private key", true)
+	reason, err := confirmPGPSensitive(cfg, cliText("cli.pgp.action.import_private"), true)
 	if err != nil {
 		return err
 	}
@@ -261,15 +261,15 @@ func importProjectPGP(cfg *config.Config, dir, logsDir, source string) error {
 	}
 	_, identity := entity.PrimaryIdentity(time.Now(), nil)
 	if identity == nil || identity.UserId == nil {
-		return errors.New("private key has no valid identity")
+		return errors.New(cliText("cli.pgp.invalid_key_identity"))
 	}
 	expectedIdentity := projectPGPIdentity(cfg)
 	identitySeparator := strings.LastIndex(expectedIdentity, " <")
 	expectedName := strings.TrimSpace(expectedIdentity[:identitySeparator])
 	expectedEmail := strings.TrimSuffix(expectedIdentity[identitySeparator+2:], ">")
 	if !strings.EqualFold(identity.UserId.Name, expectedName) || !strings.EqualFold(identity.UserId.Email, expectedEmail) {
-		fmt.Fprintf(os.Stderr, "warning: imported key identity %q <%s> differs from expected %q <%s>\n", identity.UserId.Name, identity.UserId.Email, expectedName, expectedEmail)
-		if _, err := readPGPConfirmation("Type IMPORT to accept the identity mismatch: ", "IMPORT"); err != nil {
+		fmt.Fprintln(os.Stderr, cliText("cli.pgp.identity_mismatch_warning", "name", identity.UserId.Name, "email", identity.UserId.Email, "expected_name", expectedName, "expected_email", expectedEmail))
+		if _, err := readPGPConfirmation(cliText("cli.pgp.identity_confirm_prompt"), "IMPORT"); err != nil {
 			return err
 		}
 	}
@@ -311,14 +311,14 @@ func importProjectPGP(cfg *config.Config, dir, logsDir, source string) error {
 		return err
 	}
 	if err := publishProjectPGP(cfg, dir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: imported PGP key; keyserver publication is pending: %v\n", err)
+		fmt.Fprintln(os.Stderr, cliText("cli.pgp.publication_pending_imported", "error", err))
 	}
 	return appendPGPAudit(logsDir, "security.pgp_imported", fingerprint, reason)
 }
 
 func deleteProjectPGP(cfg *config.Config, dir, logsDir string) error {
-	fmt.Fprintln(os.Stderr, "WARNING: deleting the PGP keys makes all PGP-encrypted reports and pending notifications unreadable.")
-	if _, err := confirmPGPSensitive(cfg, "delete keypair", false); err != nil {
+	fmt.Fprintln(os.Stderr, cliText("cli.pgp.delete_warning"))
+	if _, err := confirmPGPSensitive(cfg, cliText("cli.pgp.action.delete_keypair"), false); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -415,7 +415,7 @@ func publishProjectPGPWithForce(ctx context.Context, cfg *config.Config, dir str
 		return err
 	}
 	if len(failures) != 0 {
-		return fmt.Errorf("keyserver publication failed: %s", strings.Join(failures, "; "))
+		return fmt.Errorf("%s: %s", cliText("cli.pgp.keyserver_publication_failed"), strings.Join(failures, "; "))
 	}
 	return nil
 }
@@ -423,7 +423,7 @@ func publishProjectPGPWithForce(ctx context.Context, cfg *config.Config, dir str
 func pgpKeyserverEndpoint(configured string) (string, error) {
 	value := strings.TrimSpace(configured)
 	if value == "" {
-		return "", errors.New("empty PGP keyserver")
+		return "", errors.New(cliText("cli.pgp.empty_keyserver"))
 	}
 	if !strings.Contains(value, "://") {
 		switch strings.ToLower(value) {
@@ -437,7 +437,7 @@ func pgpKeyserverEndpoint(configured string) (string, error) {
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-		return "", fmt.Errorf("PGP keyserver must be an HTTPS URL: %q", configured)
+		return "", errors.New(cliText("cli.pgp.https_required", "url", configured))
 	}
 	if parsed.Path == "" || parsed.Path == "/" {
 		switch strings.ToLower(parsed.Hostname()) {
@@ -446,7 +446,7 @@ func pgpKeyserverEndpoint(configured string) (string, error) {
 		case "keyserver.ubuntu.com":
 			parsed.Path = "/pks/add"
 		default:
-			return "", fmt.Errorf("PGP keyserver URL needs an upload path: %q", configured)
+			return "", errors.New(cliText("cli.pgp.upload_path_required", "url", configured))
 		}
 	}
 	return parsed.String(), nil
@@ -455,7 +455,7 @@ func pgpKeyserverEndpoint(configured string) (string, error) {
 func submitPGPKey(ctx context.Context, endpoint, publicKey string) error {
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(request *http.Request, via []*http.Request) error {
 		if request.URL.Scheme != "https" || len(via) >= 3 {
-			return errors.New("unsafe PGP keyserver redirect")
+			return errors.New(cliText("cli.pgp.unsafe_redirect"))
 		}
 		return nil
 	}}
@@ -478,7 +478,7 @@ func submitPGPKey(ctx context.Context, endpoint, publicKey string) error {
 			if closeErr != nil {
 				lastErr = closeErr
 			} else {
-				lastErr = fmt.Errorf("HTTP %d", response.StatusCode)
+				lastErr = errors.New(cliText("cli.pgp.http_status", "status", response.StatusCode))
 			}
 		} else {
 			lastErr = err
@@ -498,38 +498,38 @@ func submitPGPKey(ctx context.Context, endpoint, publicKey string) error {
 
 func confirmPGPSensitive(cfg *config.Config, action string, requireReason bool) (string, error) {
 	if (requireReason || !service.IsElevated()) && !authenticateSecurityMaintenance(cfg.Server.Token) {
-		return "", errors.New("operator token confirmation failed")
+		return "", errors.New(cliText("cli.pgp.operator_confirmation_failed"))
 	}
-	if _, err := readPGPConfirmation("Type CONFIRM to "+action+": ", "CONFIRM"); err != nil {
+	if _, err := readPGPConfirmation(cliText("cli.pgp.confirm_prompt", "action", action), "CONFIRM"); err != nil {
 		return "", err
 	}
 	if !requireReason {
 		return "", nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errors.New("a terminal is required to enter the sensitive-operation reason")
+		return "", errors.New(cliText("cli.pgp.terminal_reason_required"))
 	}
-	fmt.Fprint(os.Stderr, "Reason: ")
+	fmt.Fprint(os.Stderr, cliText("cli.pgp.reason_prompt"))
 	reason, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
 	reason = strings.Join(strings.Fields(reason), " ")
 	if reason == "" || len(reason) > 500 {
-		return "", errors.New("reason must contain 1 to 500 characters")
+		return "", errors.New(cliText("cli.pgp.reason_length_invalid"))
 	}
 	return reason, nil
 }
 
 func readPGPConfirmation(prompt, expected string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errors.New("a terminal is required to confirm this sensitive operation")
+		return "", errors.New(cliText("cli.pgp.terminal_confirm_required"))
 	}
 	fmt.Fprint(os.Stderr, prompt)
 	value, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Fprintln(os.Stderr)
 	if err != nil || string(value) != expected {
-		return "", errors.New("confirmation did not match")
+		return "", errors.New(cliText("cli.pgp.confirmation_mismatch"))
 	}
 	return string(value), nil
 }
@@ -550,7 +550,7 @@ func enforcePGPExportRate(dir string, cfg *config.Config) error {
 	if timestamp, ok := previous[operator]; ok {
 		last, err := time.Parse(time.RFC3339, timestamp)
 		if err == nil && time.Since(last) < time.Hour {
-			return errors.New("private-key export is limited to one per hour per operator")
+			return errors.New(cliText("cli.pgp.export_rate_limited"))
 		}
 	}
 	previous[operator] = time.Now().UTC().Format(time.RFC3339)

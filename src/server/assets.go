@@ -148,10 +148,29 @@ func (s *Server) requestPath(r *http.Request, path string) string {
 		prefix = normalizePathPrefix(s.currentConfig().Server.BaseURL)
 	}
 	path = "/" + strings.TrimLeft(path, "/")
+	if strings.HasPrefix(path, "/static/") && !strings.Contains(path, "?") {
+		path += "?v=" + s.assetStamp()
+	}
 	if prefix == "" {
 		return path
 	}
 	return prefix + path
+}
+
+func (s *Server) assetStamp() string {
+	version, commit := "dev", "unknown"
+	if s != nil && s.config != nil {
+		if value := strings.TrimSpace(s.config.Version); value != "" {
+			version = value
+		}
+		if value := strings.TrimSpace(s.config.Commit); value != "" {
+			commit = value
+			if len(commit) > 7 {
+				commit = commit[:7]
+			}
+		}
+	}
+	return version + "-" + commit
 }
 
 func normalizePathPrefix(value string) string {
@@ -190,7 +209,7 @@ func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, page string,
 func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page string, status int, data PageData) {
 	t, ok := pageTemplates[page]
 	if !ok {
-		sendAPIResponseError(w, "SERVER_ERROR", "unknown page template")
+		sendAPIResponseError(w, "SERVER_ERROR", requestTranslation(r, "web.handler.error.unknown_template"))
 		return
 	}
 	if data.Version == "" {
@@ -206,10 +225,10 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 		data.APIBase = s.requestPath(r, s.apiBasePath())
 	}
 	if data.Description == "" {
-		data.Description = "Comprehensive .gitignore template API."
+		data.Description = requestTranslation(r, "web.handler.description.default")
 	}
 	if data.ResourceLabelPlural == "" {
-		data.ResourceLabelPlural = "templates"
+		data.ResourceLabelPlural = requestTranslation(r, "web.handler.resource_plural")
 	}
 	if data.Lang == "" {
 		data.Lang = i18n.LangFromContext(r.Context())
@@ -264,11 +283,13 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 		err = requestTemplate.ExecuteTemplate(&buf, "layout", data)
 	}
 	if err != nil {
-		sendAPIResponseError(w, "SERVER_ERROR", "template render failed")
+		sendAPIResponseError(w, "SERVER_ERROR", requestTranslation(r, "web.handler.error.render_failed"))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	setCacheHeaders(w, "html")
+	w.Header().Set("ETag", `"`+s.assetStamp()+`"`)
+	versionPurge(w, r, s.assetStamp(), status)
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}

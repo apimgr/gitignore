@@ -1,13 +1,13 @@
-Subject: SSL Certificate Expiring - {app_name}
+Subject: {email_subject}
 ---
-SSL CERTIFICATE EXPIRING
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-The TLS certificate for {fqdn} expires in {expires_in} days.
+{email_expiry_warning}
 
-Expiry date: {expiry_date}
+{email_expiry_date_label}: {expiry_date}
 
 --
 {app_name}

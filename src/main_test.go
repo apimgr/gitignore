@@ -162,7 +162,18 @@ func TestSchedulerCLIReadAndToggleCommands(t *testing.T) {
 }
 
 func TestMainHelpAndVersionFlags(t *testing.T) {
-	for _, args := range [][]string{{"gitignore-test", "--help"}, {"gitignore-test", "--version"}} {
+	cases := []struct {
+		args     []string
+		contains string
+	}{
+		{args: []string{"gitignore-test", "--help"}, contains: "Usage:"},
+		{args: []string{"gitignore-test", "--lang", "es", "--help"}, contains: "Información:"},
+		{args: []string{"gitignore-test", "--version"}, contains: "OS/Arch:"},
+		{args: []string{"gitignore-test", "--lang", "es", "--version"}, contains: "Compilado:"},
+		{args: []string{"gitignore-test", "--lang", "unsupported", "--version"}, contains: "Built:"},
+	}
+	for _, testCase := range cases {
+		args := testCase.args
 		oldArgs, oldFlags := os.Args, flag.CommandLine
 		reader, writer, err := os.Pipe()
 		if err != nil {
@@ -182,11 +193,8 @@ func TestMainHelpAndVersionFlags(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if args[1] == "--help" && !strings.Contains(string(output), "Usage:") {
-			t.Fatalf("help output missing usage: %s", output)
-		}
-		if args[1] == "--version" && !strings.Contains(string(output), "OS/Arch:") {
-			t.Fatalf("version output missing platform: %s", output)
+		if !strings.Contains(string(output), testCase.contains) {
+			t.Fatalf("output for %v missing %q: %s", args, testCase.contains, output)
 		}
 	}
 }

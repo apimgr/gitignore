@@ -70,6 +70,74 @@ func TestPrivacyPageRendersNoJSCCPAFormAndPersistsChoice(t *testing.T) {
 	}
 }
 
+func TestHTMLBuildStampAndVersionPurge(t *testing.T) {
+	stamp := "1.2.3-abc1234"
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: "gitignore_build", Value: "old-build"})
+	response := httptest.NewRecorder()
+	versionPurge(response, request, stamp, http.StatusOK)
+	if got := response.Header().Get("Clear-Site-Data"); got != `"cache", "storage"` {
+		t.Fatalf("Clear-Site-Data = %q", got)
+	}
+	var buildCookie *http.Cookie
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == "gitignore_build" {
+			buildCookie = cookie
+		}
+	}
+	if buildCookie == nil || buildCookie.Value != stamp || buildCookie.Path != "/" || buildCookie.MaxAge != 31536000 || !buildCookie.Secure || buildCookie.HttpOnly || buildCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("build stamp cookie = %#v", buildCookie)
+	}
+	server := newTestPageServer()
+	page := httptest.NewRecorder()
+	server.renderPage(page, httptest.NewRequest(http.MethodGet, "/", nil), "home", PageData{Title: "Home"})
+	if page.Header().Get("ETag") != `"test-unknown"` {
+		t.Errorf("HTML ETag = %q", page.Header().Get("ETag"))
+	}
+	foundBuildCookie := false
+	for _, cookie := range page.Result().Cookies() {
+		if cookie.Name == "gitignore_build" && cookie.Value == "test-unknown" {
+			foundBuildCookie = true
+		}
+	}
+	if !foundBuildCookie {
+		t.Error("HTML page did not set its build-stamp cookie")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: "gitignore_build", Value: stamp})
+	response = httptest.NewRecorder()
+	versionPurge(response, request, stamp, http.StatusOK)
+	if response.Header().Get("Clear-Site-Data") != "" {
+		t.Fatal("matching build stamp triggered a purge")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		status int
+		fetch  bool
+	}{
+		{name: "head", method: http.MethodHead, status: http.StatusOK},
+		{name: "error", method: http.MethodGet, status: http.StatusNotFound},
+		{name: "iframe", method: http.MethodGet, status: http.StatusOK, fetch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, "/", nil)
+			req.AddCookie(&http.Cookie{Name: "gitignore_build", Value: "old-build"})
+			if tc.fetch {
+				req.Header.Set("Sec-Fetch-Dest", "iframe")
+				req.Header.Set("Sec-Fetch-Mode", "navigate")
+			}
+			rec := httptest.NewRecorder()
+			versionPurge(rec, req, stamp, tc.status)
+			if rec.Header().Get("Clear-Site-Data") != "" {
+				t.Fatal("non-document response triggered a purge")
+			}
+		})
+	}
+}
+
 func TestTermsPageUsesConfiguredOverrideAndSanitizesIt(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Branding.Content.Terms.Format = "html"
@@ -83,5 +151,88 @@ func TestTermsPageUsesConfiguredOverrideAndSanitizesIt(t *testing.T) {
 	body := recorder.Body.String()
 	if !strings.Contains(body, "Custom terms") || strings.Contains(body, "alert(1)") || strings.Contains(body, `href="/server/contact"`) {
 		t.Fatalf("configured terms were not safely rendered: %s", body)
+	}
+}
+
+func TestBuiltInPrivacyAndTermsContentUsesRequestLanguage(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := New(&Config{Version: "test", Cfg: cfg})
+
+	privacy := httptest.NewRecorder()
+	s.router.ServeHTTP(privacy, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))
+	if privacy.Code != http.StatusOK {
+		t.Fatalf("privacy page status = %d", privacy.Code)
+	}
+	privacyBody := privacy.Body.String()
+	for _, text := range []string{
+		"Solo recopilamos lo necesario para prestar nuestro servicio",
+		"Sus datos se utilizan únicamente para",
+		"Son necesarias para que el sitio funcione",
+		"Este mensaje se muestra de conformidad con la normativa RGPD",
+	} {
+		if !strings.Contains(privacyBody, text) {
+			t.Errorf("Spanish privacy page is missing %q", text)
+		}
+	}
+	if strings.Contains(privacyBody, "We collect only what is necessary") || strings.Contains(privacyBody, "Required for the site to function") {
+		t.Error("Spanish privacy page contains built-in English copy")
+	}
+
+	terms := httptest.NewRecorder()
+	s.router.ServeHTTP(terms, httptest.NewRequest(http.MethodGet, "/server/terms?lang=es", nil))
+	if terms.Code != http.StatusOK {
+		t.Fatalf("terms page status = %d", terms.Code)
+	}
+	termsBody := terms.Body.String()
+	if !strings.Contains(termsBody, "El uso de GitIgnore API implica la aceptación de estas condiciones") || strings.Contains(termsBody, "Using GitIgnore API means accepting these terms") {
+		t.Error("Spanish terms page did not use the translated built-in terms")
+	}
+
+	api := httptest.NewRecorder()
+	s.router.ServeHTTP(api, httptest.NewRequest(http.MethodGet, s.apiBasePath()+"/server/privacy?lang=es", nil))
+	if api.Code != http.StatusOK || !strings.Contains(api.Body.String(), "Sus datos se almacenan en nuestros servidores") || strings.Contains(api.Body.String(), "Your data is stored on our servers") {
+		t.Errorf("Spanish privacy API did not localize built-in content: status %d, body %s", api.Code, api.Body.String())
+	}
+}
+
+func TestCookieConsentPreservesOperatorCustomText(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Privacy.Consent.Message = "Operator consent copy."
+	cfg.Server.Privacy.Cookies.Essential.Description = "Operator essential-cookie copy."
+	s := New(&Config{Version: "test", Cfg: cfg})
+
+	page := httptest.NewRecorder()
+	s.router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("privacy page status = %d", page.Code)
+	}
+	body := page.Body.String()
+	if !strings.Contains(body, "Operator consent copy.") || !strings.Contains(body, "Operator essential-cookie copy.") {
+		t.Error("custom consent or cookie-category copy was not preserved")
+	}
+
+	cfg.Server.Privacy.Data.Sold = true
+	cfg.Server.Privacy.Consent.MessageIfSold = "Operator sold-data consent copy."
+	s.ReplaceConfig(cfg)
+	soldPage := httptest.NewRecorder()
+	s.router.ServeHTTP(soldPage, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))
+	if !strings.Contains(soldPage.Body.String(), "Operator sold-data consent copy.") {
+		t.Error("custom sold-data consent copy was not preserved")
+	}
+}
+
+func TestSoldPrivacyDefaultsUseLocalizedConsentAndUsage(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Privacy.Data.Sold = true
+	s := New(&Config{Version: "test", Cfg: cfg})
+
+	page := httptest.NewRecorder()
+	s.router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("privacy page status = %d", page.Code)
+	}
+	body := page.Body.String()
+	if !strings.Contains(body, "Sus datos pueden compartirse con terceros o venderse") || !strings.Contains(body, "sus datos pueden compartirse con terceros o venderse") {
+		t.Error("sold-data privacy defaults were not rendered in Spanish")
 	}
 }

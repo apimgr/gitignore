@@ -1,13 +1,13 @@
 {{define "content"}}
 <div class="container container-lg">
-<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/security"}}">{{t .Lang "security_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "security_page.thanks_title"}}</h1><p class="page-lead">{{t .Lang "security_page.thanks_description"}}</p></header>
+<header class="page-header"><nav class="breadcrumb" aria-label="{{t .Lang "a11y.breadcrumb"}}"><a href="{{path "/server/security"}}">{{t .Lang "security_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "security_page.thanks_title"}}</h1><p class="page-lead">{{t .Lang "security_page.thanks_description"}}</p></header>
 <section class="section-card" aria-labelledby="researcher-acknowledgments">
-<h2 id="researcher-acknowledgments">Acknowledgments</h2>
+<h2 id="researcher-acknowledgments">{{t .Lang "web.security_thanks.acknowledgments"}}</h2>
 {{if .Data.entries}}
-<div class="table-wrapper"><table class="data-table"><thead><tr><th scope="col">Researcher</th><th scope="col">Disclosure date</th><th scope="col">Severity</th></tr></thead><tbody>
+<div class="table-wrapper"><table class="data-table"><thead><tr><th scope="col">{{t .Lang "web.security_thanks.researcher"}}</th><th scope="col">{{t .Lang "web.security_thanks.disclosure_date"}}</th><th scope="col">{{t .Lang "web.security_thanks.severity"}}</th></tr></thead><tbody>
 {{range .Data.entries}}<tr><td>{{.Credit}}</td><td>{{.Date}}</td><td>{{.Severity}}</td></tr>{{end}}
 </tbody></table></div>
-{{else}}<div class="empty-state"><p>No acknowledgments are currently published.</p><a class="btn btn-secondary" href="{{path "/server/security/policy"}}">Read the disclosure policy</a></div>{{end}}
+{{else}}<div class="empty-state"><p>{{t .Lang "web.security_thanks.empty"}}</p><a class="btn btn-secondary" href="{{path "/server/security/policy"}}">{{t .Lang "web.security_thanks.read_policy"}}</a></div>{{end}}
 </section>
 </div>
 {{end}}

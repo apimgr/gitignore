@@ -75,6 +75,61 @@ func TestRunBackupRunRestoreRoundtrip(t *testing.T) {
 	}
 }
 
+func TestRunBackupUsesConfiguredEncryptionPassword(t *testing.T) {
+	configDir := t.TempDir()
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "server.yml"), []byte("server: {}\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile server.yml: %v", err)
+	}
+	dbDir := filepath.Join(dataDir, "db")
+	if err := os.MkdirAll(dbDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll db dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dbDir, "server.db"), []byte("backup contents"), 0o600); err != nil {
+		t.Fatalf("WriteFile server.db: %v", err)
+	}
+
+	password := "configured backup password"
+	cfg := config.DefaultConfig()
+	cfg.Server.Backup.EncryptionPassword = password
+	backupPath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if err := runBackup(cfg, configDir, dataDir, backupPath); err != nil {
+		t.Fatalf("runBackup with configured password: %v", err)
+	}
+	encryptedBackupPath := normalizeBackupExt(backupPath, true)
+	if filepath.Ext(encryptedBackupPath) != ".enc" {
+		t.Fatalf("normalized backup path = %q, want encrypted .enc extension", encryptedBackupPath)
+	}
+	if _, err := os.Stat(encryptedBackupPath); err != nil {
+		t.Fatalf("encrypted backup was not written at %q: %v", encryptedBackupPath, err)
+	}
+	archive, err := readBackupArchive(encryptedBackupPath, password)
+	if err != nil {
+		t.Fatalf("read encrypted backup: %v", err)
+	}
+	staging, err := extractToStaging(archive)
+	if err != nil {
+		t.Fatalf("extract encrypted backup: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	if _, err := loadAndVerifyManifest(staging); err != nil {
+		t.Fatalf("verify encrypted backup manifest: %v", err)
+	}
+}
+
+func TestRunBackupBlocksComplianceWithoutConfiguredPassword(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Compliance.Enabled = true
+	backupPath := filepath.Join(t.TempDir(), "backup.tar.gz")
+	err := runBackup(cfg, t.TempDir(), t.TempDir(), backupPath)
+	if err == nil {
+		t.Fatal("runBackup in compliance mode without password succeeded")
+	}
+	if _, statErr := os.Stat(backupPath); !os.IsNotExist(statErr) {
+		t.Fatalf("backup file exists after rejected backup: %v", statErr)
+	}
+}
+
 // runBackup with no config/database present must fail rather than write an
 // empty archive.
 func TestRunBackupNothingToBackUp(t *testing.T) {

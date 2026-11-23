@@ -1,14 +1,14 @@
-Subject: Security Alert - {app_name}
+Subject: {email_subject}
 ---
-SECURITY ALERT
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
 {event}
 
-Details:
-  Source IP: {ip}
+{email_details_label}:
+  {email_source_ip_label}: {ip}
   {details}
 
 ------------------------------------------------------------------------

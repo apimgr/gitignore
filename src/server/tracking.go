@@ -55,7 +55,7 @@ func (s *Server) consentView(r *http.Request, csrf string) ConsentView {
 	if _, valid := readConsent(r); valid {
 		return view
 	}
-	privacy := s.currentConfig().Server.Privacy
+	privacy := localizedPrivacyDefaults(r, s.currentConfig().Server.Privacy)
 	view.Show = true
 	view.DataSold = privacy.Data.Sold
 	view.Message = privacy.Consent.Message
@@ -83,7 +83,7 @@ func (s *Server) consentView(r *http.Request, csrf string) ConsentView {
 		view.ManageText = i18n.Translate(i18n.LangFromContext(r.Context()), "cookie_consent.manage_preferences")
 	}
 	if view.Message == "" {
-		view.Message = i18n.Translate(i18n.LangFromContext(r.Context()), "cookie_consent.message")
+		view.Message = i18n.T(r, "cookie_consent.message")
 	}
 	return view
 }
@@ -198,11 +198,11 @@ func (s *Server) handleTrackingJS(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 	if !validCSRFRequest(r) {
-		sendAPIResponseError(w, "CSRF_FAILED", "invalid request token")
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
+		http.Error(w, i18n.T(r, "errors.invalid_form"), http.StatusBadRequest)
 		return
 	}
 	choice := r.FormValue("choice")
@@ -215,12 +215,12 @@ func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 		state.Preferences = r.FormValue("consent_preferences") == "on"
 		state.Analytics = r.FormValue("consent_analytics") == "on"
 	default:
-		http.Error(w, "invalid consent choice", http.StatusBadRequest)
+		http.Error(w, i18n.T(r, "errors.invalid_consent_choice"), http.StatusBadRequest)
 		return
 	}
 	value, err := json.Marshal(state)
 	if err != nil {
-		http.Error(w, "unable to save consent", http.StatusInternalServerError)
+		http.Error(w, i18n.T(r, "errors.save_consent_failed"), http.StatusInternalServerError)
 		return
 	}
 	setPreferenceCookie(w, r, "cookie_consent", string(value), s)

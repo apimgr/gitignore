@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -17,7 +18,7 @@ func (s *Server) handleDebugRoutes(w http.ResponseWriter, r *http.Request) {
 		routes = append(routes, fmt.Sprintf("%s %s", method, route))
 		return nil
 	}); err != nil {
-		http.Error(w, "failed to enumerate routes", http.StatusInternalServerError)
+		http.Error(w, i18n.T(r, "errors.route_enumeration_failed"), http.StatusInternalServerError)
 		return
 	}
 

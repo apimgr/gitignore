@@ -29,7 +29,7 @@ func detectShell() string {
 // binary and returns the process exit code.
 func handleShell(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: --shell [completions|init|help] [SHELL]")
+		fmt.Fprintln(os.Stderr, cliText("cli.shell.usage"))
 		return 64
 	}
 
@@ -49,13 +49,13 @@ func handleShell(args []string) int {
 	case "init":
 		return printShellInit(shell, binaryName)
 	case "help", "--help":
-		fmt.Printf("Shell integration for %s:\n", binaryName)
-		fmt.Println("  --shell completions [SHELL]  Print shell completions")
-		fmt.Println("  --shell init [SHELL]         Print shell init command")
-		fmt.Println("  SHELL: bash, zsh, fish, sh, dash, ksh, powershell, pwsh (auto-detect if omitted)")
+		fmt.Printf("%s\n", cliText("cli.shell.help_header", "binary", binaryName))
+		fmt.Printf("  --shell completions [SHELL]  %s\n", cliText("cli.shell.completions"))
+		fmt.Printf("  --shell init [SHELL]         %s\n", cliText("cli.shell.init"))
+		fmt.Printf("  %s\n", cliText("cli.shell.supported_shells", "shells", "bash, zsh, fish, sh, dash, ksh, powershell, pwsh"))
 		return 0
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: --shell [completions|init|help] [SHELL]")
+		fmt.Fprintln(os.Stderr, cliText("cli.shell.usage"))
 		return 64
 	}
 }
@@ -73,7 +73,7 @@ func printShellCompletions(shell, binaryName string) int {
 	case "powershell", "pwsh":
 		fmt.Print(generateServerPowershellCompletions(binaryName))
 	default:
-		fmt.Fprintf(os.Stderr, "Error: unsupported shell: %s\n", shell)
+		fmt.Fprintln(os.Stderr, cliText("cli.error_unsupported_shell", "shell", shell))
 		return 64
 	}
 	return 0
@@ -92,21 +92,21 @@ func printShellInit(shell, binaryName string) int {
 	case "powershell", "pwsh":
 		fmt.Printf("Invoke-Expression (& %s --shell completions powershell)\n", binaryName)
 	default:
-		fmt.Fprintf(os.Stderr, "Error: unsupported shell: %s\n", shell)
+		fmt.Fprintln(os.Stderr, cliText("cli.error_unsupported_shell", "shell", shell))
 		return 64
 	}
 	return 0
 }
 
 func generateServerBashCompletions(bin string) string {
-	return fmt.Sprintf(`# Bash completion for %[1]s
+	return fmt.Sprintf(`# %[3]s
 _%[1]s_completions() {
 	local cur
 	cur="${COMP_WORDS[COMP_CWORD]}"
 	COMPREPLY=( $(compgen -W "%[2]s" -- "$cur") )
 }
 complete -F _%[1]s_completions %[1]s
-`, bin, joinServerWords(serverFlagWords))
+`, bin, joinServerWords(serverFlagWords), cliText("cli.shell.bash_comment", "binary", bin))
 }
 
 func generateServerZshCompletions(bin string) string {
@@ -133,7 +133,7 @@ func generateServerFishCompletions(bin string) string {
 }
 
 func generateServerPosixCompletions(bin string) string {
-	return fmt.Sprintf("# POSIX completion for %s is not standardized; supported flags: %s\n", bin, joinServerWords(serverFlagWords))
+	return fmt.Sprintf("# %s\n", cliText("cli.shell.posix_comment", "binary", bin, "flags", joinServerWords(serverFlagWords)))
 }
 
 func generateServerPowershellCompletions(bin string) string {

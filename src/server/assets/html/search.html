@@ -1,11 +1,11 @@
 {{define "content"}}
-<h1>Search Templates</h1>
+<h1>{{t .Lang "common.search"}}</h1>
 <form action="{{path "/search"}}" method="get">
-<input type="text" name="q" value="{{.Data.query}}" placeholder="Search templates…" aria-label="Search">
-<button type="submit">Search</button>
+<input type="text" name="q" value="{{.Data.query}}" placeholder="{{t .Lang "web.home.search_placeholder"}}" aria-label="{{t .Lang "common.search"}}">
+<button type="submit">{{t .Lang "common.search"}}</button>
 </form>
 {{if .Data.query}}
-<p>{{len .Data.results}} result(s) for "{{.Data.query}}":</p>
+<p>{{tf .Lang "web.search.results" "count" (len .Data.results) "query" .Data.query}}</p>
 <ul class="templates">
 {{range .Data.results}}<li><a href="{{path (printf "/template/%s" .Name)}}">{{.Name}}</a></li>{{end}}
 </ul>

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/mattn/go-isatty"
 )
 
@@ -43,10 +44,15 @@ func ResolveColor(flagValue string) bool {
 
 // Printer wraps stdout/stderr writes with optional ANSI color.
 type Printer struct {
-	Color bool
+	Color    bool
+	Language string
 }
 
 func New(color bool) *Printer { return &Printer{Color: color} }
+
+func (p *Printer) SetLanguage(lang string) {
+	p.Language = i18n.ResolveCLILang(lang, "")
+}
 
 func (p *Printer) colorize(code, s string) string {
 	if !p.Color {
@@ -72,12 +78,22 @@ func (p *Printer) Cyan(s string) string { return p.colorize("\x1b[36m", s) }
 
 // Error prints a formatted error to stderr as "Error: {msg}".
 func (p *Printer) Error(format string, args ...interface{}) {
-	fmt.Fprintln(os.Stderr, p.Red("Error: ")+fmt.Sprintf(format, args...))
+	p.ErrorText(fmt.Sprintf(format, args...))
+}
+
+func (p *Printer) ErrorText(message string) {
+	prefix := i18n.Translate(p.Language, "cli.client.error_prefix")
+	fmt.Fprintln(os.Stderr, p.Red(prefix)+" "+message)
 }
 
 // Warn prints a formatted warning to stderr.
 func (p *Printer) Warn(format string, args ...interface{}) {
-	fmt.Fprintln(os.Stderr, p.Yellow("Warning: ")+fmt.Sprintf(format, args...))
+	p.WarnText(fmt.Sprintf(format, args...))
+}
+
+func (p *Printer) WarnText(message string) {
+	prefix := i18n.Translate(p.Language, "cli.client.warning_prefix")
+	fmt.Fprintln(os.Stderr, p.Yellow(prefix)+" "+message)
 }
 
 // FormatTable renders rows as a simple aligned, box-drawn table.

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -44,42 +45,42 @@ type mcpToolCall struct {
 
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	if !s.validMCPOrigin(r) {
-		s.writeMCPError(w, nil, -32003, "request origin is not allowed", http.StatusForbidden)
+		s.writeMCPError(w, r, nil, -32003, "mcp.errors.origin_forbidden", http.StatusForbidden)
 		return
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		sendAPIResponseError(w, "METHOD_NOT_ALLOWED", "MCP endpoint accepts POST requests only")
+		sendAPIResponseError(w, "METHOD_NOT_ALLOWED", i18n.T(r, "mcp.errors.post_only"))
 		return
 	}
 	rawToken, ok := parseBearerHeader(r.Header.Get("Authorization"))
 	if !ok {
-		s.writeMCPUnauthorized(w, nil)
+		s.writeMCPUnauthorized(w, r, nil)
 		return
 	}
 	if _, err := s.AuthenticateBearerToken(rawToken); err != nil {
-		s.writeMCPUnauthorized(w, nil)
+		s.writeMCPUnauthorized(w, r, nil)
 		return
 	}
 	if !strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
-		s.writeMCPError(w, nil, -32600, "MCP requests must use application/json", http.StatusBadRequest)
+		s.writeMCPError(w, r, nil, -32600, "mcp.errors.content_type", http.StatusBadRequest)
 		return
 	}
 	accept := r.Header.Get("Accept")
 	if !strings.Contains(accept, "application/json") && !strings.Contains(accept, "text/event-stream") {
-		s.writeMCPError(w, nil, -32600, "MCP clients must accept application/json or text/event-stream", http.StatusBadRequest)
+		s.writeMCPError(w, r, nil, -32600, "mcp.errors.accept_header", http.StatusBadRequest)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var message mcpMessage
 	if err := json.NewDecoder(r.Body).Decode(&message); err != nil || message.JSONRPC != "2.0" || message.Method == "" {
-		s.writeMCPError(w, nil, -32700, "invalid JSON-RPC request", http.StatusBadRequest)
+		s.writeMCPError(w, r, nil, -32700, "mcp.errors.invalid_jsonrpc", http.StatusBadRequest)
 		return
 	}
 	params := map[string]json.RawMessage{}
 	if len(message.Params) != 0 {
 		if err := json.Unmarshal(message.Params, &params); err != nil {
-			s.writeMCPError(w, message.ID, -32600, "invalid request params", http.StatusBadRequest)
+			s.writeMCPError(w, r, message.ID, -32600, "mcp.errors.invalid_params", http.StatusBadRequest)
 			return
 		}
 	}
@@ -93,21 +94,21 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if meta == nil {
 			meta = paramsMeta
 		} else if paramsMeta["io.modelcontextprotocol/protocolVersion"] != meta["io.modelcontextprotocol/protocolVersion"] {
-			s.writeMCPError(w, message.ID, -32020, "HeaderMismatch: conflicting protocol metadata", http.StatusBadRequest)
+			s.writeMCPError(w, r, message.ID, -32020, "mcp.errors.metadata_conflict", http.StatusBadRequest)
 			return
 		}
 	}
 	version := r.Header.Get("MCP-Protocol-Version")
 	if message.Method == "initialize" && len(meta) == 0 || version != mcpProtocolVersion {
-		s.writeMCPError(w, message.ID, -32000, "UnsupportedProtocolVersionError: supported version is "+mcpProtocolVersion, http.StatusBadRequest)
+		s.writeMCPError(w, r, message.ID, -32000, "mcp.errors.unsupported_version", http.StatusBadRequest, "version", mcpProtocolVersion)
 		return
 	}
 	if meta["io.modelcontextprotocol/protocolVersion"] != version {
-		s.writeMCPError(w, message.ID, -32020, "HeaderMismatch: MCP-Protocol-Version does not match request metadata", http.StatusBadRequest)
+		s.writeMCPError(w, r, message.ID, -32020, "mcp.errors.protocol_version_mismatch", http.StatusBadRequest)
 		return
 	}
 	if r.Header.Get("Mcp-Method") != message.Method {
-		s.writeMCPError(w, message.ID, -32020, "HeaderMismatch: Mcp-Method does not match request method", http.StatusBadRequest)
+		s.writeMCPError(w, r, message.ID, -32020, "mcp.errors.method_header_mismatch", http.StatusBadRequest)
 		return
 	}
 	if message.Method == "tools/call" || message.Method == "resources/read" || message.Method == "prompts/get" {
@@ -123,12 +124,12 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		got, decodeErr := decodeMCPName(r.Header.Get("Mcp-Name"))
 		if decodeErr != nil || want == "" || got != want {
-			s.writeMCPError(w, message.ID, -32020, "HeaderMismatch: Mcp-Name does not match request name", http.StatusBadRequest)
+			s.writeMCPError(w, r, message.ID, -32020, "mcp.errors.name_header_mismatch", http.StatusBadRequest)
 			return
 		}
 	}
 	if !mcpMethodKnown(message.Method) {
-		s.writeMCPError(w, message.ID, -32601, "Method not found", http.StatusNotFound)
+		s.writeMCPError(w, r, message.ID, -32601, "mcp.errors.method_not_found", http.StatusNotFound)
 		return
 	}
 	result, rpcError := s.dispatchMCP(r, message)
@@ -144,7 +145,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
-		s.writeMCPError(w, message.ID, -32603, "internal error", http.StatusInternalServerError)
+		s.writeMCPError(w, r, message.ID, -32603, "mcp.errors.internal_error", http.StatusInternalServerError)
 		return
 	}
 	if strings.Contains(accept, "text/event-stream") && !strings.Contains(accept, "application/json") {
@@ -181,9 +182,9 @@ func mcpMethodKnown(method string) bool {
 	}
 }
 
-func (s *Server) writeMCPUnauthorized(w http.ResponseWriter, id interface{}) {
+func (s *Server) writeMCPUnauthorized(w http.ResponseWriter, r *http.Request, id interface{}) {
 	w.Header().Set("WWW-Authenticate", `Bearer`)
-	s.writeMCPError(w, id, -32001, "Unauthorized", http.StatusUnauthorized)
+	s.writeMCPError(w, r, id, -32001, "mcp.errors.unauthorized", http.StatusUnauthorized)
 }
 
 func (s *Server) dispatchMCP(r *http.Request, message mcpMessage) (interface{}, map[string]interface{}) {
@@ -193,7 +194,7 @@ func (s *Server) dispatchMCP(r *http.Request, message mcpMessage) (interface{}, 
 			ProtocolVersion string `json:"protocolVersion"`
 		}
 		if err := json.Unmarshal(message.Params, &params); err != nil || params.ProtocolVersion != mcpProtocolVersion {
-			return nil, map[string]interface{}{"code": -32000, "message": "UnsupportedProtocolVersionError: supported version is " + mcpProtocolVersion}
+			return nil, translatedMCPError(r, -32000, "mcp.errors.unsupported_version", "version", mcpProtocolVersion)
 		}
 		return map[string]interface{}{
 			"protocolVersion": mcpProtocolVersion,
@@ -203,21 +204,21 @@ func (s *Server) dispatchMCP(r *http.Request, message mcpMessage) (interface{}, 
 	case "ping":
 		return map[string]interface{}{}, nil
 	case "tools/list":
-		return map[string]interface{}{"tools": s.mcpTools()}, nil
+		return map[string]interface{}{"tools": s.mcpToolsForRequest(r)}, nil
 	case "tools/call":
 		var call mcpToolCall
 		if err := json.Unmarshal(message.Params, &call); err != nil {
-			return nil, map[string]interface{}{"code": -32602, "message": "invalid tool arguments"}
+			return nil, translatedMCPError(r, -32602, "mcp.errors.invalid_tool_arguments")
 		}
 		return s.callMCPTool(r, call)
 	default:
-		return nil, map[string]interface{}{"code": -32601, "message": "method not found"}
+		return nil, translatedMCPError(r, -32601, "mcp.errors.method_not_found")
 	}
 }
 
-func (s *Server) mcpTools() []mcpTool {
+func (s *Server) mcpToolsForRequest(r *http.Request) []mcpTool {
 	tools := make([]mcpTool, 0)
-	spec := s.openAPISpec(httptest.NewRequest(http.MethodGet, "/", nil))
+	spec := s.openAPISpec(r)
 	specPaths, _ := spec["paths"].(map[string]interface{})
 	err := chi.Walk(s.router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if method != http.MethodGet || !strings.HasPrefix(route, s.apiBasePath()+"/") || strings.Contains(route, "/server/mcp") {
@@ -292,20 +293,20 @@ func mcpOperationID(route string) string {
 
 func (s *Server) callMCPTool(r *http.Request, call mcpToolCall) (interface{}, map[string]interface{}) {
 	var tool *mcpTool
-	for _, candidate := range s.mcpTools() {
+	for _, candidate := range s.mcpToolsForRequest(r) {
 		if candidate.Name == call.Name {
 			tool = &candidate
 			break
 		}
 	}
 	if tool == nil {
-		return nil, map[string]interface{}{"code": -32602, "message": "unknown tool"}
+		return nil, translatedMCPError(r, -32602, "mcp.errors.unknown_tool")
 	}
 	path := tool.Path
 	for _, parameter := range tool.PathParams {
 		value, ok := call.Arguments[parameter].(string)
 		if !ok || value == "" || strings.Contains(value, "/") || value == "." || value == ".." {
-			return nil, map[string]interface{}{"code": -32602, "message": "invalid path argument"}
+			return nil, translatedMCPError(r, -32602, "mcp.errors.invalid_path_argument")
 		}
 		path = strings.Replace(path, "{"+parameter+"}", url.PathEscape(value), 1)
 	}
@@ -323,13 +324,13 @@ func (s *Server) callMCPTool(r *http.Request, call mcpToolCall) (interface{}, ma
 			case float64, bool:
 				query.Set(parameter, fmt.Sprint(value))
 			default:
-				return nil, map[string]interface{}{"code": -32602, "message": "query values must be scalar"}
+				return nil, translatedMCPError(r, -32602, "mcp.errors.query_values_scalar")
 			}
 		}
 	}
 	for key := range call.Arguments {
 		if !allowedArguments[key] {
-			return nil, map[string]interface{}{"code": -32602, "message": "unknown tool argument"}
+			return nil, translatedMCPError(r, -32602, "mcp.errors.unknown_tool_argument")
 		}
 	}
 	if encoded := query.Encode(); encoded != "" {
@@ -390,8 +391,16 @@ func (s *Server) validMCPOrigin(r *http.Request) bool {
 	return s.hasLearnedOrigin(origin, time.Now())
 }
 
-func (s *Server) writeMCPError(w http.ResponseWriter, id interface{}, code int, message string, status int) {
+func translatedMCPError(r *http.Request, code int, key string, args ...interface{}) map[string]interface{} {
+	message := i18n.T(r, key)
+	if len(args) > 0 {
+		message = i18n.TF(r, key, args...)
+	}
+	return map[string]interface{}{"code": code, "message": message}
+}
+
+func (s *Server) writeMCPError(w http.ResponseWriter, r *http.Request, id interface{}, code int, key string, status int, args ...interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": id, "error": map[string]interface{}{"code": code, "message": message}})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": id, "error": translatedMCPError(r, code, key, args...)})
 }

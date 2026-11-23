@@ -11,6 +11,7 @@ import (
 	"time"
 
 	displayformat "github.com/apimgr/gitignore/src/common/format"
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/email"
 	"github.com/apimgr/gitignore/src/server"
@@ -114,6 +115,10 @@ func templateDir(configDir string) string {
 	return filepath.Join(configDir, "template", "email")
 }
 
+func emailText(lang, key string, values ...interface{}) string {
+	return i18n.TranslateFormat(lang, "cli.email."+key, values...)
+}
+
 // notifyRecipient resolves the operator recipient address: the configured admin
 // email, then the Reply-To address, then the From address.
 func notifyRecipient(cfg *config.Config, sender *email.Sender) string {
@@ -142,26 +147,26 @@ func initEmail(cfg *config.Config, configDir, dataDir string, i2pStatus func() s
 			e.SMTP.Host = host
 			e.SMTP.Port = port
 			e.Enabled = true
-			fmt.Printf("SMTP: detected %s:%d\n", host, port)
+			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_detected", "host", host, "port", e.SMTP.Port))
 			// Persist the detected host so future startups skip detection.
 			if err := config.Update(func(c *config.Config) {
 				c.Server.Notifications.Email.SMTP.Host = host
 				c.Server.Notifications.Email.SMTP.Port = port
 			}); err != nil {
-				fmt.Printf("SMTP: failed to persist detected host: %v\n", err)
+				fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_persist_failed", "error", err))
 			}
 		} else {
 			e.Enabled = false
-			fmt.Println("SMTP: no local server detected (email disabled)")
+			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_not_detected"))
 		}
 	} else {
 		// Test the configured connection.
 		if err := email.TestConnection(e.SMTP.Host, e.SMTP.Port, e.SMTP.TLS); err != nil {
 			e.Enabled = false
-			fmt.Printf("SMTP: connection to %s:%d failed: %v (email disabled)\n", e.SMTP.Host, e.SMTP.Port, err)
+			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_connection_failed", "host", e.SMTP.Host, "port", e.SMTP.Port, "error", err))
 		} else {
 			e.Enabled = true
-			fmt.Printf("SMTP: connected to %s:%d\n", e.SMTP.Host, e.SMTP.Port)
+			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_connected", "host", e.SMTP.Host, "port", e.SMTP.Port))
 		}
 	}
 
@@ -235,13 +240,13 @@ func (n *emailNotifier) emit(template string, enabled bool, extra map[string]str
 	for k, v := range extra {
 		vars[k] = v
 	}
-	subject, body, err := n.renderer.Render(template, vars)
+	subject, body, err := n.renderer.RenderLocalized(template, n.cfg.Server.I18n.DefaultLanguage, vars)
 	if err != nil {
-		fmt.Printf("email: render %q failed: %v\n", template, err)
+		fmt.Println(emailText(n.cfg.Server.I18n.DefaultLanguage, "render_failed", "template", template, "error", err))
 		return
 	}
 	if err := n.sender.Send(n.recipient, subject, body); err != nil {
-		fmt.Printf("email: send %q failed: %v\n", template, err)
+		fmt.Println(emailText(n.cfg.Server.I18n.DefaultLanguage, "send_failed", "template", template, "error", err))
 	}
 }
 
@@ -329,6 +334,7 @@ func emitSchedulerError(taskID, taskName, errMsg, nextRun string) {
 // `email test [recipient]`, `email status`, and `email validate`.
 func handleEmailCommand(args []string, cfg *config.Config, configDir string) {
 	config.ApplySMTPEnv(cfg)
+	lang := outputLanguage
 	sub := ""
 	if len(args) > 0 {
 		sub = args[0]
@@ -340,28 +346,28 @@ func handleEmailCommand(args []string, cfg *config.Config, configDir string) {
 	switch sub {
 	case "status":
 		if strings.TrimSpace(e.SMTP.Host) == "" {
-			fmt.Println("Email: disabled (no SMTP host configured; auto-detected at server start)")
+			fmt.Println(emailText(lang, "disabled_no_host"))
 			return
 		}
-		fmt.Printf("SMTP Host: %s:%d\n", e.SMTP.Host, e.SMTP.Port)
-		fmt.Printf("TLS Mode:  %s\n", nonEmpty(e.SMTP.TLS, "auto"))
-		fmt.Printf("From:      %s <%s>\n", sender.FromName, sender.FromEmail)
+		fmt.Println(emailText(lang, "host_label", "host", e.SMTP.Host, "port", e.SMTP.Port))
+		fmt.Println(emailText(lang, "tls_mode_label", "mode", nonEmpty(e.SMTP.TLS, "auto")))
+		fmt.Println(emailText(lang, "from_label", "name", sender.FromName, "email", sender.FromEmail))
 		if err := email.TestConnection(e.SMTP.Host, e.SMTP.Port, e.SMTP.TLS); err != nil {
-			fmt.Printf("Status:    UNREACHABLE (%v)\n", err)
+			fmt.Println(emailText(lang, "unreachable", "error", err))
 			os.Exit(exUnavailable)
 		}
-		fmt.Println("Status:    reachable")
+		fmt.Println(emailText(lang, "reachable"))
 
 	case "validate":
 		if err := email.ValidateAll(renderer); err != nil {
-			fmt.Printf("Template validation failed: %v\n", err)
+			fmt.Println(emailText(lang, "template_validation_failed", "error", err))
 			os.Exit(exConfig)
 		}
-		fmt.Printf("All %d email templates are valid.\n", len(email.TemplateNames))
+		fmt.Println(emailText(lang, "templates_valid", "count", len(email.TemplateNames)))
 
 	case "test":
 		if !sender.CanSend() {
-			fmt.Println("Cannot send test email: no SMTP host configured.")
+			fmt.Println(emailText(lang, "cannot_send_test"))
 			os.Exit(exConfig)
 		}
 		recipient := e.ReplyTo
@@ -372,25 +378,25 @@ func handleEmailCommand(args []string, cfg *config.Config, configDir string) {
 			recipient = cfg.Server.Admin.Email
 		}
 		if recipient == "" {
-			fmt.Println("Usage: gitignore email test <recipient>")
+			fmt.Println(emailText(lang, "test_usage", "binary", projectName))
 			os.Exit(exUsage)
 		}
 		n := &emailNotifier{sender: sender, renderer: renderer, cfg: cfg, dataDir: ""}
 		vars := n.globals()
-		subject, body, err := renderer.Render("test", vars)
+		subject, body, err := renderer.RenderLocalized("test", lang, vars)
 		if err != nil {
-			fmt.Printf("Failed to render test template: %v\n", err)
+			fmt.Println(emailText(lang, "render_test_failed", "error", err))
 			os.Exit(exConfig)
 		}
-		subject = "[TEST] " + subject
+		subject = i18n.Translate(lang, "email.test_prefix") + " " + subject
 		if err := sender.Send(recipient, subject, body); err != nil {
-			fmt.Printf("Failed to send test email: %v\n", err)
+			fmt.Println(emailText(lang, "send_test_failed", "error", err))
 			os.Exit(exUnavailable)
 		}
-		fmt.Printf("Test email sent to %s (subject: %q)\n", recipient, subject)
+		fmt.Println(emailText(lang, "test_sent", "recipient", recipient, "subject", subject))
 
 	default:
-		fmt.Println("Email commands: test [recipient], status, validate")
+		fmt.Println(emailText(lang, "commands_help"))
 		os.Exit(exUsage)
 	}
 }

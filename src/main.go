@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/netip"
@@ -46,6 +47,18 @@ var (
 )
 
 const projectName = "gitignore"
+
+var outputLanguage = i18n.DefaultLang
+
+func cliText(key string, values ...interface{}) string {
+	return i18n.TranslateFormat(outputLanguage, key, values...)
+}
+
+func setOutputLanguage(flagLanguage, configLanguage string) {
+	outputLanguage = i18n.ResolveCLILang(flagLanguage, configLanguage)
+	service.SetLanguage(outputLanguage)
+	config.SetLanguage(outputLanguage)
+}
 
 func resolveSecurityDataDir(value, dataDir string) string {
 	value = strings.TrimSpace(value)
@@ -141,6 +154,7 @@ func main() {
 	// output (AI.md PART 8). Internal identifiers (service unit, config paths,
 	// User-Agent) keep the hardcoded projectName instead.
 	binaryName := filepath.Base(os.Args[0])
+	flag.CommandLine = flag.NewFlagSet(binaryName, flag.ContinueOnError)
 
 	// Flags
 	port := flag.String("port", "", "Server port (overrides config)")
@@ -187,8 +201,15 @@ func main() {
 	daemonFlag := flag.Bool("daemon", false, "Run as daemon (detach from terminal)")
 	langFlag := flag.String("lang", "", "Language for output (default: auto, from LANG env)")
 	shellCmd := flag.String("shell", "", "Shell integration: completions, init, help [SHELL]")
+	flag.Usage = func() { printHelp(binaryName) }
+	flag.CommandLine.SetOutput(io.Discard)
 
-	flag.Parse()
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		setOutputLanguage(*langFlag, "")
+		fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_command_line"))
+		os.Exit(2)
+	}
+	setOutputLanguage(*langFlag, "")
 
 	if *showHelp {
 		printHelp(binaryName)
@@ -196,8 +217,11 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Printf("%s %s\nBuilt: %s\nGo: %s\nOS/Arch: %s/%s\n",
-			binaryName, Version, BuildDate, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("%s\n%s\n%s\n%s\n",
+			cliText("version.name_version", "project_name", binaryName, "project_version", Version),
+			cliText("version.built", "build_date", BuildDate),
+			cliText("version.go", "go_version", runtime.Version()),
+			cliText("version.os_arch", "goos", runtime.GOOS, "goarch", runtime.GOARCH))
 		return
 	}
 
@@ -207,15 +231,6 @@ func main() {
 		os.Exit(handleShell(append([]string{*shellCmd}, flag.Args()...)))
 	}
 
-	// --lang sets the output locale (AI.md PART 8). Server terminal output is not
-	// yet routed through i18n, so this only exports LANG for locale-aware
-	// downstream code and the client; documented as a partial in AUDIT.AI.md.
-	if *langFlag != "" {
-		if err := os.Setenv("LANG", *langFlag); err != nil {
-			log.Printf("Warning: failed to set locale: %v", err)
-		}
-	}
-
 	colorEnabled := resolveColor(*colorFlag)
 
 	if *debugFlag {
@@ -223,7 +238,7 @@ func main() {
 		// force development mode (mode and debug are tracked independently)
 		mode.SetDebug(true)
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
-		log.Println("Debug mode enabled")
+		log.Println(cliText("cli.main.debug_enabled"))
 	}
 
 	// Resolve config directory (flag > CONFIG_DIR env > OS default).
@@ -240,7 +255,7 @@ func main() {
 	if *dataDirFlag != "" {
 		dataDir = *dataDirFlag
 		if err := os.Setenv("DATA_DIR", dataDir); err != nil {
-			log.Printf("Failed to set data directory: %v", err)
+			log.Printf("%s", cliText("cli.main.set_data_directory_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	} else if v := os.Getenv("DATA_DIR"); v != "" {
@@ -252,7 +267,7 @@ func main() {
 	if *logDirFlag != "" {
 		logsDir = *logDirFlag
 		if err := os.Setenv("LOG_DIR", logsDir); err != nil {
-			log.Printf("Failed to set log directory: %v", err)
+			log.Printf("%s", cliText("cli.main.set_log_directory_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	} else if v := os.Getenv("LOG_DIR"); v != "" {
@@ -263,13 +278,13 @@ func main() {
 	// GetBackupDir resolve the override wherever they are called.
 	if *cacheDirFlag != "" {
 		if err := os.Setenv("CACHE_DIR", *cacheDirFlag); err != nil {
-			log.Printf("Failed to set cache directory: %v", err)
+			log.Printf("%s", cliText("cli.main.set_cache_directory_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	}
 	if *backupDirFlag != "" {
 		if err := os.Setenv("BACKUP_DIR", *backupDirFlag); err != nil {
-			log.Printf("Failed to set backup directory: %v", err)
+			log.Printf("%s", cliText("cli.main.set_backup_directory_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	}
@@ -284,7 +299,7 @@ func main() {
 	// (AI.md PART 8 "Directory Validation Rules"): 0755 root / 0700 user.
 	for _, d := range []string{configDir, dataDir, logsDir, apppath.GetCacheDir(), apppath.GetBackupDir()} {
 		if err := ensureRuntimeDir(d); err != nil {
-			log.Printf("Warning: failed to create directory %s: %v", d, err)
+			log.Printf("%s", cliText("cli.main.create_directory_warning", "path", d, "error", err))
 		}
 	}
 
@@ -293,9 +308,10 @@ func main() {
 	config.SetAuditLogDir(logsDir)
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Printf("Warning: failed to load config: %v, using defaults", err)
+		log.Printf("%s", cliText("cli.main.load_config_warning", "error", err))
 		cfg = config.DefaultConfig()
 	}
+	setOutputLanguage(*langFlag, cfg.Server.I18n.DefaultLanguage)
 	flag.Visit(func(parsed *flag.Flag) {
 		if parsed.Name == "i2p" {
 			cfg.Server.I2P.Enabled = *i2pFlag
@@ -318,13 +334,13 @@ func main() {
 		}
 		checkPort = strings.Split(checkPort, ",")[0]
 		if err := checkHealth(checkPort, cfg.Server.BaseURL); err != nil {
-			fmt.Fprintf(os.Stderr, "Health check failed: %v\n", err)
+			fmt.Fprintln(os.Stderr, cliText("cli.main.health_check_failed", "error", err))
 			os.Exit(1)
 		}
-		fmt.Println("OK")
+		fmt.Println(cliText("cli.main.health_check_ok"))
 		if addr := tor.ReadHostname(dataDir); addr != "" {
-			fmt.Println("Tor Hidden Service: Connected")
-			fmt.Printf("  Address: %s\n", addr)
+			fmt.Println(cliText("cli.main.tor_hidden_service_connected"))
+			fmt.Printf("  %s\n", cliText("cli.main.address", "address", addr))
 		}
 		os.Exit(0)
 	}
@@ -333,14 +349,14 @@ func main() {
 	if *modeFlag != "" {
 		resolved := resolveMode(*modeFlag)
 		if resolved == "" {
-			fmt.Fprintf(os.Stderr, "Invalid mode: %s\nValid: production, development (aliases: prod, dev)\n", *modeFlag)
+			fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_mode", "mode", *modeFlag))
 			os.Exit(2)
 		}
 		if err := config.Update(func(c *config.Config) { c.Server.Mode = resolved }); err != nil {
-			log.Printf("Failed to save config: %v", err)
+			log.Printf("%s", cliText("cli.main.save_config_failed", "error", err))
 			os.Exit(exConfig)
 		}
-		fmt.Printf("Application mode set to: %s\n", resolved)
+		fmt.Println(cliText("cli.main.mode_set", "mode", resolved))
 		return
 	}
 
@@ -391,7 +407,7 @@ func main() {
 	if *daemonFlag || cfg.Server.Daemonize {
 		isParent, derr := daemonize()
 		if derr != nil {
-			log.Printf("Failed to daemonize: %v", derr)
+			log.Printf("%s", cliText("cli.main.daemonize_failed", "error", derr))
 			os.Exit(exOSErr)
 		}
 		if isParent {
@@ -405,7 +421,7 @@ func main() {
 		URL:    cfg.Server.Database.URL,
 		Token:  cfg.Server.Database.Token,
 	}); err != nil {
-		log.Printf("Failed to initialize database: %v", err)
+		log.Printf("%s", cliText("cli.main.initialize_database_failed", "error", err))
 		os.Exit(exUnavailable)
 	}
 	defer func() { _ = db.Close() }()
@@ -440,7 +456,7 @@ func main() {
 	// already folded in above), debug from DEBUG env var, then --debug
 	// CLI flag always wins last (already applied above via SetDebug).
 	if err := mode.Set(cfg.Server.Mode); err != nil {
-		log.Printf("Warning: invalid mode %q, defaulting to production: %v", cfg.Server.Mode, err)
+		log.Printf("%s", cliText("cli.main.invalid_config_mode", "mode", cfg.Server.Mode, "error", err))
 	}
 	mode.InitDebug()
 	if *debugFlag {
@@ -449,13 +465,13 @@ func main() {
 	devMode := mode.IsAppModeDev()
 
 	// ── Load templates ───────────────────────────────────────────────────────
-	log.Println("Loading .gitignore templates...")
+	log.Println(cliText("cli.main.loading_templates"))
 	templateMgr, err := template.New()
 	if err != nil {
-		log.Printf("Failed to load templates: %v", err)
+		log.Printf("%s", cliText("cli.main.load_templates_failed", "error", err))
 		os.Exit(exOSFile)
 	}
-	log.Printf("Loaded %d templates", templateMgr.Count())
+	log.Printf("%s", cliText("cli.main.templates_loaded", "count", templateMgr.Count()))
 
 	// ── Signal handling ──────────────────────────────────────────────────────
 	// Platform-dependent subscription (AI.md PART 8): SIGTERM/SIGINT/SIGQUIT and
@@ -475,7 +491,7 @@ func main() {
 	// Stale-aware; skipped entirely inside containers (AI.md PART 8 "PID File
 	// Handling"). A live prior instance is fatal.
 	if err := writePIDFile(pidFile); err != nil {
-		log.Printf("%v", err)
+		log.Printf("%s", cliText("cli.main.write_pid_file_failed", "error", err))
 		os.Exit(exOSErr)
 	}
 
@@ -490,7 +506,7 @@ func main() {
 	if cfg.Server.Security.Blocklists.Enabled {
 		blocklistMatcher = blocklist.NewMatcher(securityDir, blocklistCfg.ExtraSources)
 		if err := blocklistMatcher.Reload(time.Now().UTC()); err != nil {
-			log.Printf("blocklist_load: %v", err)
+			log.Printf("%s", cliText("cli.main.blocklist_load_failed", "error", err))
 		}
 	}
 	var srv *server.Server
@@ -530,24 +546,24 @@ func main() {
 		},
 		Apply: func(next *config.Config, changes config.ConfigChanges) error {
 			if srv == nil {
-				return fmt.Errorf("server is not ready")
+				return fmt.Errorf("%s", cliText("cli.main.server_not_ready"))
 			}
 			srv.ReplaceConfig(next)
 			if len(changes.GracefulReload) > 0 {
 				reopenLogs()
 			}
 			if len(changes.HotReload) > 0 || len(changes.GracefulReload) > 0 {
-				log.Printf("Configuration reloaded: %s", strings.Join(append(changes.HotReload, changes.GracefulReload...), ", "))
+				log.Printf("%s", cliText("cli.main.configuration_reloaded", "changes", strings.Join(append(changes.HotReload, changes.GracefulReload...), ", ")))
 			}
 			if len(changes.RestartRequired) > 0 {
-				log.Printf("Configuration changes require restart: %s", strings.Join(changes.RestartRequired, ", "))
+				log.Printf("%s", cliText("cli.main.configuration_restart_required", "changes", strings.Join(changes.RestartRequired, ", ")))
 			}
 			return nil
 		},
-		OnError: func(error) { log.Printf("Configuration reload failed; retaining the last good configuration") },
+		OnError: func(error) { log.Println(cliText("cli.main.configuration_reload_failed")) },
 	})
 	if managerErr != nil {
-		log.Printf("Configuration watcher unavailable: %v", managerErr)
+		log.Printf("%s", cliText("cli.main.configuration_watcher_unavailable", "error", managerErr))
 	}
 	webhookDispatcher := notify.NewDispatcher(notify.Options{
 		UserAgent: projectName + "/" + Version,
@@ -573,13 +589,13 @@ func main() {
 		WebhookDispatcher: webhookDispatcher,
 		SendContact: func(to, subject, body string) error {
 			if notifier == nil || notifier.sender == nil || !notifier.sender.CanSend() {
-				return fmt.Errorf("email delivery is not configured")
+				return fmt.Errorf("%s", cliText("cli.main.email_delivery_not_configured"))
 			}
 			return notifier.sender.Send(to, subject, body)
 		},
 		SendContactReply: func(to, replyTo, subject, body string) error {
 			if notifier == nil || notifier.sender == nil || !notifier.sender.CanSend() {
-				return fmt.Errorf("email delivery is not configured")
+				return fmt.Errorf("%s", cliText("cli.main.email_delivery_not_configured"))
 			}
 			return notifier.sender.SendWithReplyTo(to, replyTo, subject, body)
 		},
@@ -588,10 +604,10 @@ func main() {
 		cfgManager.Start(context.Background())
 	}
 
-	log.Printf("gitignore %s (commit: %s, built: %s)", Version, CommitID, BuildDate)
-	log.Printf("Listening on %s:%d", serverAddress, portNum)
+	log.Printf("%s", cliText("cli.main.server_version", "version", Version, "commit", CommitID, "build_date", BuildDate))
+	log.Printf("%s", cliText("cli.main.listening", "address", serverAddress, "port", portNum))
 	if devMode {
-		log.Println("Development mode enabled")
+		log.Println(cliText("cli.main.development_mode_enabled"))
 	}
 
 	errChan := make(chan error, 1)
@@ -617,11 +633,11 @@ func main() {
 	// cadence. These bootstrap updates never block the HTTP listener.
 	go func() {
 		if _, err := blocklist.Update(context.Background(), blocklistCfg); err != nil {
-			log.Printf("blocklist bootstrap update failed: %v", err)
+			log.Printf("%s", cliText("cli.main.blocklist_bootstrap_update_failed", "error", err))
 		}
 		if blocklistMatcher != nil {
 			if err := blocklistMatcher.Reload(time.Now().UTC()); err != nil {
-				log.Printf("blocklist bootstrap reload failed: %v", err)
+				log.Printf("%s", cliText("cli.main.blocklist_bootstrap_reload_failed", "error", err))
 			}
 		}
 		_ = srv.RefreshHealth()
@@ -631,7 +647,7 @@ func main() {
 			SecurityDir: securityDir, NVDSource: cfg.Data.CVE.Source, NVDAPIKey: cfg.Data.CVE.APIKey,
 			TrivyEnabled: cfg.Data.Trivy.Enabled, TrivySource: cfg.Data.Trivy.Source,
 		}); err != nil {
-			log.Printf("CVE bootstrap update failed: %v", err)
+			log.Printf("%s", cliText("cli.main.cve_bootstrap_update_failed", "error", err))
 		}
 		_ = srv.RefreshHealth()
 	}()
@@ -645,6 +661,12 @@ func main() {
 			emitDiskLow(event.Path, event.UsedPercent, event.FreeBytes, event.ThresholdPercent)
 		},
 		Log: func(level, message string, fields map[string]interface{}) {
+			switch message {
+			case "Disk space low":
+				message = cliText("cli.main.disk_space_low")
+			case "Disk space recovered":
+				message = cliText("cli.main.disk_space_recovered")
+			}
 			log.Printf("%s %s fields=%v", level, message, fields)
 		},
 	})
@@ -678,7 +700,7 @@ func main() {
 		DiskCheckInterval: cfg.Server.Notifications.DiskLow.CheckInterval,
 		TorHealth: func(ctx context.Context) error {
 			if torMgr == nil {
-				return fmt.Errorf("tor manager is unavailable")
+				return fmt.Errorf("%s", cliText("cli.main.tor_manager_unavailable"))
 			}
 			return torMgr.HealthCheck(ctx)
 		},
@@ -696,18 +718,18 @@ func main() {
 	// ── Start the always-running task scheduler (AI.md PART 18) ───────────────
 	var sched *scheduler.Scheduler
 	if built, err := buildScheduler(cfg, configDir, dataDir, logsDir, geoipMgr, runtimeDeps); err != nil {
-		log.Printf("Failed to build scheduler: %v", err)
+		log.Printf("%s", cliText("cli.main.build_scheduler_failed", "error", err))
 	} else {
 		sched = built
 		if err := sched.Start(context.Background()); err != nil {
-			log.Printf("Failed to start scheduler: %v", err)
+			log.Printf("%s", cliText("cli.main.start_scheduler_failed", "error", err))
 		}
 	}
 
 	for {
 		select {
 		case err := <-errChan:
-			log.Printf("Server error: %v", err)
+			log.Printf("%s", cliText("cli.main.server_error", "error", err))
 			if cfgManager != nil {
 				cfgManager.Stop()
 			}
@@ -716,13 +738,13 @@ func main() {
 		case sig := <-sigChan:
 			switch classifySignal(sig) {
 			case sigActionReopenLogs:
-				log.Println("Received SIGUSR1, reopening logs...")
+				log.Println(cliText("cli.received_sigusr1"))
 				reopenLogs()
 			case sigActionStatusDump:
-				log.Println("Received SIGUSR2, dumping status...")
+				log.Println(cliText("cli.received_sigusr2"))
 				dumpStatus()
 			default:
-				log.Printf("Received signal %v, shutting down...", sig)
+				log.Printf("%s", cliText("cli.received_signal", "signal", sig))
 				if cfgManager != nil {
 					cfgManager.Stop()
 				}
@@ -731,7 +753,7 @@ func main() {
 				torCancel()
 				if torMgr != nil {
 					if err := torMgr.Close(); err != nil {
-						log.Printf("Error stopping Tor: %v", err)
+						log.Printf("%s", cliText("cli.main.stop_tor_failed", "error", err))
 					}
 				}
 				if sched != nil {
@@ -809,99 +831,10 @@ func resolveMode(s string) string {
 }
 
 func printHelp(binaryName string) {
-	fmt.Printf(`%[1]s %[2]s
-
-Usage: %[1]s [options]
-
-Information:
-  -h, --help                     Show help
-  -v, --version                  Show version
-  --status                       Show server status and health (exit 0 = healthy)
-
-Shell Integration:
-  --shell completions [SHELL]    Print shell completions
-  --shell init [SHELL]           Print shell init command
-  --shell help                   Show shell help
-
-Server Configuration:
-  --mode {production|development} Application mode (default: production)
-  --config DIR                   Config directory
-  --data DIR                     Data directory
-  --cache DIR                    Cache directory
-  --log DIR                      Log directory
-  --backup DIR                   Backup directory
-  --pid FILE                     PID file path
-  --address ADDR                 Listen address (default: [::])
-  --port PORT                    Listen port (default: random 64xxx, 80 in container)
-  --baseurl PATH                 URL path prefix (default: /)
-  --i2p                          Enable the I2P eepsite
-  --daemon                       Run as daemon (detach from terminal)
-  --debug                        Enable debug mode
-  --color {auto|yes|no}          Color output (default: auto)
-  --lang CODE                    Language for output (default: auto)
-
-Service Commands:
-  --service start      Start the service
-  --service stop       Stop the service
-  --service restart    Restart the service
-  --service reload     Reload configuration
-  --service status     Show service status
-  --service --install  Install as system service
-  --service --uninstall Remove system service
-
-Maintenance Commands:
-  --maintenance backup [file]   Backup configuration and data
-  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring
-  --maintenance restore [file]  Restore from backup
-  --maintenance update          Check for and install updates
-  --maintenance pgp <action>    Manage the project security keypair
-  --maintenance security list|show|update  Manage disclosure report metadata (root)
-
-Update Commands:
-  --update check               Check for updates
-  --update yes                 Install latest update
-  --update branch BRANCH       %[3]s
-
-Scheduler Commands:
-  scheduler list               List all scheduled tasks and status
-  scheduler show <id>          Show task details
-  scheduler run <id>           Run a task immediately
-  scheduler enable <id>        Enable a task
-  scheduler disable <id>       Disable a task
-  scheduler history <id>       Show a task's last recorded run
-
-Email Commands:
-  email test [recipient]       Send a test email to verify SMTP
-  email status                 Show SMTP configuration and reachability
-  email validate               Validate all email templates
-
-Environment Variables (runtime):
-  PORT       Server port
-  LISTEN     Listen address
-  MODE       Application mode
-  DOMAIN     FQDN override
-  SMTP_HOST      SMTP server host (overrides config)
-  SMTP_PORT      SMTP server port (default 587)
-  SMTP_USERNAME  SMTP auth username
-  SMTP_PASSWORD  SMTP auth password
-  SMTP_TLS       TLS mode: auto, starttls, tls, none
-  SMTP_FROM_NAME  Envelope From display name
-  SMTP_FROM_EMAIL Envelope From address
-
-Environment Variables (init-only, first run):
-  CONFIG_DIR    Configuration directory
-  DATA_DIR      Data directory
-  DATABASE_DIR  Database directory (default: {data}/db)
-  CACHE_DIR     Cache directory
-  LOG_DIR       Log directory
-  BACKUP_DIR    Backup directory
-
-Configuration:
-  Root:    /etc/apimgr/gitignore/server.yml
-  User:    ~/.config/apimgr/gitignore/server.yml
-  Docker:  /config/server.yml
-
-`, binaryName, Version, i18n.Translate(i18n.ResolveCLILang("", ""), "cli.update_branch_usage"))
+	fmt.Println(cliText("cli.server_help",
+		"binary", binaryName,
+		"version", Version,
+		"update_branch_usage", cliText("cli.update_branch_usage")))
 }
 
 func checkHealth(port string, baseURLs ...string) error {
@@ -917,7 +850,7 @@ func checkHealth(port string, baseURLs ...string) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("health check returned status %d", resp.StatusCode)
+		return fmt.Errorf("%s", cliText("cli.main.health_status_error", "status", resp.StatusCode))
 	}
 	return nil
 }
@@ -926,22 +859,22 @@ func handleServiceCommand(cmd, configDir string, force bool) {
 	switch cmd {
 	case "start":
 		if err := service.Start(); err != nil {
-			log.Printf("Failed to start service: %v", err)
+			log.Printf("%s", cliText("cli.main.start_service_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	case "stop":
 		if err := service.Stop(); err != nil {
-			log.Printf("Failed to stop service: %v", err)
+			log.Printf("%s", cliText("cli.main.stop_service_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	case "restart":
 		if err := service.Restart(); err != nil {
-			log.Printf("Failed to restart service: %v", err)
+			log.Printf("%s", cliText("cli.main.restart_service_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	case "reload":
 		if err := service.Reload(); err != nil {
-			log.Printf("Failed to reload service: %v", err)
+			log.Printf("%s", cliText("cli.main.reload_service_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	case "status":
@@ -950,17 +883,17 @@ func handleServiceCommand(cmd, configDir string, force bool) {
 		installService()
 	case "--uninstall":
 		if err := service.Uninstall(force); err != nil {
-			log.Printf("Failed to uninstall service: %v", err)
+			log.Printf("%s", cliText("cli.main.uninstall_service_failed", "error", err))
 			os.Exit(exOSErr)
 		}
 	case "--disable":
 		serviceDisable()
 	case "--help":
-		fmt.Println("Service commands: start, stop, restart, reload, status, --install, --uninstall, --disable, --help")
+		fmt.Println(cliText("cli.main.service_commands"))
 		fmt.Println()
 		serviceStatus()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown service command: %s\n", cmd)
+		fmt.Fprintln(os.Stderr, cliText("cli.main.unknown_service_command", "command", cmd))
 		os.Exit(1)
 	}
 }
@@ -973,7 +906,7 @@ func handleServiceCommand(cmd, configDir string, force bool) {
 func installService() {
 	if service.IsElevated() {
 		if err := service.Install(); err != nil {
-			log.Printf("Failed to install service: %v", err)
+			log.Printf("%s", cliText("cli.main.install_service_failed", "error", err))
 			os.Exit(exCantCreat)
 		}
 		return
@@ -982,21 +915,21 @@ func installService() {
 	if method := service.DetectEscalation(); method != service.EscalateNone {
 		exePath, err := os.Executable()
 		if err == nil {
-			fmt.Printf("Elevated privileges required to install a system service (using %s)...\n", method)
+			fmt.Println(cliText("cli.main.install_service_escalation", "method", method))
 			args := append([]string{exePath}, os.Args[1:]...)
 			if err := service.ExecElevated(method, args); err != nil {
-				log.Printf("Failed to install service via %s: %v", method, err)
+				log.Printf("%s", cliText("cli.main.install_service_via_failed", "method", method, "error", err))
 				os.Exit(exOSErr)
 			}
 			return
 		}
 	}
 
-	fmt.Println("No privilege escalation method available (sudo/su/pkexec/doas not found).")
-	fmt.Println("Falling back to a user-level service install...")
+	fmt.Println(cliText("cli.main.no_privilege_escalation"))
+	fmt.Println(cliText("cli.main.user_service_fallback"))
 	if err := service.InstallUser(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to install user-level service: %v\n", err)
-		fmt.Fprintln(os.Stderr, "Run this command as root, or install sudo/su/pkexec/doas, then retry.")
+		fmt.Fprintln(os.Stderr, cliText("cli.main.install_user_service_failed", "error", err))
+		fmt.Fprintln(os.Stderr, cliText("cli.main.install_service_retry"))
 		os.Exit(exCantCreat)
 	}
 }
@@ -1008,7 +941,7 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 	case "backup":
 		if len(args) > 0 && args[0] == "test" {
 			if len(args) > 2 {
-				fmt.Fprintln(os.Stderr, "Usage: gitignore --maintenance backup test [backup-file]")
+				fmt.Fprintln(os.Stderr, cliText("cli.main.backup_test_usage"))
 				os.Exit(2)
 			}
 			backupFile := ""
@@ -1018,24 +951,24 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 				var err error
 				backupFile, err = latestBackupFile(apppath.GetBackupDir())
 				if err != nil {
-					log.Printf("Backup test failed: %v", err)
+					log.Printf("%s", cliText("cli.main.backup_test_failed", "error", err))
 					os.Exit(exIOErr)
 				}
 			}
 			password := ""
 			if strings.HasSuffix(backupFile, ".enc") {
 				var err error
-				password, err = promptPassword("Enter backup password: ")
+				password, err = promptPassword(cliText("cli.main.backup_password_prompt"))
 				if err != nil {
-					log.Printf("Backup test failed: %v", err)
+					log.Printf("%s", cliText("cli.main.backup_test_failed", "error", err))
 					os.Exit(exIOErr)
 				}
 			}
 			if err := verifyBackupPGP(backupFile, password); err != nil {
-				log.Printf("Backup PGP verification failed: %v", err)
+				log.Printf("%s", cliText("cli.main.backup_pgp_verification_failed", "error", err))
 				os.Exit(exIOErr)
 			}
-			fmt.Println("Backup PGP keypair verified; encrypted private key decrypts and matches the public key.")
+			fmt.Println(cliText("cli.main.backup_pgp_verified"))
 			return
 		}
 		cfg, _ := config.Load(configPath)
@@ -1045,24 +978,24 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 		} else {
 			backupDir := apppath.GetBackupDir()
 			if err := os.MkdirAll(backupDir, 0755); err != nil {
-				log.Printf("Failed to create backup directory: %v", err)
+				log.Printf("%s", cliText("cli.main.create_backup_directory_failed", "error", err))
 				os.Exit(exCantCreat)
 			}
 			timestamp := time.Now().Format("2006-01-02_150405")
 			backupFile = filepath.Join(backupDir, fmt.Sprintf("gitignore_backup_%s.tar.gz", timestamp))
 		}
 		if err := runBackup(cfg, configDir, dataDir, backupFile); err != nil {
-			log.Printf("Backup failed: %v", err)
+			log.Printf("%s", cliText("cli.main.backup_failed", "error", err))
 			os.Exit(exIOErr)
 		}
 
 	case "restore":
 		if len(args) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: gitignore --maintenance restore <backup-file>")
+			fmt.Fprintln(os.Stderr, cliText("cli.main.restore_usage"))
 			os.Exit(2)
 		}
 		if err := runRestore(args[0], configDir, dataDir); err != nil {
-			log.Printf("Restore failed: %v", err)
+			log.Printf("%s", cliText("cli.main.restore_failed", "error", err))
 			os.Exit(exIOErr)
 		}
 
@@ -1077,19 +1010,19 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 			if m == "" {
 				m = "production"
 			}
-			fmt.Printf("Current mode: %s\n", m)
+			fmt.Println(cliText("cli.main.current_mode", "mode", m))
 			return
 		}
 		resolved := resolveMode(args[0])
 		if resolved == "" {
-			fmt.Fprintf(os.Stderr, "Invalid mode: %s\nValid: production, development (aliases: prod, dev)\n", args[0])
+			fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_mode", "mode", args[0]))
 			os.Exit(2)
 		}
 		if err := config.Update(func(c *config.Config) { c.Server.Mode = resolved }); err != nil {
-			log.Printf("Failed to save config: %v", err)
+			log.Printf("%s", cliText("cli.main.save_config_failed", "error", err))
 			os.Exit(exConfig)
 		}
-		fmt.Printf("Application mode set to: %s\n", resolved)
+		fmt.Println(cliText("cli.main.mode_set", "mode", resolved))
 
 	case "setup":
 		cfg, _ := config.Load(configPath)
@@ -1105,32 +1038,32 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 			c.Server.Port = port
 			c.Server.FQDN = fqdn
 		}); err != nil {
-			log.Printf("Failed to reset configuration: %v", err)
+			log.Printf("%s", cliText("cli.main.reset_configuration_failed", "error", err))
 			os.Exit(exConfig)
 		}
-		fmt.Println("gitignore Setup")
-		fmt.Println("===============")
-		fmt.Printf("Config: %s\n", configPath)
-		fmt.Printf("Port:   %s\n", port)
-		fmt.Printf("Mode:   %s\n", defaults.Server.Mode)
-		fmt.Println("Server configuration reset to defaults.")
-		fmt.Println("Setup complete.")
+		fmt.Println(cliText("cli.main.setup_title"))
+		fmt.Println(cliText("cli.main.setup_separator"))
+		fmt.Println(cliText("cli.main.config_path", "path", configPath))
+		fmt.Println(cliText("cli.main.port_value", "port", port))
+		fmt.Println(cliText("cli.main.mode_value", "mode", defaults.Server.Mode))
+		fmt.Println(cliText("cli.main.configuration_reset"))
+		fmt.Println(cliText("cli.main.setup_complete"))
 
 	case "pgp":
 		if err := handlePGPMaintenance(configDir, configPath, dataDir, logsDir, args); err != nil {
-			fmt.Fprintf(os.Stderr, "PGP maintenance failed: %v\n", err)
+			fmt.Fprintln(os.Stderr, cliText("cli.main.pgp_maintenance_failed", "error", err))
 			os.Exit(exConfig)
 		}
 
 	case "security":
 		if err := handleSecurityMaintenance(configPath, dataDir, logsDir, args); err != nil {
-			fmt.Fprintf(os.Stderr, "Security maintenance failed: %v\n", err)
+			fmt.Fprintln(os.Stderr, cliText("cli.main.security_maintenance_failed", "error", err))
 			os.Exit(exConfig)
 		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown maintenance command: %s\n", cmd)
-		fmt.Fprintln(os.Stderr, "Available: backup, restore, update, mode, setup, pgp, security")
+		fmt.Fprintln(os.Stderr, cliText("cli.main.unknown_maintenance_command", "command", cmd))
+		fmt.Fprintln(os.Stderr, cliText("cli.main.available_maintenance_commands"))
 		os.Exit(1)
 	}
 }
@@ -1156,7 +1089,7 @@ func latestBackupFile(directory string) (string, error) {
 		}
 	}
 	if latest == "" {
-		return "", fmt.Errorf("no backup archives found in %s", directory)
+		return "", fmt.Errorf("%s", cliText("cli.main.no_backup_archives", "directory", directory))
 	}
 	return latest, nil
 }
@@ -1164,28 +1097,28 @@ func latestBackupFile(directory string) (string, error) {
 func serviceStatus() {
 	installed, running, enabled, pid := service.Status()
 
-	installedStr := "not installed"
+	installedStr := cliText("cli.main.service_not_installed")
 	if installed {
-		installedStr = "installed"
+		installedStr = cliText("cli.main.service_installed")
 	}
-	state := "stopped"
+	state := cliText("cli.main.service_stopped")
 	if running {
-		state = "running"
+		state = cliText("cli.main.service_running")
 	}
-	autoStart := "disabled"
+	autoStart := cliText("cli.main.service_disabled")
 	if enabled {
-		autoStart = "enabled"
+		autoStart = cliText("cli.main.service_enabled")
 	}
 	pidStr := "-"
 	if running && pid > 0 {
 		pidStr = strconv.Itoa(pid)
 	}
 
-	fmt.Println("Current status:")
-	fmt.Printf("  Service:    %s\n", installedStr)
-	fmt.Printf("  State:      %s\n", state)
-	fmt.Printf("  Auto-start: %s\n", autoStart)
-	fmt.Printf("  PID:        %s\n", pidStr)
+	fmt.Println(cliText("cli.main.current_status"))
+	fmt.Println(cliText("cli.main.service_label", "value", installedStr))
+	fmt.Println(cliText("cli.main.state_label", "value", state))
+	fmt.Println(cliText("cli.main.autostart_label", "value", autoStart))
+	fmt.Println(cliText("cli.main.pid_label", "value", pidStr))
 }
 
 func serviceDisable() {
@@ -1195,7 +1128,7 @@ func serviceDisable() {
 	case "darwin":
 		runCommand("launchctl", "unload", "/Library/LaunchDaemons/apimgr.gitignore.plist")
 	default:
-		fmt.Printf("Service disable not supported on %s\n", runtime.GOOS)
+		fmt.Println(cliText("cli.main.service_disable_unsupported", "os", runtime.GOOS))
 	}
 }
 
@@ -1223,21 +1156,21 @@ func handleUpdateCommand(sub string, subArgs []string, cfg *config.Config) {
 		runUpdateCheck(cfg)
 	case "branch":
 		if len(subArgs) == 0 {
-			fmt.Printf("Current branch: %s\n", cfg.Server.Update.Branch)
+			fmt.Println(cliText("cli.main.current_branch", "branch", cfg.Server.Update.Branch))
 			return
 		}
 		branch, ok := config.NormalizeUpdateBranch(subArgs[0])
 		if !ok {
-			fmt.Fprintln(os.Stderr, i18n.Translate(i18n.ResolveCLILang("", ""), "cli.invalid_update_branch"))
+			fmt.Fprintln(os.Stderr, cliText("cli.invalid_update_branch"))
 			os.Exit(exUsage)
 		}
 		if err := config.Update(func(c *config.Config) { c.Server.Update.Branch = branch }); err != nil {
-			log.Printf("Failed to save config: %v", err)
+			log.Printf("%s", cliText("cli.main.save_config_failed", "error", err))
 			os.Exit(exConfig)
 		}
-		fmt.Printf("Branch set to: %s\n", branch)
+		fmt.Println(cliText("cli.main.branch_set", "branch", branch))
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown update command: %s\n", sub)
+		fmt.Fprintln(os.Stderr, cliText("cli.main.unknown_update_command", "command", sub))
 		os.Exit(exUsage)
 	}
 }
@@ -1247,6 +1180,6 @@ func runCommand(name string, args ...string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		log.Printf("Command failed: %s %v: %v", name, args, err)
+		log.Printf("%s", cliText("cli.main.command_failed", "name", name, "args", args, "error", err))
 	}
 }

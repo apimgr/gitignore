@@ -8,16 +8,28 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/apimgr/gitignore/src/client/api"
 	"github.com/apimgr/gitignore/src/client/output"
+	"github.com/apimgr/gitignore/src/common/i18n"
 )
 
 // BinaryName is set once at startup to filepath.Base(os.Args[0]) so help/
 // version/error text always shows the actual invoked name, even if the
 // binary has been renamed (see AI.md PART 32 "Binary Naming Rules").
 var BinaryName = "gitignore-cli"
+
+var language = i18n.DefaultLang
+
+func SetLanguage(lang string) {
+	language = lang
+}
+
+func text(key string, values ...interface{}) string {
+	return i18n.TranslateFormat(language, key, values...)
+}
 
 // knownCommands maps a leading positional argument to a command handler
 // name. Anything that doesn't match one of these is treated as a bare
@@ -52,7 +64,7 @@ func Dispatch(c *api.Client, p *output.Printer, format string, args []string) in
 		return CmdCategories(c, p, format)
 	case "category":
 		if len(rest) == 0 {
-			p.Error("category requires a name")
+			p.ErrorText(text("cli.client.command.category_name_required"))
 			return output.ExitUsage
 		}
 		return CmdCategory(c, p, format, rest[0])
@@ -60,7 +72,7 @@ func Dispatch(c *api.Client, p *output.Printer, format string, args []string) in
 		return CmdStats(c, p, format)
 	case "get", "template":
 		if len(rest) == 0 {
-			p.Error("%s requires a template name", first)
+			p.ErrorText(text("cli.client.command.template_name_required", "command", first))
 			return output.ExitUsage
 		}
 		return CmdGetTemplate(c, p, format, rest[0])
@@ -84,8 +96,8 @@ func Dispatch(c *api.Client, p *output.Printer, format string, args []string) in
 // TUI-eligible path.
 func Interactive(c *api.Client, p *output.Printer, format string) int {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println(p.Bold(fmt.Sprintf("%s — interactive mode", BinaryName)))
-	fmt.Println("Type a command, or 'help' / 'quit'.")
+	fmt.Println(p.Bold(text("cli.client.interactive.title", "binary", BinaryName)))
+	fmt.Println(text("cli.client.interactive.prompt"))
 	fmt.Println()
 
 	for {
@@ -113,64 +125,25 @@ func Interactive(c *api.Client, p *output.Printer, format string) int {
 }
 
 func printInteractiveHelp() {
-	fmt.Println("Commands:")
-	fmt.Println("  list                 List all template names")
-	fmt.Println("  search TERM          Search templates")
-	fmt.Println("  categories           List categories")
-	fmt.Println("  category NAME        List templates in a category")
-	fmt.Println("  get NAME             Print a single template")
-	fmt.Println("  combine NAME NAME.. Merge templates (or just: NAME NAME..)")
-	fmt.Println("  stats                Show server template statistics")
-	fmt.Println("  quit                 Exit interactive mode")
+	fmt.Println(text("cli.client.interactive.help"))
 }
 
 // PrintHelp prints --help output using the actual invoked binary name.
 func PrintHelp(version string) {
-	fmt.Printf("%s %s - CLI for gitignore\n\n", BinaryName, version)
-	fmt.Println("Usage:")
-	fmt.Printf("  %s [command] [args] [flags]\n", BinaryName)
-	fmt.Println("  # interactive mode (no args)")
-	fmt.Printf("  %s\n\n", BinaryName)
-	fmt.Println("Commands:")
-	fmt.Println("  list                          List all template names")
-	fmt.Println("  search QUERY                  Search templates by name/tag")
-	fmt.Println("  categories                    List categories")
-	fmt.Println("  category NAME                 List templates in a category")
-	fmt.Println("  get NAME | template NAME       Print a single template")
-	fmt.Println("  combine NAME...                Merge templates (default when args are bare names)")
-	fmt.Println("  stats                         Show server template statistics")
-	fmt.Println()
-	fmt.Println("Flags:")
-	fmt.Println("-h, --help                             - Show help")
-	fmt.Println("-v, --version                           - Show version")
-	fmt.Println("--shell completions [SHELL]            - Print shell completions (auto-detect if SHELL omitted)")
-	fmt.Println("--shell init [SHELL]                   - Print shell init command (auto-detect if SHELL omitted)")
-	fmt.Println("--shell help                           - Show shell integration help")
-	fmt.Println()
-	fmt.Println("--server URL                           - Server URL (default: from cli.yml)")
-	fmt.Println("--config NAME                          - Config profile name (default: cli)")
-	fmt.Println("--output {text|json|table}              - Output format (default: text)")
-	fmt.Println("--debug                                - Debug output")
-	fmt.Println("--color {auto|yes|no}                  - Color output (default: auto)")
-	fmt.Println("--lang CODE                            - Language for output (default: auto)")
-	fmt.Println()
-	fmt.Println("Shells: bash, zsh, fish, sh, dash, ksh, powershell, pwsh")
-	fmt.Println()
-	fmt.Println("Run without arguments for interactive mode.")
-	fmt.Println("Examples:")
-	fmt.Printf("  %s Go Node > .gitignore\n", BinaryName)
-	fmt.Printf("  %s search python\n", BinaryName)
-	fmt.Printf("  %s get Go --output json\n", BinaryName)
+	fmt.Println(text("cli.client.help", "binary", BinaryName, "version", version))
 }
 
 // PrintVersion prints --version output. Extended server info is appended
 // when reachable (best-effort; a failed probe is silent).
 func PrintVersion(version, commit, buildDate string, c *api.Client) {
-	fmt.Printf("%s %s (%s) built %s\n", BinaryName, version, commit, buildDate)
+	fmt.Println(text("cli.client.version_line", "binary", BinaryName, "version", version, "commit", commit))
+	fmt.Println(text("cli.client.built_line", "build_date", buildDate))
+	fmt.Println(text("cli.client.go_line", "go_version", runtime.Version()))
+	fmt.Println(text("cli.client.os_arch_line", "goos", runtime.GOOS, "goarch", runtime.GOARCH))
 	if c == nil {
 		return
 	}
 	if err := c.Healthz(); err == nil {
-		fmt.Printf("\nServer: %s\n", c.BaseURL)
+		fmt.Printf("\n%s\n", text("cli.client.server_label", "server", c.BaseURL))
 	}
 }

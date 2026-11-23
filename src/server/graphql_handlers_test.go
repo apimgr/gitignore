@@ -1,11 +1,13 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/template"
 )
 
@@ -39,5 +41,59 @@ func TestGraphQLHandlerRejectsMalformedAndMultipleJSONValues(t *testing.T) {
 		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "errors") {
 			t.Errorf("malformed GraphQL body %q returned %d %s", body, recorder.Code, recorder.Body.String())
 		}
+	}
+}
+
+func TestGraphQLHandlerLocalizesErrors(t *testing.T) {
+	s := New(&Config{})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/graphql?lang=es", strings.NewReader("{"))
+	recorder := httptest.NewRecorder()
+	i18n.Middleware(http.HandlerFunc(s.handleGraphQL)).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("GraphQL error status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	var response struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode GraphQL error response: %v", err)
+	}
+	want := i18n.Translate("es", "errors.bad_request")
+	if len(response.Errors) != 1 || response.Errors[0].Message != want {
+		t.Fatalf("GraphQL error message = %#v, want %q", response.Errors, want)
+	}
+}
+
+func TestGraphQLExecutionErrorsAreLocalizedWithoutLosingLocations(t *testing.T) {
+	templates, err := template.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(&Config{Templates: templates})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/graphql?lang=es", strings.NewReader(`{"query":"{ unknownField }"}`))
+	recorder := httptest.NewRecorder()
+	i18n.Middleware(http.HandlerFunc(s.handleGraphQL)).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GraphQL validation status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var response struct {
+		Errors []struct {
+			Message   string `json:"message"`
+			Locations []struct {
+				Line   int `json:"line"`
+				Column int `json:"column"`
+			} `json:"locations"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode GraphQL validation response: %v", err)
+	}
+	want := i18n.Translate("es", "graphql.errors.query_failed")
+	if len(response.Errors) != 1 || response.Errors[0].Message != want || len(response.Errors[0].Locations) == 0 {
+		t.Fatalf("GraphQL validation error = %#v, want localized message %q with source locations", response.Errors, want)
 	}
 }

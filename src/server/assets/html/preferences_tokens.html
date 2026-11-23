@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="container container-lg">
-<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/preferences"}}">{{t .Lang "owner_tokens_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "owner_tokens_page.title"}}</h1><p class="page-lead">{{t .Lang "owner_tokens_page.description"}}</p></header>
+<header class="page-header"><nav class="breadcrumb" aria-label="{{t .Lang "a11y.breadcrumb"}}"><a href="{{path "/server/preferences"}}">{{t .Lang "owner_tokens_page.back"}}</a></nav><h1 class="page-title">{{t .Lang "owner_tokens_page.title"}}</h1><p class="page-lead">{{t .Lang "owner_tokens_page.description"}}</p></header>
 {{if .Data.message}}<p class="notice" role="status">{{.Data.message}}</p>{{end}}
 {{if not .Data.authenticated}}
 <div class="token-management-layout">

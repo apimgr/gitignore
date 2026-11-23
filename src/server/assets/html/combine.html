@@ -1,9 +1,9 @@
 {{define "content"}}
-<h1>Combine Templates</h1>
+<h1>{{t .Lang "nav.combine"}}</h1>
 <form action="{{path "/combine"}}" method="get">
-<input type="text" name="templates" value="{{.Data.templates}}" placeholder="go,node,macos" aria-label="Templates">
-<button type="submit">Combine</button>
+<input type="text" name="templates" value="{{.Data.templates}}" placeholder="go,node,macos" aria-label="{{t .Lang "nav.combine"}}">
+<button type="submit">{{t .Lang "nav.combine"}}</button>
 </form>
 {{if .Data.content}}<pre>{{.Data.content}}</pre>{{end}}
-{{if .Data.error}}<p>Error: {{.Data.error}}</p>{{end}}
+{{if .Data.error}}<p>{{t .Lang "common.error"}}: {{.Data.error}}</p>{{end}}
 {{end}}

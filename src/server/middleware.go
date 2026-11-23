@@ -62,7 +62,7 @@ func (s *Server) blocklistMiddleware(next http.Handler) http.Handler {
 			for _, prefix := range s.blockedIPs {
 				if prefix.Contains(address.Unmap()) {
 					log.Printf("security.ip_blocked: ip=[redacted] reason=config")
-					sendAPIResponseError(w, "FORBIDDEN", "access denied")
+					sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 					return
 				}
 			}
@@ -73,7 +73,7 @@ func (s *Server) blocklistMiddleware(next http.Handler) http.Handler {
 		}
 		if source, blocked := s.blocklist.MatchIP(ip, now); blocked {
 			log.Printf("blocklist_block: source=%s ip=[redacted]", source)
-			sendAPIResponseError(w, "FORBIDDEN", "access denied")
+			sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 			return
 		}
 		domainHeader := r.Header.Get("Origin")
@@ -84,14 +84,14 @@ func (s *Server) blocklistMiddleware(next http.Handler) http.Handler {
 		}
 		if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(domainHeader), now); blocked {
 			log.Printf("blocklist_block: source=%s field=%s", source, domainField)
-			sendAPIResponseError(w, "FORBIDDEN", "access denied")
+			sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 			return
 		}
 		for _, value := range r.URL.Query() {
 			for _, candidate := range value {
 				if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(candidate), now); blocked {
 					log.Printf("blocklist_block: source=%s field=query", source)
-					sendAPIResponseError(w, "FORBIDDEN", "access denied")
+					sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 					return
 				}
 			}
@@ -107,7 +107,7 @@ func (s *Server) blocklistMiddleware(next http.Handler) http.Handler {
 								for _, candidate := range candidates {
 									if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(candidate), now); blocked {
 										log.Printf("blocklist_block: source=%s field=form", source)
-										sendAPIResponseError(w, "FORBIDDEN", "access denied")
+										sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 										return
 									}
 								}
@@ -120,7 +120,7 @@ func (s *Server) blocklistMiddleware(next http.Handler) http.Handler {
 						for _, candidate := range jsonDomainTargets(fields, false) {
 							if source, blocked := s.blocklist.MatchDomain(requestDomainCandidate(candidate), now); blocked {
 								log.Printf("blocklist_block: source=%s field=json", source)
-								sendAPIResponseError(w, "FORBIDDEN", "access denied")
+								sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 								return
 							}
 						}
@@ -464,7 +464,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 				s.metrics.RateLimitRequestsTotal.WithLabelValues("per_ip", status).Inc()
 			}
 			if !allowed {
-				sendAPIResponseError(w, "RATE_LIMITED", "too many requests")
+				sendAPIResponseErrorLocalized(w, r, "RATE_LIMITED")
 				return
 			}
 		}
@@ -484,7 +484,7 @@ func (s *Server) geoipMiddleware(next http.Handler) http.Handler {
 			if ip := net.ParseIP(s.clientIP(r)); ip != nil {
 				if allowed, country := s.geoip.CountryAllowed(ip); !allowed {
 					log.Printf("geoip_block: ip=[redacted] country=%s", country)
-					sendAPIResponseError(w, "FORBIDDEN", "access denied")
+					sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
 					return
 				}
 			}

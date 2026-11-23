@@ -29,7 +29,7 @@ func TestNewTrimsTrailingSlash(t *testing.T) {
 
 func TestAPIErrorError(t *testing.T) {
 	e := &APIError{Status: 404, Message: "not found"}
-	if got := e.Error(); got != "server returned 404: not found" {
+	if got := e.Error(); got != "Server returned 404: not found" {
 		t.Errorf("Error() = %q", got)
 	}
 }
@@ -42,6 +42,9 @@ func TestListSuccess(t *testing.T) {
 		if got := r.Header.Get("Accept"); got != "application/json" {
 			t.Errorf("Accept header = %q, want application/json", got)
 		}
+		if got := r.Header.Get("Accept-Language"); got != "fr" {
+			t.Errorf("Accept-Language header = %q, want fr", got)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":   true,
 			"data": []string{"Go", "Node"},
@@ -50,6 +53,7 @@ func TestListSuccess(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL)
+	c.Lang = "fr"
 	names, err := c.List()
 	if err != nil {
 		t.Fatalf("List: %v", err)

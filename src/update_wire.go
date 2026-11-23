@@ -30,29 +30,37 @@ func newUpdater(cfg *config.Config) *updater.Updater {
 	})
 }
 
+func updateStatusLines(currentVersion, branch string) [2]string {
+	return [2]string{
+		cliText("cli.update.current_version", "version", currentVersion),
+		cliText("cli.update.branch", "branch", branch),
+	}
+}
+
 // runUpdateCheck performs `--update check`: it queries the configured channel
 // and prints whether an update is available, without touching the binary. It
 // requires no privileges. Exit code 0 whether or not an update exists (AI.md
 // PART 22 exit codes); a query error exits 1.
 func runUpdateCheck(cfg *config.Config) {
 	u := newUpdater(cfg)
-	fmt.Printf("Current version: %s\n", Version)
-	fmt.Printf("Update branch:   %s\n", cfg.Server.Update.Branch)
+	for _, line := range updateStatusLines(Version, cfg.Server.Update.Branch) {
+		fmt.Println(line)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	rel, err := u.Check(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Update check failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, cliText("cli.update.check_failed", "error", err))
 		os.Exit(1)
 	}
 	if rel == nil {
-		fmt.Println("You are running the latest version.")
+		fmt.Println(cliText("cli.update.up_to_date"))
 		return
 	}
-	fmt.Printf("Update available: %s\n", rel.TagName)
-	fmt.Printf("Run '%s --update yes' to install.\n", projectName)
+	fmt.Println(cliText("cli.update.available", "version", rel.TagName))
+	fmt.Println(cliText("cli.update.install_hint", "binary", filepath.Base(os.Args[0])))
 }
 
 // runUpdateInstall performs `--update yes` (the default): it checks the
@@ -62,28 +70,29 @@ func runUpdateCheck(cfg *config.Config) {
 // exit 1 on any failure (AI.md PART 22).
 func runUpdateInstall(cfg *config.Config) {
 	u := newUpdater(cfg)
-	fmt.Printf("Current version: %s\n", Version)
-	fmt.Printf("Update branch:   %s\n", cfg.Server.Update.Branch)
+	for _, line := range updateStatusLines(Version, cfg.Server.Update.Branch) {
+		fmt.Println(line)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	rel, err := u.Check(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Update check failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, cliText("cli.update.check_failed", "error", err))
 		os.Exit(1)
 	}
 	if rel == nil {
-		fmt.Println("You are running the latest version.")
+		fmt.Println(cliText("cli.update.up_to_date"))
 		return
 	}
-	fmt.Printf("Downloading %s...\n", rel.TagName)
+	fmt.Println(cliText("cli.update.downloading", "version", rel.TagName))
 	if err := u.Install(ctx, rel); err != nil {
-		fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, cliText("cli.update.install_failed", "error", err))
 		os.Exit(1)
 	}
 	emitUpdateInstalled(Version, rel.TagName)
-	fmt.Printf("Updated to %s. Restart the service to load the new binary.\n", rel.TagName)
+	fmt.Println(cliText("cli.update.installed", "version", rel.TagName))
 }
 
 // updateCheckHandler is the scheduler's update_check task (AI.md PART 18/22). It

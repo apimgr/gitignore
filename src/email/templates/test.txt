@@ -1,13 +1,13 @@
-Subject: Test Email - {app_name}
+Subject: {email_subject}
 ---
-TEST EMAIL
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-This is a test email confirming that SMTP is configured correctly.
+{email_smtp_confirmation}
 
-If you received this message, {app_name} can send operator notifications.
+{email_notifications_enabled}
 
 --
 {app_name}

@@ -1,14 +1,14 @@
-Subject: Update Installed - {app_name}
+Subject: {email_subject}
 ---
-UPDATE INSTALLED
+{email_heading}
 
-From: {app_name} ({fqdn})
-Time: {timestamp}
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
 
-{app_name} was updated successfully.
+{email_updated}
 
-Previous version: {current_version}
-New version:      {new_version}
+{email_previous_version_label}: {current_version}
+{email_new_version_label}: {new_version}
 
 --
 {app_name}

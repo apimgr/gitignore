@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,8 +53,22 @@ func TestLoadRejectsInvalidDisplayMode(t *testing.T) {
 	if err := os.WriteFile(path, []byte("display:\n  mode: cli\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if _, _, err := Load(path); err == nil {
+	if _, _, err := Load(path, "es"); err == nil {
 		t.Fatal("Load accepted an invalid display.mode")
+	} else if err.Error() != "El valor de display.mode no es válido; usa auto, gui o tui" {
+		t.Errorf("Load error = %q, want localized display mode message", err)
+	}
+}
+
+func TestLoadParseErrorUsesRequestedLanguage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cli.yml")
+	if err := os.WriteFile(path, []byte("server: ["), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, _, err := Load(path, "es"); err == nil {
+		t.Fatal("Load accepted malformed configuration")
+	} else if !strings.Contains(err.Error(), "No se pudo interpretar la configuración "+path) {
+		t.Errorf("Load error = %q, want translated Spanish prefix", err)
 	}
 }
 

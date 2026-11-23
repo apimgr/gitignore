@@ -15,91 +15,89 @@ import (
 	htmlparser "golang.org/x/net/html"
 )
 
-const privacyCollection = `**We collect only what is necessary to provide our service:**
-
-**Usage Information (with consent):**
-- Pages visited and features used
-- Browser type and device information
-- Approximate location (country/region from IP, not precise)
-
-**Technical Information:**
-- IP address (for security and abuse prevention)
-- API token identifiers (hashed, never stored in plain text)
-
-**We do NOT collect:**
-- Payment information (unless explicitly required by the service)
-- Precise location data
-- Data from other websites or apps`
-
-const privacyUsage = `**Your data is used solely to:**
-
-- **Provide the service:** Authentication, core functionality
-- **Improve the experience:** Performance optimization, bug fixes, feature improvements
-- **Ensure security:** Prevent abuse, detect fraud, protect the service
-- **Communicate:** Service updates, security alerts, and (with consent) product news
-
-**Your data is NEVER:**
-- Sold to third parties
-- Used for targeted advertising
-- Shared without your explicit consent (except as required by law)`
-
-const privacyUsageSold = `**Your data may be used to:**
-
-- **Provide the service:** Authentication, core functionality
-- **Improve the experience:** Performance optimization, bug fixes, feature improvements
-- **Ensure security:** Prevent abuse, detect fraud, protect the service
-- **Communicate:** Service updates, security alerts, and (with consent) product news
-- **Third-party sharing:** Your data may be shared with or sold to third parties for analytics, advertising, or other purposes as described below
-
-**Your rights:**
-- You can opt out of data sales using the CCPA control on this page
-- You can delete resources with your owner token and request deletion of other data through the privacy contact
-- See the Your Rights section below for details`
-
-const privacySecurity = `**How we protect your data:**
-
-- Data is stored on our servers (not third-party cloud services unless specified)
-- API tokens are stored as SHA-256 hashes (never in plain text)
-- Connections are encrypted with HTTPS/TLS
-- Security audits and updates are performed regularly
-- Operator actions use access controls and audit logging`
-
-const defaultTerms = `# Terms of Service
-
-## Acceptance
-Using {app_name} means accepting these terms. Stop using the service if you do not agree.
-
-## Acceptable use
-Do not use the service unlawfully, abuse other people, bypass rate limits or access controls, or test beyond the security policy at [/server/security/policy](/server/security/policy).
-
-## Liability
-The service is provided as is, without warranty of any kind. To the extent the law allows, the operator is not liable for loss arising from its use.
-
-## Changes
-These terms may change. The current text on this page applies from the moment it is published.
-
-## Governing law
-The laws of the United States apply, without regard to conflict-of-law rules, unless the operator's own terms text names another jurisdiction.`
-
 var inlineMarkdown = regexp.MustCompile(`\*\*(.+?)\*\*|\*(.+?)\*|` + "`" + `([^` + "`" + `]+)` + "`" + `|\[([^\]]+)\]\(([^)]+)\)`)
 
-func privacyDataUsage(sold bool) string {
+func privacyDataUsage(r *http.Request, sold bool) string {
 	if sold {
-		return privacyUsageSold
+		return i18n.T(r, "web.legal.privacy.data_usage_if_sold")
 	}
-	return privacyUsage
+	return i18n.T(r, "web.legal.privacy.data_usage")
+}
+
+func localizedPrivacyDefaults(r *http.Request, privacy config.PrivacyConfig) config.PrivacyConfig {
+	defaults := config.DefaultPrivacyConfig()
+	if privacy.Consent.Message == defaults.Consent.Message {
+		privacy.Consent.Message = i18n.T(r, "web.legal.consent.message")
+	}
+	if privacy.Consent.MessageIfSold == defaults.Consent.MessageIfSold {
+		privacy.Consent.MessageIfSold = i18n.T(r, "web.legal.consent.message_if_sold")
+	}
+	if privacy.Consent.Policy.Text == defaults.Consent.Policy.Text {
+		privacy.Consent.Policy.Text = i18n.T(r, "privacy.title")
+	}
+	if privacy.Consent.Buttons.Accept == defaults.Consent.Buttons.Accept {
+		privacy.Consent.Buttons.Accept = i18n.T(r, "cookie_consent.accept")
+	}
+	if privacy.Consent.Buttons.Decline == defaults.Consent.Buttons.Decline {
+		privacy.Consent.Buttons.Decline = i18n.T(r, "cookie_consent.decline")
+	}
+	if privacy.Consent.PreferencesText == defaults.Consent.PreferencesText {
+		privacy.Consent.PreferencesText = i18n.T(r, "cookie_consent.manage_preferences")
+	}
+	if privacy.Cookies.Essential.Description == defaults.Cookies.Essential.Description {
+		privacy.Cookies.Essential.Description = i18n.T(r, "web.legal.cookies.essential_description")
+	}
+	if privacy.Cookies.Preferences.Description == defaults.Cookies.Preferences.Description {
+		privacy.Cookies.Preferences.Description = i18n.T(r, "web.legal.cookies.preferences_description")
+	}
+	if privacy.Cookies.Analytics.Description == defaults.Cookies.Analytics.Description {
+		privacy.Cookies.Analytics.Description = i18n.T(r, "web.legal.cookies.analytics_description")
+	}
+	if privacy.Cookies.Analytics.DescriptionSuffixNotSold == defaults.Cookies.Analytics.DescriptionSuffixNotSold {
+		privacy.Cookies.Analytics.DescriptionSuffixNotSold = i18n.T(r, "web.legal.cookies.analytics_suffix_not_sold")
+	}
+	if privacy.Cookies.Analytics.DescriptionSuffixSold == defaults.Cookies.Analytics.DescriptionSuffixSold {
+		privacy.Cookies.Analytics.DescriptionSuffixSold = i18n.T(r, "web.legal.cookies.analytics_suffix_sold")
+	}
+	if privacy.Retention.Period == defaults.Retention.Period {
+		privacy.Retention.Period = i18n.T(r, "web.legal.privacy.retention_period")
+	}
+	privacy.Data.Sharing = append([]config.PrivacySharingConfig(nil), privacy.Data.Sharing...)
+	defaultSharing := make(map[string]config.PrivacySharingConfig, len(defaults.Data.Sharing))
+	for _, entry := range defaults.Data.Sharing {
+		defaultSharing[entry.Condition] = entry
+	}
+	for i := range privacy.Data.Sharing {
+		entry := &privacy.Data.Sharing[i]
+		defaultEntry, ok := defaultSharing[entry.Condition]
+		if !ok {
+			continue
+		}
+		key := "web.legal.privacy.sharing."
+		if entry.Condition == defaultEntry.Condition {
+			entry.Condition = i18n.T(r, key+"condition."+defaultEntry.Condition)
+		}
+		if entry.When == defaultEntry.When {
+			entry.When = i18n.T(r, key+"when."+defaultEntry.Condition)
+		}
+		if entry.Data == defaultEntry.Data {
+			entry.Data = i18n.T(r, key+"data."+defaultEntry.Condition)
+		}
+	}
+	return privacy
 }
 
 func (s *Server) termsContent(r *http.Request) (string, string) {
+	defaultContent := i18n.TF(r, "web.legal.terms.default", "app_name", "GitIgnore API")
 	cfg := s.currentConfig()
 	if cfg == nil {
-		return strings.ReplaceAll(defaultTerms, "{app_name}", "GitIgnore API"), "markdown"
+		return defaultContent, "markdown"
 	}
 	entry := cfg.Server.Branding.Content.Terms
 	if source, format, ok := pageContentSource(r, entry); ok {
-		return s.substitutePageVariables(source), format
+		return s.substitutePageVariables(r, source), format
 	}
-	return strings.ReplaceAll(defaultTerms, "{app_name}", "GitIgnore API"), "markdown"
+	return defaultContent, "markdown"
 }
 
 func (s *Server) operatorHTML(r *http.Request, name string) template.HTML {
@@ -120,13 +118,13 @@ func (s *Server) operatorHTML(r *http.Request, name string) template.HTML {
 	if !ok {
 		return ""
 	}
-	return renderPublicContent(s.substitutePageVariables(source), format)
+	return renderPublicContent(s.substitutePageVariables(r, source), format)
 }
 
-func (s *Server) substitutePageVariables(source string) string {
+func (s *Server) substitutePageVariables(r *http.Request, source string) string {
 	version, buildDate := "", ""
 	if s.config != nil {
-		version, buildDate = s.config.Version, humanTimestampString(s.config.BuildDate)
+		version, buildDate = s.config.Version, humanTimestampString(i18n.LangFromContext(r.Context()), s.config.BuildDate)
 	}
 	values := map[string]string{
 		"{current_year}": time.Now().UTC().Format("2006"), "{project_name}": "gitignore",
@@ -142,11 +140,12 @@ func (s *Server) substitutePageVariables(source string) string {
 	return source
 }
 
-func privacyConsentMessage(p config.PrivacyConfig) string {
-	if p.Data.Sold {
-		return p.Consent.MessageIfSold
+func privacyConsentMessage(r *http.Request, p config.PrivacyConfig) string {
+	localized := localizedPrivacyDefaults(r, p)
+	if localized.Data.Sold {
+		return localized.Consent.MessageIfSold
 	}
-	return p.Consent.Message
+	return localized.Consent.Message
 }
 
 func trackingProviderName(name string) string {

@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="container container-sm">
-<header class="page-header"><nav class="breadcrumb" aria-label="Breadcrumb"><a href="{{path "/server/preferences"}}">{{t .Lang "preferences_page.sync_back"}}</a></nav><h1 class="page-title">{{t .Lang "preferences_page.sync_title"}}</h1><p class="page-lead">{{t .Lang "preferences_page.sync_description"}}</p></header>
+<header class="page-header"><nav class="breadcrumb" aria-label="{{t .Lang "a11y.breadcrumb"}}"><a href="{{path "/server/preferences"}}">{{t .Lang "preferences_page.sync_back"}}</a></nav><h1 class="page-title">{{t .Lang "preferences_page.sync_title"}}</h1><p class="page-lead">{{t .Lang "preferences_page.sync_description"}}</p></header>
 <section class="section-card" aria-labelledby="sync-export"><h2 id="sync-export">{{t .Lang "preferences_page.export_title"}}</h2>
 <p>{{t .Lang "preferences_page.export_url"}}</p><p class="copy-value" id="preference-url">{{.Data.url}}</p><button class="btn copy-btn" type="button" aria-live="polite" data-copy="preference-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
 <p>{{t .Lang "preferences_page.export_code"}}</p><p class="copy-value" id="preference-code">{{.Data.code}}</p><button class="btn copy-btn" type="button" aria-live="polite" data-copy="preference-code" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>

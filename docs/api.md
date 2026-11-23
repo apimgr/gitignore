@@ -47,6 +47,7 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/preferences/tokens/primary` | POST | Issue a primary owner token on request; does not create a resource |
 | `/api/{api_version}/server/preferences/tokens/primary/reveal` | POST | Reveal the primary token; requires the primary Bearer token |
 | `/api/{api_version}/server/preferences/tokens/primary/rotate` | POST | Rotate the primary token |
+| `/api/{api_version}/server/preferences/tokens/primary` | DELETE | Revoke the primary token and delete the owner after confirming the last four token characters |
 | `/api/{api_version}/server/preferences/tokens/{id}/reveal` | POST | Reveal a linked token; requires the owner's Bearer token |
 | `/api/{api_version}/server/preferences/tokens/{id}/rotate` | POST | Rotate a linked token; requires the owner's Bearer token |
 | `/api/{api_version}/server/preferences/tokens/{id}` | PATCH / DELETE | Update or revoke one linked token |
@@ -71,6 +72,12 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/cli/completion/{bash,zsh,fish}` | GET | Shell completions |
 
 Native API success responses use `{ "ok": true, "data": ... }`; paginated lists add a sibling `pagination` object. Errors use `{ "ok": false, "error": "ERROR_CODE", "message": "...", "details": ... }`, with the HTTP status carried by the response status code. Health endpoints and external compatibility routes use their documented native formats. The OpenAPI UI is `/server/docs/swagger`; the GraphiQL interface is `/server/docs/graphql`.
+
+## Public discovery files
+
+The server always provides `/sitemap.xml`, `/feed.xml`, and `/rss.xml`. The sitemap contains only public frontend routes permitted by `web.robots.allow` and `web.robots.deny`; it excludes API routes, preferences, contact forms, and other private or action routes. Public template pages are included as catalog resources. Large sitemaps are split into numbered files referenced by the index.
+
+The Atom and RSS feeds are valid empty feeds for this project because the embedded template catalog has no per-item publication timestamps. They use the request's public origin, provide `ETag` and `Last-Modified`, and return `304 Not Modified` for matching conditional requests. `/robots.txt` includes the absolute request-specific sitemap URL.
 
 ## Contact and security reports
 

@@ -26,6 +26,7 @@ client_binary: gitignore-cli
 - Template composition: merge multiple templates into one output
 - List all available template names
 - Full web frontend (browser, search, composer) using server-side Go templates, dark/light/auto theme, PWA, mobile-first
+- Public discovery files: `/sitemap.xml`, `/feed.xml`, and `/rss.xml`; template feeds remain empty because catalog entries have no publication timestamps
 - Server pages: `/server/about`, `/server/help`, `/server/healthz`, `/server/privacy`, `/server/terms`, `/server/security`, `/server/security/policy`, and `/server/security/thanks`; the report form at `/server/contact` is reached through the security page or its signed security contact link
 - Guest browser preferences at `/server/preferences` with stateless cross-device export/import at `/server/preferences/sync`; preferences and consent remain in browser cookies and are not tied to an account
 - CLI client (`gitignore-cli`) for shell-pipeline use: `gitignore-cli Go Node > .gitignore`

@@ -32,6 +32,8 @@ The contact page accepts reports from visitors. It validates field sizes and add
 | `/api/metrics` and `/api/metrics/{prometheus,grafana,loki}` | Unversioned metrics aliases with the matching per-service bearer token |
 | `/metrics` and `/metrics/{prometheus,grafana,loki}` | Root metrics aliases when enabled; requires the matching per-service bearer token |
 | `/robots.txt` | Crawler directives from configuration |
+| `/sitemap.xml` | Dynamically generated public-page map; excludes API, preferences, and contact routes |
+| `/feed.xml` and `/rss.xml` | Atom and RSS feeds; empty for the timestamp-free embedded template catalog |
 
 Repository-source vulnerabilities should be reported through [GitHub private vulnerability reporting](https://github.com/apimgr/gitignore/security/advisories/new), as described in [.github/SECURITY.md](https://github.com/apimgr/gitignore/blob/main/.github/SECURITY.md). A deployed-instance vulnerability can be reported through the security form linked from `/server/security` and `security.txt`. Do not file vulnerability details in a public issue.
 
@@ -44,6 +46,12 @@ Browser security reports use a separate flow from vulnerability reports. CSP vio
 The optional project key is managed with `--maintenance pgp generate`, `rotate`, `publish`, `export`, `import`, and `delete`. The private key is encrypted at rest; the public key is served at `/.well-known/pgp-key.asc` when publication is enabled. Stored report bodies use the project PGP key when available and otherwise use AES-256-GCM; a researcher's supplied key is used for the acknowledgment email, which contains no report content. Rotation re-encrypts retained PGP-encrypted reports transactionally and keeps the prior encrypted key for the transition period. Keyserver publication retries on the scheduled maintenance cadence. Private-key operations require operator authorization and typed confirmation; private key material is never exposed by a web endpoint.
 
 The public Contact page also handles abuse, DMCA, and privacy requests. It uses a one-time challenge, request and field size limits, validation, and rate limiting. `GET /api/{api_version}/server/contact` publishes the form field descriptors and a fresh challenge without disclosing the destination address. The POST flow has a review step; a message is sent only after the confirmation step. Configure a recipient and SMTP before expecting delivery.
+
+## Owner data and audit log
+
+The owner-token page lets an owner export or remove their identity by using the CLI. Operators can list token prefixes and metadata, revoke linked tokens, or revoke a primary token to delete its owner and all linked tokens. These maintenance commands require root or the configured `server.token`; confirmations require typing the token prefix or owner ID unless `--yes` is supplied. Exports contain token metadata only, never token values, hashes, or encrypted token material, and are created with mode `0600`.
+
+Audit events are stored as JSON Lines in `audit.log`. Each line includes the SHA-256 hash of the prior exact line in `prev`; `audit.anchor` carries the last hash across daily rotation and is stored with mode `0600`. Startup verifies the active chain, reports broken entries without stopping the server, and daily rotation applies the audit retention and compression settings. Operators can inspect the integrity result with `--maintenance compliance report`.
 
 ## Deployment protections
 

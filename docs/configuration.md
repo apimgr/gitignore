@@ -198,6 +198,10 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.branding.content.about`, `.privacy`, `.terms` | Built-in content | Project page content; `privacy` extends built-in privacy text, `about` extends the page, and `terms` overrides built-in terms. |
 | `server.branding.content.footer` | Built-in footer | HTML is sanitized; empty/whitespace disables the custom branding block. |
 | `server.seo.keywords` | `[]` | List of keywords. |
+| `server.seo.sitemap.max_urls` | `50000` | Maximum URLs in one sitemap file; values above the protocol limit are capped at `50000`. Larger catalogs use numbered sitemap files and an index. |
+| `server.seo.sitemap.include_images` | `false` | Reserved for public resource image entries; embedded GitIgnore templates have no image URLs. |
+| `server.seo.feed.max_items` | `50` | Maximum public items per Atom and RSS feed, from `1` through `200`. This catalog has no timestamped public item pages, so both feeds are valid and empty. |
+| `server.seo.feed.title` | Application title | Optional Atom/RSS channel title. |
 | `server.seo.author` | Empty | Author or organization text. |
 | `server.seo.og_image` | Empty | Image URL/data URI/local asset name. |
 | `server.seo.twitter_handle` | Empty | `@handle`. |
@@ -223,8 +227,8 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.rate_limit.read.requests`, `.window` | `yaml.d/security.yml` | `120`, `60` | Requests and seconds; always active, per IP or valid token. |
 | `server.rate_limit.write.requests`, `.window` | `yaml.d/security.yml` | `10`, `60` | Requests and seconds. |
 | `server.rate_limit.health.requests`, `.window` | `yaml.d/security.yml` | `120`, `60` | Requests and seconds. |
-| `server.rate_limit.strict.requests`, `.window` | `yaml.d/security.yml` | `10`, `900` | Requests and seconds for reveal, rotate, and restore attempts. |
-| `server.rate_limit.auth_failures.requests`, `.window` | `yaml.d/security.yml` | `5`, `900` | Failed auth attempts per IP; locks out until window expiration. |
+| `server.rate_limit.strict.requests`, `.window` | `yaml.d/security.yml` | `10`, `900` | Requests and seconds for token reveal, rotate, restore, issue, and primary revoke attempts; keyed by owner or IP. |
+| `server.rate_limit.auth_failures.requests`, `.window` | `yaml.d/security.yml` | `5`, `900` | Failed auth attempts per IP; once reached, all requests from that IP are locked out until the window expires. |
 | `server.rate_limit.global_burst` | `yaml.d/security.yml` | `240` | Per-minute total ceiling. There is no `enabled` switch. |
 | `server.security.reports.retention_days` | `yaml.d/security.yml` | `365` | Days after closure; open reports are never purged. |
 | `server.security.blocklists.enabled` | `yaml.d/security.yml` | `true` | Boolean; built-in `firehol_level1` remains active. |

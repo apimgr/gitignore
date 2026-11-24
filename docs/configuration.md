@@ -351,7 +351,8 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.update.auto_install` | `yaml.d/maintenance.yml` | `false` | Boolean; scheduled checks notify only unless enabled. |
 | `server.update.defer_days` | `yaml.d/maintenance.yml` | `0` | Integer `0–365`; ignored for `devel`. |
 | `server.update.cli_min_version` | `yaml.d/maintenance.yml` | Empty | Optional minimum CLI version returned by autodiscovery. |
-| `tor.onion_address`, `tor.contact_email` | `yaml.d/tor.yml` | Empty, empty | Optional onion hostname (without scheme) and Tor-only contact email. |
+| `server.tor.expose` | `yaml.d/tor.yml` | `false` | Explicitly advertise the runtime-derived onion address in API autodiscovery. |
+| `server.tor.contact_email` | `yaml.d/tor.yml` | Empty | Optional email shown only on Tor responses; never falls back to clearnet contact information. The onion address itself is runtime state read from Tor's hidden-service hostname file. |
 | `server.i2p.enabled` | `yaml.d/i2p.yml` | `true` in containers, `false` elsewhere | Boolean; `--i2p` then `I2P_ENABLED` override the config value. |
 | `server.i2p.binary` | `yaml.d/i2p.yml` | Empty (auto-detect) | Optional `i2pd` executable path. |
 | `server.i2p.sam_address` | `yaml.d/i2p.yml` | `127.0.0.1:7656` | SAMv3 host:port. |

@@ -6,6 +6,8 @@ The catalog and browser pages are public and read-only. The application has no u
 
 The contact page accepts reports from visitors. It validates field sizes and addresses, requires a single-use challenge, and sends messages only to configured recipients when SMTP is available. Security reports use a separate encrypted-storage and disclosure flow. These submissions are not public catalog data.
 
+Configured webhooks receive summary fields only; submitted contact details and report bodies are never sent to webhook transports. On Tor requests, security pages use only the configured Tor contact address and omit clearnet reporting links and locale hints.
+
 ## Security and health endpoints
 
 | Endpoint | Purpose |

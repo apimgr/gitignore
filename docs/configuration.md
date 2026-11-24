@@ -105,15 +105,20 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.database.driver` | `server.yml` | `sqlite` | `sqlite` (aliases `sqlite2`, `sqlite3`) or `libsql` (alias `turso`). A connection URL's scheme selects the driver. |
 | `server.database.url` | `server.yml` or `secrets.yml` | `{data_dir}/db/server.db` | SQLite path/`file:`, or `libsql://`/`https://`. Credential-bearing URLs are stored in `secrets.yml`; rejected URL forms are reported and are not replaced with SQLite. |
 | `server.database.token` | `secrets.yml` | Empty | libsql credential supplied by the operator. |
-| `server.database.pool.max_open` | `server.yml` | The configuration example uses `5`; the pool-sizing table calls `25` the small-deployment default (default unresolved) | Positive connection count; for SQLite this sizes the read pool, while the write pool is fixed at one. |
-| `server.database.pool.max_idle` | `server.yml` | The configuration example uses `2`; the pool-sizing table calls `5` the small-deployment default (default unresolved) | Maximum idle connections; must be compatible with `max_open`. |
-| `server.database.pool.max_lifetime` | `server.yml` | `5m` in the configuration example | Duration before a connection is retired. |
-| `server.database.pool.max_idle_time` | `server.yml` | `1m` in the configuration example | Duration an idle connection may remain open. |
-| `server.database.cache.enabled` | `server.yml` | `true` in the local-cache example; default not stated | Boolean; local SQLite cache for remote libsql/Turso. |
+| `server.database.pool.max_open` | `server.yml` | `25` | Positive connection count; for SQLite this sizes the read pool, while the write pool is fixed at one. |
+| `server.database.pool.max_idle` | `server.yml` | `5` | Maximum idle connections; must be compatible with `max_open`. |
+| `server.database.pool.max_lifetime` | `server.yml` | `5m` | Duration before a connection is retired. |
+| `server.database.pool.max_idle_time` | `server.yml` | `1m` | Duration an idle connection may remain open. |
+| `server.database.cache.enabled` | `server.yml` | `false` | Enable a local SQLite read cache for the remote libSQL driver. |
+| `server.database.cache.path` | `server.yml` | `{data_dir}/db/cache.db` | Local cache file; used only when enabled. |
+| `server.database.cache.sync_interval` | `server.yml` | `30s` | Positive duration between remote-to-local cache syncs. |
+| `server.database.cache.offline_mode` | `server.yml` | `true` | Permit read-only fallback to a cache younger than `max_age` when libSQL is unavailable. |
+| `server.database.cache.max_age` | `server.yml` | `1h` | Maximum cache age before reads must use the remote database. |
+| `server.database.cache.enabled` | `server.yml` | `false` | Boolean; opt-in local SQLite cache for remote libsql/Turso. |
 | `server.database.cache.path` | `server.yml` | `${DATA_DIR}/db/cache.db` in the example | Local SQLite cache path. |
 | `server.database.cache.sync_interval` | `server.yml` | `30s` in the example | Duration between remote synchronization. |
 | `server.database.cache.offline_mode` | `server.yml` | `true` in the example | Boolean; enables read-only cached operation when the remote database is unavailable. |
-| `server.database.cache.max_age` | `server.yml` | `1h` in the example | Maximum cache age before forcing a remote read. |
+| `server.database.cache.max_age` | `server.yml` | `1h` | Maximum cache age before forcing a remote read. |
 | `server.cache.type` | `server.yml` | `memory` | `none`, `memory`, `valkey`, or `redis`. |
 | `server.cache.url` | `server.yml` or `secrets.yml` | Empty | `valkey://`, `valkeys://`, `redis://`, or `rediss://`; credential-bearing URLs go in `secrets.yml`. If set, the URL takes precedence over individual connection fields. |
 | `server.cache.host` | `server.yml` | `localhost` | Host name or address; used when `url` is empty. |
@@ -130,6 +135,8 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.cache.ttl` | `server.yml` | `1h` | Duration for default cache entries. |
 | `server.trusted_proxies.additional` | `server.yml` | `[]` | IPs, CIDRs, or DNS names; DNS names refresh every five minutes. Private and loopback ranges are trusted automatically. |
 | `server.trusted_proxies.client_ip_header` | `server.yml` | `auto` | `auto` or one supported pinned client-IP header name. |
+
+SQLite uses a single serialized write connection and a query-only read pool. Both use WAL, a 10-second busy timeout, and foreign-key enforcement. The server database stores sliding-window rate limits, the database audit index, app secrets, scheduler task state and run history, backup metadata, owner identities and API tokens, and security-report metadata. Configuration remains in `server.yml`, ordered `yaml.d/` files, and `secrets.yml`; it is not stored in the database. libSQL uses the same logical schema with the `srv_` table and index prefix.
 
 ### HTTP, browser, discovery, and localization
 

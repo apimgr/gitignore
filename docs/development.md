@@ -36,6 +36,12 @@ make test
 
 This target runs `go vet`, `govulncheck`, the Go test suite, and the coverage threshold inside the Go container. Translation-key consistency is covered by the test suite. Optional container/integration scripts are in `tests/`; consult their help or source before running them because some require Incus or a configured browser environment.
 
+For the systemd/container integration tier, run `./tests/run_tests.sh`; it selects Incus when available and Docker otherwise. The browser suite is on-demand after major frontend changes and covers server-rendered, no-JavaScript, and full-JavaScript behavior:
+
+```sh
+./tests/e2e.sh
+```
+
 ## Release artifacts
 
 ```sh
@@ -48,6 +54,8 @@ make release
 ## Documentation
 
 Update the relevant pages in `docs/` when browser routes, API behavior, configuration, CLI behavior, security, or integrations change. Update the translation guide and locale documentation when language support changes. Build commands are described in the root Makefile; there are no `make run`, `make run-dev`, or `make build-all` targets.
+
+Validate the documentation with `python -m mkdocs build --strict`. When running locally, pass `--site-dir` to a project-scoped temporary directory so generated site files do not enter the repository.
 
 ## Contributing
 

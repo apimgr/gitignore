@@ -1,11 +1,13 @@
 # GitIgnore API
 
-GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, browser interface, and companion `gitignore-cli`. The Go server builds as a self-contained static binary or runs in Docker.
-
 [![CI](https://github.com/apimgr/gitignore/actions/workflows/ci.yml/badge.svg)](https://github.com/apimgr/gitignore/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/apimgr/gitignore)](https://github.com/apimgr/gitignore/releases)
 [![License](https://img.shields.io/github/license/apimgr/gitignore)](LICENSE.md)
 [![Docs](https://readthedocs.org/projects/apimgr-gitignore/badge/?version=latest)](https://apimgr-gitignore.readthedocs.io)
+
+## About
+
+GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a public REST API, read-only GraphQL API, browser interface, and companion `gitignore-cli`. The Go server builds as a self-contained static binary or runs in Docker.
 
 ## Features
 
@@ -22,7 +24,7 @@ GitIgnore serves a curated, embedded catalog of `.gitignore` templates through a
 
 The catalog API is public and read-only. There are no user accounts, admin web panel, or user-submitted templates. See [IDEA.md](IDEA.md) for product scope.
 
-## Install
+## Production
 
 Download the latest server and client artifacts from [GitHub Releases](https://github.com/apimgr/gitignore/releases/latest).
 
@@ -50,8 +52,6 @@ xattr -d com.apple.quarantine /usr/local/bin/gitignore 2>/dev/null || true
 ```
 
 Windows users should download the matching `.exe` and add its directory to `%PATH%`. FreeBSD users should download the matching artifact, make it executable with `chmod +x`, and place it on their `PATH`.
-
-## Production
 
 ### Docker
 

@@ -4,7 +4,7 @@ GitIgnore serves the public template catalog through a static server binary or D
 
 ## Install and configure
 
-See [Installation](installation.md) for deployment options and [Configuration](configuration.md) for paths, settings, and precedence. On first start, the server creates its configuration and required runtime directories. The catalog and locale files are embedded in the binaries.
+See [Installation](installation.md) for deployment options and [Configuration](configuration.md) for paths, settings, and precedence. On first start, the server creates its configuration and required runtime directories. When started as root on Unix, it creates the fixed `gitignore` service account if needed, sets runtime-directory ownership, binds the listener, and drops privileges to that account. A non-root start keeps the current identity and uses private runtime directories. The catalog and locale files are embedded in the binaries.
 
 ## Server pages
 

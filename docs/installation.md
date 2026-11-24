@@ -67,6 +67,8 @@ sudo gitignore --service start
 
 Use `gitignore --service --help` for supported service operations. Service installation changes host service configuration and should be performed on the intended deployment host.
 
+On Unix, a root startup creates the fixed `gitignore` service account if it is missing, assigns it ownership of runtime data, binds the listener, and then drops privileges. A non-root startup does not create an account and keeps the current user.
+
 ## Daemon mode
 
 On supported Unix systems, start the server detached from the terminal with `--daemon`:

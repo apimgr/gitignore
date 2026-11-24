@@ -90,7 +90,6 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.debug.runtime_endpoints` | `server.yml` | `true` in the debug configuration example | Boolean; effective only while the debug flag is enabled. |
 | `server.api_version` | `server.yml` | `v1` | API version path segment. |
 | `server.baseurl` | `server.yml` | `/` | URL path prefix; reverse-proxy prefix headers take precedence. |
-| `server.user`, `server.group` | `server.yml` | Automatically selected | System account/group names; privilege behavior is platform-specific. |
 | `server.pidfile` | `server.yml` | `true` | Boolean. PID files are skipped in containers. |
 | `server.daemonize` | `server.yml` | `false` | Boolean; changing it requires restart. |
 | `server.ssl.enabled` | `server.yml` | `false` | Boolean; controls TLS on the bound listener. |

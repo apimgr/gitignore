@@ -7,7 +7,7 @@ Bring the current repository into complete alignment with AI.md and IDEA.md. AI.
 ## Work sequence
 
 1. Complete the remaining read-only requirement inventory from AI.md PART 0–32, IDEA.md, project rules, current code, all server pages, README, docs, and existing tests. Preserve current user changes.
-2. Align the owner-token cookie identifier with AI.md's lowercase suffix rule. A successful validation of the prior cookie transparently writes the compliant name and expires the prior name; AI.md does not specify this persistent-cookie migration, so report that guidance gap to the coordinating session.
+2. Align the owner-token cookie identifier with AI.md's lowercase suffix rule. Preserve existing sessions by accepting the legacy cookie, refreshing the compliant cookie after validation, and expiring the legacy cookie.
 3. Complete browser-page localization across every rendered page and all supported locales. Translate visible text, accessible labels, titles, metadata, legal content, and no-JavaScript messages; preserve behavior and add deterministic locale-conformance coverage.
 4. Verify and complete localization of other human-readable output required by PART 30, including API errors, health/status, OpenAPI/Swagger, GraphQL, email, and server/client CLI output.
 5. Bring README and all ReadTheDocs content into current alignment. Provide a per-setting configuration reference with defaults, accepted values, validation, and canonical file locations; document routes, formats, security/reporting, discovery, integrations, CLI, and operations.

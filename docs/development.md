@@ -36,7 +36,7 @@ make test
 
 This target runs `go vet`, `govulncheck`, the Go test suite, and the coverage threshold inside the Go container. Translation-key consistency is covered by the test suite. Optional container/integration scripts are in `tests/`; consult their help or source before running them because some require Incus or a configured browser environment.
 
-For the systemd/container integration tier, run `./tests/run_tests.sh`; it selects Incus when available and Docker otherwise. The browser suite is on-demand after major frontend changes and covers server-rendered, no-JavaScript, and full-JavaScript behavior:
+`./tests/run_tests.sh` runs the basic Docker binary-validation suite. Run `./tests/incus.sh` separately for service and systemd/container integration. The browser suite is on-demand after major frontend changes and covers server-rendered, no-JavaScript, and full-JavaScript behavior:
 
 ```sh
 ./tests/e2e.sh

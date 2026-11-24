@@ -114,11 +114,6 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.database.cache.sync_interval` | `server.yml` | `30s` | Positive duration between remote-to-local cache syncs. |
 | `server.database.cache.offline_mode` | `server.yml` | `true` | Permit read-only fallback to a cache younger than `max_age` when libSQL is unavailable. |
 | `server.database.cache.max_age` | `server.yml` | `1h` | Maximum cache age before reads must use the remote database. |
-| `server.database.cache.enabled` | `server.yml` | `false` | Boolean; opt-in local SQLite cache for remote libsql/Turso. |
-| `server.database.cache.path` | `server.yml` | `${DATA_DIR}/db/cache.db` in the example | Local SQLite cache path. |
-| `server.database.cache.sync_interval` | `server.yml` | `30s` in the example | Duration between remote synchronization. |
-| `server.database.cache.offline_mode` | `server.yml` | `true` in the example | Boolean; enables read-only cached operation when the remote database is unavailable. |
-| `server.database.cache.max_age` | `server.yml` | `1h` | Maximum cache age before forcing a remote read. |
 | `server.cache.type` | `server.yml` | `memory` | `none`, `memory`, `valkey`, or `redis`. |
 | `server.cache.url` | `server.yml` or `secrets.yml` | Empty | `valkey://`, `valkeys://`, `redis://`, or `rediss://`; credential-bearing URLs go in `secrets.yml`. If set, the URL takes precedence over individual connection fields. |
 | `server.cache.host` | `server.yml` | `localhost` | Host name or address; used when `url` is empty. |
@@ -136,7 +131,7 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.trusted_proxies.additional` | `server.yml` | `[]` | IPs, CIDRs, or DNS names; DNS names refresh every five minutes. Private and loopback ranges are trusted automatically. |
 | `server.trusted_proxies.client_ip_header` | `server.yml` | `auto` | `auto` or one supported pinned client-IP header name. |
 
-SQLite uses a single serialized write connection and a query-only read pool. Both use WAL, a 10-second busy timeout, and foreign-key enforcement. The server database stores sliding-window rate limits, the database audit index, app secrets, scheduler task state and run history, backup metadata, owner identities and API tokens, and security-report metadata. Configuration remains in `server.yml`, ordered `yaml.d/` files, and `secrets.yml`; it is not stored in the database. libSQL uses the same logical schema with the `srv_` table and index prefix.
+SQLite uses a single serialized write connection and a query-only read pool. Both use WAL, a 10-second busy timeout, and foreign-key enforcement. The server database stores sliding-window rate limits, the relational audit copy, app secrets, scheduler task state and run history, backup metadata, owner identities and API tokens, temporary IP blocks, and security-report metadata. Audit events are also written to the append-only, hash-chained JSONL log; the database copy supports relational queries. Configuration remains in `server.yml`, ordered `yaml.d/` files, and `secrets.yml`; it is not stored in the database. libSQL uses the same logical schema with the `srv_` table and index prefix. When the optional local SQLite cache is enabled for libSQL, reads use the synchronized local mirror and refresh from the remote on a cache miss; writes remain remote-first. If the remote is unavailable, the server permits read-only fallback only while the local cache is within `max_age`.
 
 ### HTTP, browser, discovery, and localization
 
@@ -242,6 +237,11 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.security.blocklists.extra_sources[]` | `yaml.d/security.yml` | `[]` | Each source has `id` (unique `a-z0-9_`, not `firehol_level1`), `type` (`ip` or `domain`), HTTPS `url`, and `enabled` (`true` by default). |
 | `server.security.allowlist[]` | `yaml.d/security.yml` | `[]` | Entries have `cidr` (IP/CIDR) and optional `description`. |
 | `server.security.blocked_ips[]` | `yaml.d/security.yml` | `[]` | Entries have `cidr` and `reason`. |
+| `server.security.abuse_detection.request_flood.multiplier` | `yaml.d/security.yml` | `10` | Multiplier over the configured per-class rate limit before an address is temporarily blocked. |
+| `server.security.abuse_detection.request_flood.window` | `yaml.d/security.yml` | `60s` | Sliding observation window for request-flood detection. |
+| `server.security.abuse_detection.request_flood.block_duration` | `yaml.d/security.yml` | `1h` | Duration of an automatic IP block; expired entries are removed by the scheduler. |
+| `server.security.abuse_detection.auto_block_ip` | `yaml.d/security.yml` | `true` | Persist a temporary block after the request-flood threshold is reached. |
+| `server.security.abuse_detection.auto_alert` | `yaml.d/security.yml` | `true` | Send the configured security alert for an automatic flood block when email delivery is available. |
 | `server.geoip.enabled` | `yaml.d/security.yml` | `true` | Boolean. Lookup failures fail open. |
 | `server.geoip.deny_countries`, `.allow_countries` | `yaml.d/security.yml` | `[]`, `[]` | Uppercase ISO 3166-1 alpha-2 codes. If both are set, `allow_countries` wins. |
 | `server.geoip.presets` | `yaml.d/security.yml` | `{}` | Operator-authored map of preset names to country-code lists; never applied automatically. |

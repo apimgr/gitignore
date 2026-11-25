@@ -254,6 +254,8 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.tokens.cookie_max_age` | `yaml.d/security.yml` | `1y` | Duration for sliding owner cookie lifetime. |
 | `server.tokens.idle_purge_days` | `yaml.d/security.yml` | `0` (never) | Days; purges only owners with no resources. |
 
+The owner cookie name is recorded in `IDEA.md`. When a deployment changes an older mixed-case name to a compliant lowercase name, `owner_token_legacy` records the old name during the migration window. The server checks the new cookie first, migrates a valid legacy value on first use, and expires the old cookie; API requests never use cookie authentication.
+
 ### Pages, contact delivery, privacy, and analytics
 
 | Key | File | Default | Accepted values and validation |

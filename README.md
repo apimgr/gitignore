@@ -123,6 +123,7 @@ The default versioned API base is `/api/v1`; operators may configure the version
 | `GET /api/v1/categories` | List template categories |
 | `GET /api/v1/stats` | Catalog statistics |
 | `POST /api/v1/server/graphql` | Read-only GraphQL query |
+| `GET /api/v1/server/graphql?query=...` | Read-only GraphQL query, including the no-JavaScript help form |
 | `POST /api/v1/server/mcp` | Stateless MCP; Bearer token required |
 | `GET /api/v1/server/healthz` | Health status |
 | `GET /api/v1/server/swagger` | OpenAPI document |

@@ -14,14 +14,14 @@
 | `/api/mcp` and `/mcp` | Direct aliases for the MCP endpoint |
 | `/server/help/mcp` | Human-readable MCP setup and tool guidance |
 | `/api/{api_version}/server/help/mcp` | MCP help metadata and project guidance |
-| `/api/graphql` and `/api/{api_version}/server/graphql` | GraphQL query endpoints (POST); the versioned endpoint also supports GET with `query`, optional JSON `variables`, and `operationName` |
+| `/api/graphql` and `/api/{api_version}/server/graphql` | GraphQL query endpoints (POST and GET); GET accepts `query`, optional JSON `variables`, and `operationName` |
 | `/api/v1/cli/sh` | Generated POSIX shell helper |
 | `/api/v1/cli/ps` | Generated PowerShell helper |
 | `/api/v1/cli/completion/{bash,zsh,fish}` | Shell completion scripts |
 
 See [API Reference](api.md) for route details and the unversioned gitignore.io compatibility routes.
 
-The versioned GraphQL GET route provides a plain usage response when `query` is omitted and accepts the same query options as POST. This route also backs the GraphQL page's no-JavaScript help link; the interactive GraphiQL editor still requires JavaScript.
+Both GraphQL GET routes provide a plain usage response when `query` is omitted and accept the same query options as POST. The versioned route backs the GraphQL page's no-JavaScript help link; the interactive GraphiQL editor still requires JavaScript.
 
 ## Progressive Web App
 

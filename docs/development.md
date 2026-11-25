@@ -20,6 +20,17 @@ The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go b
 
 ## Build
 
+| Target | Behavior |
+|---|---|
+| `make dev` | Build server and client into a project-scoped temporary directory without release metadata. |
+| `make local` | Build versioned server and client binaries for the local platform. |
+| `make build` | Build local binaries and the eight supported server and client platform artifacts. |
+| `make test` | Run vet, vulnerability scanning, unit tests, and the coverage gate in Docker. |
+| `make release` | Build and publish the stable `release.txt` version as a GitHub release. It replaces an existing release and tag with the same version. |
+| `make beta` | Create and push a timestamped beta tag from a clean `main` branch; CI publishes the beta. |
+| `make docker` | Build and push the multi-architecture container image. |
+| `make clean` | Remove `binaries/` and `releases/`. |
+
 ```sh
 make dev    # Build server and client into a project-scoped temporary directory
 make local  # Build binaries for the host OS/architecture into binaries/
@@ -49,7 +60,7 @@ make build
 make release
 ```
 
-`make release` builds the configured platform matrix and writes version, source archive, and checksum artifacts under `releases/`. `make docker` builds and pushes the configured multi-architecture image, so use it only when publishing is intended.
+`make release` requires a stable semantic version in `release.txt`. It builds the platform matrix, prepares version, source archive, and checksum assets, then creates the matching `v{version}` GitHub release as latest. If that release or tag already exists, the target deletes it before recreating it. Beta and devel releases are published by CI from their tags and commits. `make docker` builds and pushes the configured multi-architecture image.
 
 ## Documentation
 
@@ -59,10 +70,10 @@ Validate the documentation with `python -m mkdocs build --strict`. When running 
 
 ## Contributing
 
-1. Create a feature branch.
+1. Work on `main` or use a temporary local branch and merge it into `main` before publishing.
 2. Make the change and add or update focused tests where behavior changes.
 3. Run `make test` in Docker.
 4. Update the affected documentation pages.
-5. Submit a pull request with a concise description of behavior and verification.
+5. Push through the repository's `gitcommit` workflow and check the resulting CI run.
 
 Follow standard Go formatting and place comments above the code they describe. See the repository's [AI.md file](https://github.com/apimgr/gitignore/blob/main/AI.md) for the full coding requirements.

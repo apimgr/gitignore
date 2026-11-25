@@ -144,7 +144,7 @@ All project-defined API routes are public and read-only. Template routes use the
 | GET | `/api/{api_version}/templates.tar.gz` | None | Download the complete catalog as a gzip tar archive. |
 | POST | `/api/{api_version}/server/graphql` | None | Submit a read-only GraphQL query as JSON; returns query data. |
 | GET | `/api/{api_version}/server/graphql` | None | Run a read-only GraphQL query using the `query`, `variables`, and `operationName` parameters; without `query`, return usage guidance. |
-| POST | `/api/graphql` | None | Current-version alias of the GraphQL query endpoint. |
+| POST, GET | `/api/graphql` | None | Current-version alias of the GraphQL query endpoint; GET accepts query parameters for read-only queries. |
 | POST | `/api/{api_version}/server/mcp` | Bearer token | Stateless MCP endpoint exposing public read-only API operations as tools. |
 | GET | `/api/list` | None | gitignore.io-compatible list; `format=json` returns its compatible JSON catalog. |
 | GET | `/api/{name1,name2,...}` | None | gitignore.io-compatible composition; returns wrapped template text and compatibility errors for unknown names. |

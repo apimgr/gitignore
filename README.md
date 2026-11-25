@@ -68,7 +68,7 @@ The container stores configuration and data in the mounted directories. Use a de
 
 ### Docker Compose
 
-The production Compose file listens on `172.17.0.1:64180`. Copy it to a deployment directory before starting so persistent configuration and data stay outside the source checkout.
+The production Compose file runs the app with a Valkey cache and listens on `172.17.0.1:64180`. Copy it to a deployment directory before starting so persistent configuration and data stay outside the source checkout.
 
 ```sh
 docker compose -f /path/to/deployment/docker-compose.yml up -d
@@ -124,6 +124,8 @@ The default versioned API base is `/api/v1`; operators may configure the version
 | `GET /api/v1/stats` | Catalog statistics |
 | `POST /api/v1/server/graphql` | Read-only GraphQL query |
 | `GET /api/v1/server/graphql?query=...` | Read-only GraphQL query, including the no-JavaScript help form |
+| `POST /api/graphql` | Current-version GraphQL alias |
+| `GET /api/graphql?query=...` | Current-version GraphQL alias for read-only queries |
 | `POST /api/v1/server/mcp` | Stateless MCP; Bearer token required |
 | `GET /api/v1/server/healthz` | Health status |
 | `GET /api/v1/server/swagger` | OpenAPI document |
@@ -151,6 +153,16 @@ Build the server and client for supported platforms with:
 ```sh
 make build
 ```
+
+| Target | Purpose |
+|---|---|
+| `make dev` | Build server and client into a project-scoped temporary directory. |
+| `make local` | Build both binaries for the local platform. |
+| `make build` | Build both binaries for all eight supported platforms. |
+| `make test` | Run vet, vulnerability scanning, unit tests, and coverage enforcement. |
+| `make release` | Publish the stable `release.txt` version as a GitHub release. |
+| `make beta` | Push a timestamped beta tag from a clean `main` branch for CI publishing. |
+| `make docker` | Build and push the multi-architecture container image. |
 
 See [Development](docs/development.md) for repository layout and contribution guidance. AI.md defines the project implementation and verification requirements.
 

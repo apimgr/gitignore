@@ -67,6 +67,7 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/swagger` | GET | OpenAPI document |
 | `/api/{api_version}/server/graphql` | POST | GraphQL query endpoint with a JSON request body |
 | `/api/{api_version}/server/graphql` | GET | Read-only GraphQL query using `query`, optional JSON `variables`, and optional `operationName` parameters |
+| `/api/graphql` | POST, GET | Current-version alias for GraphQL queries; GET accepts the same query parameters |
 | `/api/{api_version}/server/mcp` | POST | Stateless MCP JSON-RPC endpoint; requires the same Bearer token as the REST API and exposes only operations authorized for that token |
 | `/api/{api_version}/cli/sh` | GET | Generated POSIX shell helper |
 | `/api/{api_version}/cli/ps` | GET | Generated PowerShell helper |
@@ -104,7 +105,7 @@ Template names are matched case-insensitively. Unknown names produce the compati
 
 ## GraphQL
 
-The read-only GraphQL endpoint accepts JSON POST requests at `/api/graphql` and `/api/{api_version}/server/graphql`. The versioned endpoint also accepts GET requests with a URL-encoded `query` and optional JSON `variables` and `operationName` parameters. Without a `query`, GET returns usage guidance. The browser playground is `/server/docs/graphql`; its no-JavaScript card links directly to the GET endpoint. Common query fields include `template(name)`, `list`, `search(q)`, `categories`, `category(name)`, `combine(templates)`, and `stats`.
+The read-only GraphQL endpoint accepts JSON POST requests at `/api/graphql` and `/api/{api_version}/server/graphql`. Both routes also accept GET requests with a URL-encoded `query` and optional JSON `variables` and `operationName` parameters. Without a `query`, GET returns usage guidance. The browser playground is `/server/docs/graphql`; its no-JavaScript card links directly to the GET endpoint. Common query fields include `template(name)`, `list`, `search(q)`, `categories`, `category(name)`, `combine(templates)`, and `stats`.
 
 MCP uses stateless Streamable HTTP JSON-RPC at `/api/{api_version}/server/mcp`, with direct aliases at `/api/mcp` and `/mcp`. Every request requires `Authorization: Bearer <token>`; missing or invalid credentials receive `401`. Requests use protocol revision `2026-07-28` and include matching `MCP-Protocol-Version` and `Mcp-Method` headers; calls to named tools, resources, or prompts also include `Mcp-Name`. The endpoint validates `Origin` before credentials and protocol headers. It uses the REST API's token validation and per-operation authorization. `tools/list` includes only operations allowed to the caller. Token-management and token-issuance operations are never tools. Use a separate linked token for each MCP client; create and manage linked tokens at `/server/preferences/tokens`. The endpoint accepts POST only. See the in-app `/server/help/mcp` page for connection details.
 

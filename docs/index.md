@@ -4,7 +4,7 @@ GitIgnore serves a curated catalog of `.gitignore` templates through a versioned
 
 ## Quick start
 
-The production Compose file is under `docker/`; copy it to a deployment directory so its persistent relative `volumes/` paths stay outside the source checkout. It listens on host address `172.17.0.1:64180` and routes to container port `80`.
+The production Compose file is under `docker/`; it runs the app with Valkey and persists its data under `volumes/`. Copy it to a deployment directory so those relative paths stay outside the source checkout. It listens on host address `172.17.0.1:64180` and routes to container port `80`.
 
 From the deployment directory containing the copied Compose file, start it with:
 

@@ -160,6 +160,7 @@ make build
 | `make local` | Build both binaries for the local platform. |
 | `make build` | Build both binaries for all eight supported platforms. |
 | `make test` | Run vet, vulnerability scanning, unit tests, and coverage enforcement. |
+| `make test TEST_E2E=1` | Run the browser end-to-end suite on demand, separate from the commit gate. |
 | `make release` | Publish the stable `release.txt` version as a GitHub release. |
 | `make beta` | Push a timestamped beta tag from a clean `main` branch for CI publishing. |
 | `make docker` | Build and push the multi-architecture container image. |

@@ -26,6 +26,7 @@ The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go b
 | `make local` | Build versioned server and client binaries for the local platform. |
 | `make build` | Build local binaries and the eight supported server and client platform artifacts. |
 | `make test` | Run vet, vulnerability scanning, unit tests, and the coverage gate in Docker. |
+| `make test TEST_E2E=1` | Run the browser end-to-end suite on demand; this is separate from the commit gate. |
 | `make release` | Build and publish the stable `release.txt` version as a GitHub release. It replaces an existing release and tag with the same version. |
 | `make beta` | Create and push a timestamped beta tag from a clean `main` branch; CI publishes the beta. |
 | `make docker` | Build and push the multi-architecture container image. |

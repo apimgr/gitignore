@@ -4,19 +4,26 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
+	"runtime/debug"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,14 +32,16 @@ import (
 
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
+	"github.com/apimgr/gitignore/src/diskcheck"
 	apppath "github.com/apimgr/gitignore/src/path"
 	"github.com/apimgr/gitignore/src/pgp"
+	"github.com/apimgr/gitignore/src/scheduler"
 )
 
 // Backup encryption parameters (AI.md PART 21). Argon2id derives the AES-256
 // key from the operator password; the key is never persisted and the password
-// is never stored. saltLen/nonceLen are prepended to the ciphertext so restore
-// can reconstruct the key without any side-channel state.
+// is never stored. The authenticated cleartext header carries the salt, KDF
+// parameters, nonce, and non-secret key identifier.
 const (
 	backupManifestVersion = "1.0.0"
 	backupArgonTime       = 3
@@ -41,20 +50,38 @@ const (
 	backupKeyLen          = 32
 	backupSaltLen         = 16
 	backupNonceLen        = 12
+	backupMagic           = "BKUP1"
+	backupKeyIDLen        = 8
+	backupHeaderLen       = len(backupMagic) + backupSaltLen + 4 + 4 + 1 + backupNonceLen + backupKeyIDLen
+	backupExtensionMagic  = "BKX1"
 )
 
 // backupManifest is the manifest.json embedded at the root of every archive.
 // Checksums maps each archived file path to its SHA-256, letting restore
 // verify integrity before any file is installed (AI.md PART 21 → "Manifest").
 type backupManifest struct {
-	Version          string            `json:"version"`
-	CreatedAt        string            `json:"created_at"`
-	CreatedBy        string            `json:"created_by"`
-	AppVersion       string            `json:"app_version"`
-	Contents         []string          `json:"contents"`
-	Checksums        map[string]string `json:"checksums"`
-	Encrypted        bool              `json:"encrypted"`
-	EncryptionMethod string            `json:"encryption_method,omitempty"`
+	Version          string               `json:"version"`
+	CreatedAt        string               `json:"created_at"`
+	SnapshotAt       string               `json:"snapshot_at"`
+	CreatedBy        string               `json:"created_by"`
+	AppVersion       string               `json:"app_version"`
+	Type             string               `json:"type"`
+	SHA256           string               `json:"sha256"`
+	BaseBackup       string               `json:"base_backup,omitempty"`
+	BaseSHA256       string               `json:"base_sha256,omitempty"`
+	Deleted          []string             `json:"deleted,omitempty"`
+	Contents         []string             `json:"contents"`
+	Checksums        map[string]string    `json:"checksums"`
+	Files            []backupManifestFile `json:"files"`
+	Encrypted        bool                 `json:"encrypted"`
+	EncryptionMethod string               `json:"encryption_method,omitempty"`
+}
+
+type backupManifestFile struct {
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Modified int64  `json:"mtime"`
+	SHA256   string `json:"sha256"`
 }
 
 // backupSource pairs an on-disk file with the path it takes inside the archive.
@@ -112,12 +139,22 @@ func collectBackupSources(configDir, dataDir string) ([]backupSource, error) {
 // buildBackupArchive builds a gzip-compressed tar in memory containing the
 // manifest and all source files, returning the raw archive bytes.
 func buildBackupArchive(sources []backupSource, encrypted bool) ([]byte, error) {
+	return buildBackupArchiveAt(sources, encrypted, time.Now().UTC(), "full", "", "", nil)
+}
+
+func buildBackupArchiveAt(sources []backupSource, encrypted bool, snapshotAt time.Time, backupType, baseBackup, baseSHA256 string, deleted []string) ([]byte, error) {
 	manifest := backupManifest{
 		Version:    backupManifestVersion,
-		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:  snapshotAt.UTC().Format(time.RFC3339),
+		SnapshotAt: snapshotAt.UTC().Format(time.RFC3339),
 		CreatedBy:  "operator",
 		AppVersion: Version,
+		Type:       backupType,
+		BaseBackup: baseBackup,
+		BaseSHA256: baseSHA256,
+		Deleted:    append([]string(nil), deleted...),
 		Checksums:  make(map[string]string),
+		Files:      make([]backupManifestFile, 0, len(sources)),
 		Encrypted:  encrypted,
 	}
 	if encrypted {
@@ -136,10 +173,22 @@ func buildBackupArchive(sources []backupSource, encrypted bool) ([]byte, error) 
 			return nil, fmt.Errorf("%s: %w", cliText("cli.backup.source_read_failed", "path", src.diskPath), err)
 		}
 		sum := sha256.Sum256(data)
-		manifest.Checksums[src.archivePath] = hex.EncodeToString(sum[:])
+		checksum := hex.EncodeToString(sum[:])
+		manifest.Checksums[src.archivePath] = checksum
 		manifest.Contents = append(manifest.Contents, src.archivePath)
+		info, err := os.Stat(src.diskPath)
+		if err != nil {
+			return nil, err
+		}
+		manifest.Files = append(manifest.Files, backupManifestFile{Path: src.archivePath, Size: int64(len(data)), Modified: info.ModTime().Unix(), SHA256: checksum})
 		files = append(files, payload{name: src.archivePath, data: data})
 	}
+	fileList, err := json.Marshal(manifest.Files)
+	if err != nil {
+		return nil, err
+	}
+	manifestHash := sha256.Sum256(fileList)
+	manifest.SHA256 = hex.EncodeToString(manifestHash[:])
 
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -183,9 +232,9 @@ func buildBackupArchive(sources []backupSource, encrypted bool) ([]byte, error) 
 }
 
 // encryptBackup derives a key from password via Argon2id and encrypts the
-// archive with AES-256-GCM. Output layout: salt || nonce || ciphertext. The
-// plaintext archive never touches disk (AI.md PART 21 → "How Encryption Works").
-func encryptBackup(plaintext []byte, password string) ([]byte, error) {
+// archive with AES-256-GCM. The cleartext header is authenticated as GCM AAD.
+// The plaintext archive never touches disk (AI.md PART 21).
+func encryptBackup(plaintext []byte, password string, baseBackup ...string) ([]byte, error) {
 	salt := make([]byte, backupSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, err
@@ -204,11 +253,31 @@ func encryptBackup(plaintext []byte, password string) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
-
-	out := make([]byte, 0, len(salt)+len(nonce)+len(ciphertext))
-	out = append(out, salt...)
-	out = append(out, nonce...)
+	header := make([]byte, 0, backupHeaderLen)
+	header = append(header, backupMagic...)
+	header = append(header, salt...)
+	var encoded [8]byte
+	binary.BigEndian.PutUint32(encoded[:4], backupArgonMemory)
+	binary.BigEndian.PutUint32(encoded[4:], backupArgonTime)
+	header = append(header, encoded[:]...)
+	header = append(header, byte(backupArgonThreads))
+	header = append(header, nonce...)
+	header = append(header, backupKeyID(key)...)
+	base := ""
+	if len(baseBackup) > 0 {
+		base = baseBackup[0]
+	}
+	if len(base) > 0xffff || (base != "" && filepath.Base(base) != base) {
+		return nil, errors.New("incremental base reference is invalid")
+	}
+	header = append(header, backupExtensionMagic...)
+	var baseLength [2]byte
+	binary.BigEndian.PutUint16(baseLength[:], uint16(len(base)))
+	header = append(header, baseLength[:]...)
+	header = append(header, base...)
+	ciphertext := gcm.Seal(nil, nonce, plaintext, header)
+	out := make([]byte, 0, len(header)+len(ciphertext))
+	out = append(out, header...)
 	out = append(out, ciphertext...)
 	return out, nil
 }
@@ -218,6 +287,27 @@ func encryptBackup(plaintext []byte, password string) ([]byte, error) {
 // password fails the GCM tag check and returns an error (AI.md PART 21
 // "Decrypt test").
 func decryptBackup(blob []byte, password string) ([]byte, error) {
+	if bytes.HasPrefix(blob, []byte(backupMagic)) {
+		header, err := parseBackupHeader(blob)
+		if err != nil {
+			return nil, err
+		}
+		key := argon2.IDKey([]byte(password), header.salt, header.time, header.memory, header.threads, backupKeyLen)
+		if !hmac.Equal(header.keyID, backupKeyID(key)) {
+			return nil, errors.New(cliText("cli.backup.wrong_password"))
+		}
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return nil, err
+		}
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return nil, err
+		}
+		return gcm.Open(nil, header.nonce, blob[header.headerLength:], blob[:header.headerLength])
+	}
+	// Backward compatibility for archives created before the authenticated
+	// BKUP1 header was introduced.
 	if len(blob) < backupSaltLen+backupNonceLen {
 		return nil, errors.New(cliText("cli.backup.encrypted_truncated"))
 	}
@@ -241,6 +331,75 @@ func decryptBackup(blob []byte, password string) ([]byte, error) {
 	return plaintext, nil
 }
 
+type parsedBackupHeader struct {
+	salt         []byte
+	memory       uint32
+	time         uint32
+	threads      uint8
+	nonce        []byte
+	keyID        []byte
+	baseBackup   string
+	headerLength int
+}
+
+func parseBackupHeader(blob []byte) (parsedBackupHeader, error) {
+	if len(blob) < backupHeaderLen+16 || string(blob[:len(backupMagic)]) != backupMagic {
+		return parsedBackupHeader{}, errors.New("encrypted backup header is invalid")
+	}
+	pos := len(backupMagic)
+	header := parsedBackupHeader{salt: blob[pos : pos+backupSaltLen]}
+	pos += backupSaltLen
+	header.memory = binary.BigEndian.Uint32(blob[pos : pos+4])
+	pos += 4
+	header.time = binary.BigEndian.Uint32(blob[pos : pos+4])
+	pos += 4
+	header.threads = blob[pos]
+	pos++
+	header.nonce = blob[pos : pos+backupNonceLen]
+	pos += backupNonceLen
+	header.keyID = blob[pos : pos+backupKeyIDLen]
+	pos += backupKeyIDLen
+	header.headerLength = pos
+	if len(blob) >= pos+len(backupExtensionMagic)+2 && string(blob[pos:pos+len(backupExtensionMagic)]) == backupExtensionMagic {
+		pos += len(backupExtensionMagic)
+		baseLength := int(binary.BigEndian.Uint16(blob[pos : pos+2]))
+		pos += 2
+		if len(blob) < pos+baseLength+16 {
+			return parsedBackupHeader{}, errors.New("encrypted backup base reference is truncated")
+		}
+		header.baseBackup = string(blob[pos : pos+baseLength])
+		if header.baseBackup != "" && filepath.Base(header.baseBackup) != header.baseBackup {
+			return parsedBackupHeader{}, errors.New("encrypted backup base reference is invalid")
+		}
+		header.headerLength = pos + baseLength
+	} else if len(blob) < pos+16 {
+		return parsedBackupHeader{}, errors.New("encrypted backup ciphertext is truncated")
+	}
+	if header.memory < 8*1024 || header.memory > 1024*1024 || header.time == 0 || header.time > 10 || header.threads == 0 || header.threads > 32 {
+		return parsedBackupHeader{}, errors.New("encrypted backup KDF parameters are invalid")
+	}
+	return header, nil
+}
+
+func backupKeyID(key []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte("key-id"))
+	return []byte(hex.EncodeToString(mac.Sum(nil))[:backupKeyIDLen])
+}
+
+func backupArchiveKeyMatches(path, password string) (bool, error) {
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	header, err := parseBackupHeader(blob)
+	if err != nil {
+		return false, err
+	}
+	key := argon2.IDKey([]byte(password), header.salt, header.time, header.memory, header.threads, backupKeyLen)
+	return hmac.Equal(header.keyID, backupKeyID(key)), nil
+}
+
 // promptPassword reads a password from the terminal without echoing it. It
 // never accepts a password on the command line (AI.md PART 21 note: CLI
 // passwords leak via shell history and process lists).
@@ -259,7 +418,12 @@ func promptPassword(prompt string) (string, error) {
 }
 
 // runBackup implements `--maintenance backup [filename]`.
-func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error {
+func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) (result error) {
+	defer func() {
+		if result != nil {
+			appendBackupAudit("backup.failed", "error", "failure", map[string]any{"filename": filepath.Base(backupFile), "error": result.Error()})
+		}
+	}()
 	password := ""
 	complianceEnabled := false
 	if cfg != nil {
@@ -274,10 +438,11 @@ func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error 
 	// Ensure the filename extension matches the encryption decision.
 	backupFile = normalizeBackupExt(backupFile, encrypt)
 
-	sources, err := collectBackupSources(configDir, dataDir)
+	sources, cleanupSources, err := prepareBackupSources(cfg, configDir, dataDir)
 	if err != nil {
 		return err
 	}
+	defer cleanupSources()
 	if len(sources) == 0 {
 		return errors.New(cliText("cli.backup.nothing_to_back_up"))
 	}
@@ -298,19 +463,471 @@ func runBackup(cfg *config.Config, configDir, dataDir, backupFile string) error 
 	if err := os.MkdirAll(filepath.Dir(backupFile), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(backupFile, out, 0o600); err != nil {
-		return err
-	}
-
-	// Verify the freshly written backup by reading it back and re-checking
-	// every manifest checksum (AI.md PART 21 → "Verification").
-	if err := verifyBackupFile(backupFile, password); err != nil {
-		_ = os.Remove(backupFile)
+	if err := writeVerifiedBackupExclusive(backupFile, out, password, restoreLimits(cfg)); err != nil {
+		appendBackupAudit("backup.verification_failed", "error", "failure", map[string]any{"filename": filepath.Base(backupFile), "check": err.Error()})
 		return fmt.Errorf("%s: %w", cliText("cli.backup.verification_failed"), err)
+	}
+	if info, err := os.Stat(backupFile); err == nil {
+		checksum, checksumErr := checksumFile(backupFile)
+		if checksumErr != nil {
+			return checksumErr
+		}
+		if err := db.RecordBackup(backupFile, info.Size(), checksum); err != nil {
+			return fmt.Errorf("record backup metadata: %w", err)
+		}
+	}
+	if cfg != nil {
+		if _, err := applyBackupRetention(filepath.Dir(backupFile), cfg.Server.Backup.Retention, password); err != nil {
+			return fmt.Errorf("apply backup retention: %w", err)
+		}
+	}
+	if info, err := os.Stat(backupFile); err == nil {
+		appendBackupAudit("backup.created", "info", "success", map[string]any{"filename": filepath.Base(backupFile), "size": info.Size(), "encrypted": encrypt, "verification_status": "verified"})
 	}
 
 	fmt.Println(cliText("cli.backup.created", "file", backupFile))
 	return nil
+}
+
+func runScheduledBackup(cfg *config.Config, configDir, dataDir, backupDir, kind string, snapshotAt time.Time) (result error) {
+	filename := fmt.Sprintf("%s-%s.tar.gz", projectName, kind)
+	defer func() {
+		if result != nil && !errors.Is(result, scheduler.ErrSkipped) {
+			appendBackupAudit("backup.failed", "error", "failure", map[string]any{"filename": filename, "error": result.Error()})
+		}
+	}()
+	if _, err := applyBackupRetention(backupDir, cfg.Server.Backup.Retention, cfg.Server.Backup.EncryptionPassword); err != nil {
+		return fmt.Errorf("apply pre-backup retention: %w", err)
+	}
+	usage, err := diskcheck.MeasureVolume(backupDir)
+	if err != nil {
+		return fmt.Errorf("measure backup volume: %w", err)
+	}
+	threshold := cfg.Server.Maintenance.Cleanup.DiskThreshold
+	if threshold < 1 || threshold > 100 {
+		threshold = 90
+	}
+	lastBackupSize := mostRecentBackupSize(backupDir, snapshotAt)
+	if usage.UsedPercent > float64(threshold) || (lastBackupSize > 0 && usage.FreeBytes < uint64(lastBackupSize)*2) {
+		appendBackupAudit("backup.skipped_disk_full", "error", "failure", map[string]any{"free_bytes": usage.FreeBytes, "disk_usage_percent": usage.UsedPercent, "threshold_percent": threshold})
+		return scheduler.ErrSkipped
+	}
+	sources, cleanup, err := prepareBackupSources(cfg, configDir, dataDir)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if len(sources) == 0 {
+		return errors.New(cliText("cli.backup.nothing_to_back_up"))
+	}
+	password := cfg.Server.Backup.EncryptionPassword
+	if cfg.Server.Compliance.Enabled && password == "" {
+		return errors.New(cliText("cli.backup.compliance_password_required", "setting", "server.backup.encryption_password"))
+	}
+	basePath := latestFullBackup(backupDir, snapshotAt)
+	if basePath != "" && strings.HasSuffix(basePath, ".enc") != (password != "") {
+		appendBackupAudit("backup.encryption_key_changed", "info", "success", map[string]any{"filename": filepath.Base(basePath), "reason": "encryption_setting_changed"})
+		basePath = ""
+	} else if basePath != "" && password != "" {
+		matches, matchErr := backupArchiveKeyMatches(basePath, password)
+		if matchErr != nil {
+			appendBackupAudit("backup.base_header_invalid", "warning", "failure", map[string]any{"filename": filepath.Base(basePath)})
+			basePath = ""
+		} else if !matches {
+			appendBackupAudit("backup.encryption_key_changed", "info", "success", map[string]any{"filename": filepath.Base(basePath)})
+			basePath = ""
+		}
+	}
+	if kind == "hourly" {
+		if basePath == "" {
+			return scheduler.ErrSkipped
+		}
+		if err := writeIncrementalBackup(cfg, sources, backupDir, basePath, "hourly", snapshotAt); err != nil {
+			return err
+		}
+		_, err = applyBackupRetention(backupDir, cfg.Server.Backup.Retention, password)
+		return err
+	}
+	if kind == "daily" && basePath != "" {
+		if err := writeIncrementalBackup(cfg, sources, backupDir, basePath, "daily", snapshotAt); err != nil {
+			return err
+		}
+	}
+	name := scheduledFullBackupName(backupDir, snapshotAt)
+	if password != "" {
+		name += ".enc"
+	}
+	if err := writeBackupArchive(filepath.Join(backupDir, name), sources, password, snapshotAt, "full", "", "", nil, cfg.Server.Restore); err != nil {
+		return err
+	}
+	if _, err := applyBackupRetention(backupDir, cfg.Server.Backup.Retention, password); err != nil {
+		return err
+	}
+	return nil
+}
+
+func mostRecentBackupSize(directory string, before time.Time) int64 {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return 0
+	}
+	var size int64
+	var latest time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.Contains(entry.Name(), "_backup_") {
+			continue
+		}
+		stamp, ok := backupNameTime(entry.Name())
+		if !ok || stamp.After(before) || (!latest.IsZero() && !stamp.After(latest)) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		latest, size = stamp, info.Size()
+	}
+	return size
+}
+
+func latestFullBackup(directory string, before time.Time) string {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return ""
+	}
+	var selected string
+	var selectedAt time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.Contains(entry.Name(), "_backup_") {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		stamp, ok := backupNameTime(entry.Name())
+		if !ok || !stamp.Before(before) {
+			continue
+		}
+		if selected == "" || stamp.After(selectedAt) {
+			selected, selectedAt = path, stamp
+		}
+	}
+	return selected
+}
+
+func scheduledFullBackupName(directory string, snapshotAt time.Time) string {
+	base := fmt.Sprintf("%s_backup_%s.tar.gz", projectName, snapshotAt.Format("2006-01-02"))
+	if backupNameAvailable(directory, base) {
+		return base
+	}
+	stamp := snapshotAt.UTC()
+	for offset := 0; offset < 24*60*60; offset++ {
+		candidate := fmt.Sprintf("%s_backup_%s.tar.gz", projectName, stamp.Add(time.Duration(offset)*time.Second).Format("2006-01-02_150405"))
+		if backupNameAvailable(directory, candidate) {
+			return candidate
+		}
+	}
+	return fmt.Sprintf("%s_backup_%s.tar.gz", projectName, time.Now().UTC().Format("2006-01-02_150405.000000000"))
+}
+
+func backupNameAvailable(directory, name string) bool {
+	for _, candidate := range []string{name, name + ".enc"} {
+		if _, err := os.Lstat(filepath.Join(directory, candidate)); err == nil || !os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
+}
+
+func writeIncrementalBackup(cfg *config.Config, sources []backupSource, directory, basePath, kind string, snapshotAt time.Time) (returnErr error) {
+	password := cfg.Server.Backup.EncryptionPassword
+	baseSum, err := checksumFile(basePath)
+	if err != nil {
+		return err
+	}
+	baseArchive, err := readBackupArchive(basePath, password)
+	if err != nil {
+		return err
+	}
+	baseStage, err := extractToStaging(baseArchive)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cleanupErr := os.RemoveAll(baseStage); cleanupErr != nil {
+			returnErr = errors.Join(returnErr, cleanupErr)
+		}
+	}()
+	baseManifest, err := loadAndVerifyManifest(baseStage)
+	if err != nil {
+		return err
+	}
+	baseFiles := make(map[string]backupManifestFile, len(baseManifest.Files))
+	for _, file := range baseManifest.Files {
+		baseFiles[file.Path] = file
+	}
+	current := make(map[string]backupManifestFile, len(sources))
+	changed := make([]backupSource, 0, len(sources))
+	for _, source := range sources {
+		data, err := os.ReadFile(source.diskPath)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(source.diskPath)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		file := backupManifestFile{Path: source.archivePath, Size: int64(len(data)), Modified: info.ModTime().Unix(), SHA256: hex.EncodeToString(sum[:])}
+		current[source.archivePath] = file
+		old, exists := baseFiles[source.archivePath]
+		if !exists || old.Size != file.Size || old.Modified != file.Modified || old.SHA256 != file.SHA256 {
+			changed = append(changed, source)
+		}
+	}
+	var deleted []string
+	for name := range baseFiles {
+		if _, ok := current[name]; !ok {
+			deleted = append(deleted, name)
+		}
+	}
+	sort.Strings(deleted)
+	baseName := filepath.Base(basePath)
+	archive, err := buildBackupArchiveAt(changed, password != "", snapshotAt, "incremental", baseName, baseSum, deleted)
+	if err != nil {
+		return err
+	}
+	if password != "" {
+		archive, err = encryptBackup(archive, password, baseName)
+		if err != nil {
+			return err
+		}
+	}
+	name := fmt.Sprintf("%s-%s.tar.gz", projectName, kind)
+	if password != "" {
+		name += ".enc"
+	}
+	path := filepath.Join(directory, name)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(directory, ".incremental-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name() + filepath.Ext(path)
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(temp.Name())
+		return err
+	}
+	_ = os.Remove(temp.Name())
+	defer os.Remove(tempPath)
+	if err := os.WriteFile(tempPath, archive, 0o600); err != nil {
+		return err
+	}
+	if err := verifyBackupFileWithLimits(tempPath, password, cfg.Server.Restore); err != nil {
+		appendBackupAudit("backup.verification_failed", "error", "failure", map[string]any{"filename": filepath.Base(path), "check": err.Error()})
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	if err := recordBackupMetadata(path, kind); err != nil {
+		return fmt.Errorf("record backup metadata: %w", err)
+	}
+	if kind == "daily" {
+		appendBackupAudit("backup.daily_updated", "info", "success", map[string]any{"filename": filepath.Base(path), "changes_since_base": len(changed) + len(deleted)})
+	}
+	return nil
+}
+
+func writeBackupArchive(path string, sources []backupSource, password string, snapshotAt time.Time, backupType, baseName, baseSum string, deleted []string, limits config.RestoreConfig) error {
+	archive, err := buildBackupArchiveAt(sources, password != "", snapshotAt, backupType, baseName, baseSum, deleted)
+	if err != nil {
+		return err
+	}
+	if password != "" {
+		archive, err = encryptBackup(archive, password)
+		if err != nil {
+			return err
+		}
+	}
+	if err := writeVerifiedBackupExclusive(path, archive, password, limits); err != nil {
+		appendBackupAudit("backup.verification_failed", "error", "failure", map[string]any{"filename": filepath.Base(path), "check": err.Error()})
+		return err
+	}
+	if err := recordBackupMetadata(path, "auto"); err != nil {
+		return fmt.Errorf("record backup metadata: %w", err)
+	}
+	if info, err := os.Stat(path); err == nil {
+		appendBackupAudit("backup.created", "info", "success", map[string]any{"filename": filepath.Base(path), "size": info.Size(), "encrypted": password != "", "verification_status": "verified"})
+	}
+	return nil
+}
+
+func writeVerifiedBackupExclusive(path string, archive []byte, password string, limits config.RestoreConfig) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(dir, ".backup-verify-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name() + filepath.Ext(path)
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(temp.Name())
+		return err
+	}
+	_ = os.Remove(temp.Name())
+	defer os.Remove(tempPath)
+	if err := os.WriteFile(tempPath, archive, 0o600); err != nil {
+		return err
+	}
+	if err := verifyBackupFileWithLimits(tempPath, password, limits); err != nil {
+		return err
+	}
+	if err := os.Link(tempPath, path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func recordBackupMetadata(path, backupType string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	checksum, err := checksumFile(path)
+	if err != nil {
+		return err
+	}
+	return db.RecordBackupAs(path, info.Size(), checksum, backupType)
+}
+
+func cfgDatabaseDriver(cfg *config.Config) string {
+	if cfg == nil || strings.TrimSpace(cfg.Server.Database.Driver) == "" {
+		return "sqlite"
+	}
+	return cfg.Server.Database.Driver
+}
+
+func prepareBackupSources(cfg *config.Config, configDir, dataDir string) ([]backupSource, func(), error) {
+	sources, err := collectBackupSources(configDir, dataDir)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	directory, err := backupTempDir()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(directory)
+	}
+	createSnapshot := func(snapshot func(string) error) (string, error) {
+		path := filepath.Join(directory, "server.db")
+		if err := snapshot(path); err != nil {
+			cleanup()
+			return "", err
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			cleanup()
+			return "", err
+		}
+		return path, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(cfgDatabaseDriver(cfg)), "sqlite") {
+		if _, statErr := os.Stat(db.LocalDatabasePath(dataDir)); statErr == nil {
+			path, err := createSnapshot(func(path string) error { return db.SnapshotSQLite(context.Background(), path) })
+			if err != nil {
+				return nil, func() {}, fmt.Errorf("snapshot server database: %w", err)
+			}
+			found := false
+			for i := range sources {
+				if sources[i].archivePath == "db/server.db" {
+					sources[i].diskPath = path
+					found = true
+				}
+			}
+			if !found {
+				sources = append(sources, backupSource{archivePath: "db/server.db", diskPath: path})
+			}
+		}
+	} else {
+		filtered := sources[:0]
+		for _, source := range sources {
+			if source.archivePath != "db/server.db" {
+				filtered = append(filtered, source)
+			}
+		}
+		sources = filtered
+		if cfg != nil && cfg.Server.Database.Cache.Enabled {
+			if _, err := os.Stat(db.LocalCachePath(dataDir)); err == nil {
+				path, err := createSnapshot(func(path string) error { return db.SnapshotLocalCache(context.Background(), path) })
+				if err != nil {
+					return nil, func() {}, fmt.Errorf("snapshot local database cache: %w", err)
+				}
+				sources = append(sources, backupSource{archivePath: "db/server.db", diskPath: path})
+			}
+		}
+	}
+	for i := range sources {
+		if sources[i].diskPath == filepath.Join(directory, "server.db") {
+			continue
+		}
+		copyPath := filepath.Join(directory, fmt.Sprintf("source-%04d", i))
+		data, readErr := os.ReadFile(sources[i].diskPath)
+		if readErr != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("snapshot backup source %s: %w", sources[i].archivePath, readErr)
+		}
+		info, statErr := os.Stat(sources[i].diskPath)
+		if statErr != nil {
+			cleanup()
+			return nil, func() {}, statErr
+		}
+		if writeErr := os.WriteFile(copyPath, data, 0o600); writeErr != nil {
+			cleanup()
+			return nil, func() {}, writeErr
+		}
+		if chtimesErr := os.Chtimes(copyPath, info.ModTime(), info.ModTime()); chtimesErr != nil {
+			cleanup()
+			return nil, func() {}, chtimesErr
+		}
+		sources[i].diskPath = copyPath
+	}
+	return sources, cleanup, nil
+}
+
+func backupTempDir() (string, error) {
+	build, ok := debug.ReadBuildInfo()
+	if !ok || build.Main.Path == "" {
+		return "", errors.New("cannot determine project organization for temporary backup snapshot")
+	}
+	parts := strings.Split(build.Main.Path, "/")
+	if len(parts) < 3 || parts[0] == "" || parts[1] == "" {
+		return "", errors.New("cannot determine project organization for temporary backup snapshot")
+	}
+	base := filepath.Join(os.TempDir(), parts[1])
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(base, projectName+"-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
+
+func checksumFile(path string) (string, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(contents)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // normalizeBackupExt makes the file extension agree with whether the archive
@@ -345,6 +962,23 @@ func readBackupArchive(backupFile, password string) ([]byte, error) {
 // rejecting any entry that would escape the staging root (zip-slip / path
 // traversal). It returns the staging directory path; the caller must remove it.
 func extractToStaging(archive []byte) (string, error) {
+	return extractToStagingWithLimits(archive, config.DefaultConfig().Server.Restore)
+}
+
+func extractToStagingWithLimits(archive []byte, limits config.RestoreConfig) (string, error) {
+	maxArchive := parseRestoreSize(limits.MaxArchiveSize, 1<<30)
+	maxExpanded := parseRestoreSize(limits.MaxExpandedSize, 4<<30)
+	maxFile := parseRestoreSize(limits.MaxFileSize, 512<<20)
+	maxFiles, maxRatio := limits.MaxFiles, limits.MaxRatio
+	if maxFiles < 1 {
+		maxFiles = 10000
+	}
+	if maxRatio < 1 {
+		maxRatio = 100
+	}
+	if int64(len(archive)) > maxArchive {
+		return "", errors.New("restore archive exceeds server.restore.max_archive_size")
+	}
 	staging, err := apppath.TempDir()
 	if err != nil {
 		return "", err
@@ -357,6 +991,8 @@ func extractToStaging(archive []byte) (string, error) {
 	}
 	tr := tar.NewReader(gz)
 
+	var expanded int64
+	fileCount := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -385,6 +1021,11 @@ func extractToStaging(archive []byte) (string, error) {
 			}
 			continue
 		}
+		fileCount++
+		if fileCount > maxFiles || hdr.Size < 0 || hdr.Size > maxFile || expanded+hdr.Size > maxExpanded {
+			_ = os.RemoveAll(staging)
+			return "", errors.New("restore archive exceeds configured file or expansion limits")
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			_ = os.RemoveAll(staging)
 			return "", err
@@ -394,15 +1035,48 @@ func extractToStaging(archive []byte) (string, error) {
 			_ = os.RemoveAll(staging)
 			return "", err
 		}
-		if _, err := io.Copy(f, tr); err != nil {
+		written, copyErr := io.Copy(f, io.LimitReader(tr, maxExpanded-expanded+1))
+		if copyErr != nil {
 			_ = f.Close()
 			_ = os.RemoveAll(staging)
-			return "", err
+			return "", copyErr
 		}
 		_ = f.Close()
+		if written != hdr.Size || written+expanded > maxExpanded {
+			_ = os.RemoveAll(staging)
+			return "", errors.New("restore archive entry size exceeds configured expansion limit")
+		}
+		expanded += written
+		if float64(expanded)/float64(len(archive)) > float64(maxRatio) {
+			_ = os.RemoveAll(staging)
+			return "", errors.New("restore archive exceeds server.restore.max_ratio")
+		}
 	}
 
 	return staging, nil
+}
+
+func parseRestoreSize(value string, fallback int64) int64 {
+	value = strings.TrimSpace(strings.ToUpper(value))
+	if value == "" {
+		return fallback
+	}
+	unit := int64(1)
+	for suffix, multiplier := range map[string]int64{"KB": 1 << 10, "KIB": 1 << 10, "MB": 1 << 20, "MIB": 1 << 20, "GB": 1 << 30, "GIB": 1 << 30, "TB": 1 << 40, "TIB": 1 << 40, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40} {
+		if strings.HasSuffix(value, suffix) {
+			unit = multiplier
+			value = strings.TrimSpace(strings.TrimSuffix(value, suffix))
+			break
+		}
+	}
+	if strings.HasSuffix(value, "B") {
+		value = strings.TrimSpace(strings.TrimSuffix(value, "B"))
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n < 1 || n > int64(^uint64(0)>>1)/unit {
+		return fallback
+	}
+	return n * unit
 }
 
 // loadAndVerifyManifest reads manifest.json from the staging dir and verifies
@@ -418,27 +1092,90 @@ func loadAndVerifyManifest(staging string) (*backupManifest, error) {
 		return nil, fmt.Errorf("%s: %w", cliText("cli.backup.invalid_manifest"), err)
 	}
 
-	for path, want := range m.Checksums {
-		clean := filepath.Clean(path)
-		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
-			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_unsafe_path", "path", path))
+	for filePath, want := range m.Checksums {
+		clean, safe := safeManifestPath(filePath)
+		if !safe {
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_unsafe_path", "path", filePath))
 		}
 		data, err := os.ReadFile(filepath.Join(staging, clean))
 		if err != nil {
-			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_file_missing", "path", path))
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_file_missing", "path", filePath))
 		}
 		sum := sha256.Sum256(data)
 		if hex.EncodeToString(sum[:]) != want {
-			return nil, fmt.Errorf("%s", cliText("cli.backup.checksum_mismatch", "path", path))
+			return nil, fmt.Errorf("%s", cliText("cli.backup.checksum_mismatch", "path", filePath))
 		}
+	}
+	listedContents := make(map[string]bool, len(m.Contents))
+	for _, filePath := range m.Contents {
+		clean, safe := safeManifestPath(filePath)
+		if !safe || listedContents[clean] {
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_unsafe_path", "path", filePath))
+		}
+		listedContents[clean] = true
+		if _, ok := m.Checksums[clean]; !ok {
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_checksum_missing", "path", filePath))
+		}
+		info, err := os.Lstat(filepath.Join(staging, filepath.FromSlash(clean)))
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_file_missing", "path", filePath))
+		}
+	}
+	if len(m.Files) > 0 {
+		listed, err := json.Marshal(m.Files)
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(listed)
+		if m.SHA256 != hex.EncodeToString(sum[:]) {
+			return nil, errors.New(cliText("cli.backup.checksum_mismatch", "path", "manifest.json"))
+		}
+		for _, file := range m.Files {
+			clean, safe := safeManifestPath(file.Path)
+			if !safe {
+				return nil, fmt.Errorf("%s", cliText("cli.backup.manifest_unsafe_path", "path", file.Path))
+			}
+			checksum, ok := m.Checksums[clean]
+			if !ok || checksum != file.SHA256 {
+				return nil, errors.New(cliText("cli.backup.invalid_manifest"))
+			}
+			if len(listedContents) > 0 && !listedContents[clean] {
+				return nil, errors.New(cliText("cli.backup.invalid_manifest"))
+			}
+			info, err := os.Lstat(filepath.Join(staging, filepath.FromSlash(clean)))
+			if err != nil || info.Size() != file.Size {
+				return nil, errors.New(cliText("cli.backup.invalid_manifest"))
+			}
+		}
+	}
+	if m.Type == "" {
+		m.Type = "full"
+	}
+	if m.SnapshotAt == "" {
+		m.SnapshotAt = m.CreatedAt
 	}
 
 	return &m, nil
 }
 
+func safeManifestPath(filePath string) (string, bool) {
+	if filePath == "" || strings.ContainsAny(filePath, "\\\x00:") || strings.HasPrefix(filePath, "/") {
+		return "", false
+	}
+	clean := pathpkg.Clean(filePath)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || clean != filePath {
+		return "", false
+	}
+	return clean, true
+}
+
 // verifyBackupFile confirms a backup on disk is non-empty, decryptable (if
 // encrypted), extractable, and passes manifest checksum verification.
 func verifyBackupFile(backupFile, password string) error {
+	return verifyBackupFileWithLimits(backupFile, password, config.DefaultConfig().Server.Restore)
+}
+
+func verifyBackupFileWithLimits(backupFile, password string, limits config.RestoreConfig) error {
 	fi, err := os.Stat(backupFile)
 	if err != nil {
 		return err
@@ -450,13 +1187,78 @@ func verifyBackupFile(backupFile, password string) error {
 	if err != nil {
 		return err
 	}
-	staging, err := extractToStaging(archive)
+	staging, err := extractToStagingWithLimits(archive, limits)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(staging) }()
-	_, err = loadAndVerifyManifest(staging)
-	return err
+	manifest, err := loadAndVerifyManifest(staging)
+	if err != nil {
+		return err
+	}
+	if _, ok := manifest.Checksums["db/server.db"]; ok {
+		if err := verifySQLiteIntegrity(filepath.Join(staging, "db", "server.db")); err != nil {
+			return fmt.Errorf("%s", cliText("cli.main.backup_test_failed", "error", err.Error()))
+		}
+	}
+	if manifest.Type == "incremental" {
+		if strings.HasSuffix(backupFile, ".enc") {
+			blob, readErr := os.ReadFile(backupFile)
+			if readErr != nil {
+				return readErr
+			}
+			header, headerErr := parseBackupHeader(blob)
+			if headerErr == nil && header.baseBackup != manifest.BaseBackup {
+				return errors.New("encrypted backup base reference does not match manifest")
+			}
+		}
+		base := filepath.Join(filepath.Dir(backupFile), filepath.Base(manifest.BaseBackup))
+		if filepath.Base(manifest.BaseBackup) != manifest.BaseBackup {
+			return errors.New("ERR_BASE_MISSING")
+		}
+		if _, err := os.Stat(base); err != nil {
+			return errors.New("ERR_BASE_MISSING")
+		}
+		checksum, err := checksumFile(base)
+		if err != nil || checksum != manifest.BaseSHA256 {
+			return errors.New("ERR_BASE_CORRUPT")
+		}
+	}
+	return nil
+}
+
+func verifySQLiteIntegrity(path string) error {
+	failure := errors.New(cliText("cli.main.backup_integrity_failed"))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	database, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		return failure
+	}
+	defer database.Close()
+	rows, err := database.QueryContext(ctx, "PRAGMA integrity_check")
+	if err != nil {
+		return failure
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var result string
+		if err := rows.Scan(&result); err != nil {
+			return failure
+		}
+		count++
+		if result != "ok" {
+			return failure
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return failure
+	}
+	if count == 0 {
+		return failure
+	}
+	return nil
 }
 
 func verifyBackupPGP(backupFile, password string) error {
@@ -480,6 +1282,14 @@ func verifyBackupPGP(backupFile, password string) error {
 	if err != nil {
 		return err
 	}
+	if manifest.Type == "incremental" {
+		incrementalStage := staging
+		staging, manifest, err = mergeIncrementalRestore(backupFile, password, incrementalStage, manifest, config.DefaultConfig().Server.Restore)
+		if err != nil {
+			return err
+		}
+		_ = os.RemoveAll(incrementalStage)
+	}
 	if !hasRestoredPGPKeypair(manifest.Contents) {
 		return errors.New(cliText("cli.backup.pgp_key_files_missing"))
 	}
@@ -489,6 +1299,117 @@ func verifyBackupPGP(backupFile, password string) error {
 		}
 	}
 	return verifyStagedPGP(staging)
+}
+
+func mergeIncrementalRestore(incrementalPath, password, incrementalStage string, incremental *backupManifest, limits config.RestoreConfig) (string, *backupManifest, error) {
+	basePath := filepath.Join(filepath.Dir(incrementalPath), filepath.Base(incremental.BaseBackup))
+	if filepath.Base(incremental.BaseBackup) != incremental.BaseBackup {
+		return "", nil, errors.New("ERR_BASE_MISSING")
+	}
+	baseInfo, err := os.Stat(basePath)
+	if err != nil {
+		return "", nil, errors.New("ERR_BASE_MISSING")
+	}
+	incInfo, err := os.Stat(incrementalPath)
+	if err != nil || baseInfo.Size()+incInfo.Size() > parseRestoreSize(limits.MaxArchiveSize, 1<<30) {
+		return "", nil, errors.New("combined restore exceeds server.restore.max_archive_size")
+	}
+	sum, err := checksumFile(basePath)
+	if err != nil || sum != incremental.BaseSHA256 {
+		return "", nil, errors.New("ERR_BASE_CORRUPT")
+	}
+	baseArchive, err := readBackupArchive(basePath, password)
+	if err != nil {
+		return "", nil, errors.New("ERR_BASE_CORRUPT")
+	}
+	baseStage, err := extractToStagingWithLimits(baseArchive, limits)
+	if err != nil {
+		return "", nil, errors.New("ERR_BASE_CORRUPT")
+	}
+	baseManifest, err := loadAndVerifyManifest(baseStage)
+	if err != nil || baseManifest.Type != "full" {
+		_ = os.RemoveAll(baseStage)
+		return "", nil, errors.New("ERR_BASE_CORRUPT")
+	}
+	files := make(map[string]backupManifestFile, len(baseManifest.Files))
+	for _, file := range baseManifest.Files {
+		files[file.Path] = file
+	}
+	for _, file := range incremental.Files {
+		rel := filepath.Clean(file.Path)
+		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			_ = os.RemoveAll(baseStage)
+			return "", nil, errors.New("invalid incremental path")
+		}
+		src := filepath.Join(incrementalStage, rel)
+		dst := filepath.Join(baseStage, rel)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			_ = os.RemoveAll(baseStage)
+			return "", nil, err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			_ = os.RemoveAll(baseStage)
+			return "", nil, err
+		}
+		if err := os.WriteFile(dst, data, 0o600); err != nil {
+			_ = os.RemoveAll(baseStage)
+			return "", nil, err
+		}
+		files[file.Path] = file
+	}
+	for _, name := range incremental.Deleted {
+		rel := filepath.Clean(name)
+		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			_ = os.RemoveAll(baseStage)
+			return "", nil, errors.New("invalid deleted path")
+		}
+		_ = os.Remove(filepath.Join(baseStage, rel))
+		delete(files, name)
+	}
+	maxExpanded := parseRestoreSize(limits.MaxExpandedSize, 4<<30)
+	maxFile := parseRestoreSize(limits.MaxFileSize, 512<<20)
+	maxArchive := parseRestoreSize(limits.MaxArchiveSize, 1<<30)
+	maxFiles, maxRatio := limits.MaxFiles, limits.MaxRatio
+	if maxFiles < 1 {
+		maxFiles = 10000
+	}
+	if maxRatio < 1 {
+		maxRatio = 100
+	}
+	baseInfo, baseStatErr := os.Stat(basePath)
+	incInfo, incStatErr := os.Stat(incrementalPath)
+	if baseStatErr != nil || incStatErr != nil || baseInfo.Size()+incInfo.Size() > maxArchive {
+		_ = os.RemoveAll(baseStage)
+		return "", nil, errors.New("combined restore exceeds server.restore.max_archive_size")
+	}
+	var expanded int64
+	if len(files) > maxFiles {
+		_ = os.RemoveAll(baseStage)
+		return "", nil, errors.New("combined restore exceeds server.restore.max_files")
+	}
+	for _, file := range files {
+		if file.Size < 0 || file.Size > maxFile || expanded > maxExpanded-file.Size {
+			_ = os.RemoveAll(baseStage)
+			return "", nil, errors.New("combined restore exceeds configured expansion limits")
+		}
+		expanded += file.Size
+	}
+	if expanded > 0 && float64(expanded)/float64(baseInfo.Size()+incInfo.Size()) > float64(maxRatio) {
+		_ = os.RemoveAll(baseStage)
+		return "", nil, errors.New("combined restore exceeds server.restore.max_ratio")
+	}
+	baseManifest.Files = baseManifest.Files[:0]
+	baseManifest.Contents = baseManifest.Contents[:0]
+	baseManifest.Checksums = make(map[string]string, len(files))
+	for _, file := range files {
+		baseManifest.Files = append(baseManifest.Files, file)
+		baseManifest.Contents = append(baseManifest.Contents, file.Path)
+		baseManifest.Checksums[file.Path] = file.SHA256
+	}
+	sort.Slice(baseManifest.Files, func(i, j int) bool { return baseManifest.Files[i].Path < baseManifest.Files[j].Path })
+	sort.Strings(baseManifest.Contents)
+	return baseStage, baseManifest, nil
 }
 
 func verifyStagedPGP(staging string) error {
@@ -509,7 +1430,11 @@ func verifyStagedPGP(staging string) error {
 	}
 	defer func() { _ = conn.Close() }()
 	var encodedSecret string
-	if err := conn.QueryRow("SELECT value FROM app_secrets WHERE key = ?", "installation_secret").Scan(&encodedSecret); err != nil {
+	err = conn.QueryRow("SELECT value FROM app_secrets WHERE name = ?", "installation_secret").Scan(&encodedSecret)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such column: name") {
+		err = conn.QueryRow("SELECT value FROM app_secrets WHERE key = ?", "installation_secret").Scan(&encodedSecret)
+	}
+	if err != nil {
 		return fmt.Errorf("%s: %w", cliText("cli.backup.installation_secret_unavailable"), err)
 	}
 	secret, err := base64.StdEncoding.DecodeString(encodedSecret)
@@ -541,7 +1466,12 @@ func verifyStagedPGP(staging string) error {
 // runRestore implements `--maintenance restore <backup-file>`. It verifies the
 // backup fully in a staging directory before installing any file (AI.md PART
 // 21 → "Restore Verification" / "Restore Behavior").
-func runRestore(backupFile, configDir, dataDir string) error {
+func runRestore(backupFile, configDir, dataDir string) (result error) {
+	defer func() {
+		if result != nil {
+			appendBackupAudit("backup.failed", "error", "failure", map[string]any{"filename": filepath.Base(backupFile), "error": result.Error(), "operation": "restore"})
+		}
+	}()
 	if _, err := os.Stat(backupFile); err != nil {
 		return fmt.Errorf("%s", cliText("cli.backup.file_not_found", "file", backupFile))
 	}
@@ -556,11 +1486,22 @@ func runRestore(backupFile, configDir, dataDir string) error {
 	}
 
 	fmt.Println(cliText("cli.backup.verifying"))
+	restoreCfg, err := config.Load(filepath.Join(configDir, "server.yml"))
+	if err != nil {
+		return fmt.Errorf("read restore limits: %w", err)
+	}
+	backupInfo, err := os.Stat(backupFile)
+	if err != nil {
+		return err
+	}
+	if backupInfo.Size() > parseRestoreSize(restoreCfg.Server.Restore.MaxArchiveSize, 1<<30) {
+		return errors.New("restore archive exceeds server.restore.max_archive_size")
+	}
 	archive, err := readBackupArchive(backupFile, password)
 	if err != nil {
 		return err
 	}
-	staging, err := extractToStaging(archive)
+	staging, err := extractToStagingWithLimits(archive, restoreCfg.Server.Restore)
 	if err != nil {
 		return err
 	}
@@ -569,6 +1510,14 @@ func runRestore(backupFile, configDir, dataDir string) error {
 	manifest, err := loadAndVerifyManifest(staging)
 	if err != nil {
 		return err
+	}
+	if manifest.Type == "incremental" {
+		incrementalStage := staging
+		staging, manifest, err = mergeIncrementalRestore(backupFile, password, incrementalStage, manifest, restoreCfg.Server.Restore)
+		if err != nil {
+			return err
+		}
+		_ = os.RemoveAll(incrementalStage)
 	}
 	if manifest.AppVersion != "" && manifest.AppVersion != Version {
 		fmt.Println(cliText("cli.backup.version_mismatch_warning", "backup_version", manifest.AppVersion, "running_version", Version))
@@ -596,9 +1545,17 @@ func runRestore(backupFile, configDir, dataDir string) error {
 			return fmt.Errorf("%s: %w", cliText("cli.backup.pgp_publication_pending"), err)
 		}
 	}
+	appendBackupAudit("backup.restored", "info", "success", map[string]any{"filename": filepath.Base(backupFile)})
 
 	fmt.Println(cliText("cli.backup.restore_completed"))
 	return nil
+}
+
+func restoreLimits(cfg *config.Config) config.RestoreConfig {
+	if cfg == nil {
+		return config.DefaultConfig().Server.Restore
+	}
+	return cfg.Server.Restore
 }
 
 func hasRestoredPGPKeypair(contents []string) bool {

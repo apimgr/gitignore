@@ -230,9 +230,13 @@ func (s *Server) RefreshHealth() error {
 // refreshHealthCore performs the potentially blocking core probes outside the
 // request path. The scheduler and data reload hooks refresh these cached values.
 func (s *Server) refreshHealthCore() {
+	cacheStatus := "ok"
+	if !db.RateLimitCacheHealthy() {
+		cacheStatus = "degraded"
+	}
 	checks := ChecksInfo{
 		Database:  okError(db.Ping() == nil),
-		Cache:     "ok",
+		Cache:     cacheStatus,
 		Disk:      okError(s.diskWritable()),
 		Scheduler: okError(s.schedulerHealthy()),
 	}
@@ -332,10 +336,10 @@ func (s *Server) healthFeatures() FeaturesInfo {
 
 	_, torFound := tor.FindBinary(configuredBinary)
 	hostname := ""
-	if dataDir != "" {
+	if torFound && dataDir != "" {
 		hostname = tor.ReadHostname(dataDir)
 	}
-	running := hostname != ""
+	running := torFound && hostname != ""
 
 	f.Tor = TorInfo{
 		Enabled:  torFound,

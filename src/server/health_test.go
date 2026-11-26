@@ -58,6 +58,22 @@ func TestHealthChecksIncludesDatasetAndOverlayStates(t *testing.T) {
 	}
 }
 
+func TestHealthFeaturesHidesPersistedTorStateWhenBinaryIsMissing(t *testing.T) {
+	s := newTestHealthServer(t)
+	s.config.Cfg.Server.Tor.Binary = filepath.Join(t.TempDir(), "missing-tor")
+	hostnamePath := filepath.Join(s.config.Paths.GetDataDir(), "tor", "site", "hostname")
+	if err := os.MkdirAll(filepath.Dir(hostnamePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostnamePath, []byte("persisted.onion\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info := s.healthFeatures().Tor
+	if info.Enabled || info.Running || info.Status != "disabled" || info.Hostname != "" {
+		t.Fatalf("Tor health state with missing binary = %+v, want disabled and empty", info)
+	}
+}
+
 func TestHealthChecksReadsCachedCoreValues(t *testing.T) {
 	s := &Server{healthCore: ChecksInfo{Database: "error", Cache: "ok", Disk: "ok", Scheduler: "ok"}, healthCoreRefreshed: time.Now().UTC()}
 	checks := s.healthChecks(TorInfo{}, I2PInfo{})

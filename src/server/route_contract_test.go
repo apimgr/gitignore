@@ -181,3 +181,33 @@ func TestProjectAPIRouteContract(t *testing.T) {
 		}
 	}
 }
+
+func TestHubPageRoutesAreRegisteredOrActions(t *testing.T) {
+	templates, err := template.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{config: &Config{Templates: templates, Cfg: config.DefaultConfig()}, router: chi.NewRouter()}
+	server.setupRoutes()
+	registered := make(map[string]bool, len(serverPageRegistry))
+	for _, page := range serverPageRegistry {
+		registered[page.path] = true
+	}
+	if err := chi.Walk(server.router, func(method, path string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if method != http.MethodGet {
+			return nil
+		}
+		for _, hub := range []string{"/server/preferences", "/server/help"} {
+			prefix := hub + "/"
+			if !strings.HasPrefix(path, prefix) || strings.Contains(strings.TrimPrefix(path, prefix), "/") {
+				continue
+			}
+			if !registered[path] {
+				t.Errorf("GET hub child %s is not registered as a page", path)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk router: %v", err)
+	}
+}

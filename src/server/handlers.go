@@ -63,7 +63,7 @@ func (s *Server) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
 // self-update version feeds are unavailable, so "cli_versions" is omitted
 // rather than returning a fabricated value.
 func (s *Server) handleAPIAutodiscover(w http.ResponseWriter, r *http.Request) {
-	sendAPIResponseOK(w, map[string]interface{}{
+	data := map[string]interface{}{
 		"name":          "GitIgnore API",
 		"version":       s.config.Version,
 		"commit":        s.config.Commit,
@@ -76,7 +76,13 @@ func (s *Server) handleAPIAutodiscover(w http.ResponseWriter, r *http.Request) {
 		"mcp":           s.apiBasePath() + "/server/mcp",
 		"mcp_aliases":   []string{"/api/mcp", "/mcp"},
 		"healthz":       "/api/healthz",
-	})
+	}
+	if cfg := s.currentConfig(); cfg != nil && cfg.Server.Tor.Expose {
+		if address, _ := s.torOnionAddress.Load().(string); address != "" {
+			data["onion"] = address + ".onion"
+		}
+	}
+	sendAPIResponseOK(w, data)
 }
 
 // handleAPITemplate returns a template's content
@@ -210,13 +216,13 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 
 // handleRobotsTxt serves robots.txt from config
 func (s *Server) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = fmt.Fprintln(w, "User-agent: *")
 	if s.currentConfig() != nil {
-		for _, path := range s.currentConfig().WebRobots.Allow {
+		for _, path := range s.currentConfig().Web.Robots.Allow {
 			_, _ = fmt.Fprintf(w, "Allow: %s\n", path)
 		}
-		for _, path := range s.currentConfig().WebRobots.Deny {
+		for _, path := range s.currentConfig().Web.Robots.Deny {
 			_, _ = fmt.Fprintf(w, "Disallow: %s\n", path)
 		}
 	} else {
@@ -224,6 +230,7 @@ func (s *Server) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "Allow: /api")
 		_, _ = fmt.Fprintln(w, "Disallow: /debug")
 	}
+	_, _ = fmt.Fprintf(w, "Sitemap: %s\n", s.absoluteURL(r, "/sitemap.xml"))
 }
 
 // handleSecurityTxt serves security.txt
@@ -234,12 +241,14 @@ func (s *Server) handleSecurityTxt(w http.ResponseWriter, r *http.Request) {
 	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.ReportURL) != "" {
 		reportURL = strings.TrimSpace(s.currentConfig().Web.Security.ReportURL)
 	}
-	_, _ = fmt.Fprintf(w, "Contact: %s\n", reportURL)
+	if !s.isTorRequest(r) {
+		_, _ = fmt.Fprintf(w, "Contact: %s\n", reportURL)
+	}
 	if id, err := securityID(time.Now()); err == nil {
 		_, _ = fmt.Fprintf(w, "Contact: %s\n", securityReportURL(serverURL, id))
 	}
-	email := s.securityContactEmail()
-	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.Contact) != "" {
+	email := s.responseSecurityContactEmail(r)
+	if !s.isTorRequest(r) && s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.Contact) != "" {
 		email = strings.TrimSpace(s.currentConfig().Web.Security.Contact)
 	}
 	if email != "" {
@@ -257,7 +266,9 @@ func (s *Server) handleSecurityTxt(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "Encryption: %s/.well-known/pgp-key.asc\n", serverURL)
 		_, _ = fmt.Fprintf(w, "# PGP-Fingerprint: %s\n", metadata.Fingerprint)
 	}
-	_, _ = fmt.Fprintln(w, "Preferred-Languages: en")
+	if !s.isTorRequest(r) {
+		_, _ = fmt.Fprintln(w, "Preferred-Languages: en")
+	}
 	_, _ = fmt.Fprintf(w, "Canonical: %s/.well-known/security.txt\n", serverURL)
 }
 

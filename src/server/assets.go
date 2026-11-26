@@ -79,30 +79,41 @@ func init() {
 
 // PageData is the view model passed to every HTML page template.
 type PageData struct {
-	Title               string
-	DocumentTitle       string
-	ResourceLabelPlural string
-	Description         string
-	Version             string
-	BuildDate           string
-	BaseURL             string
-	APIBase             string
-	Lang                string
-	Dir                 string
-	Theme               string
-	Path                string
-	NextTheme           string
-	LanguageName        string
-	Languages           []i18n.LanguageInfo
-	CSRFToken           string
-	LanguagePreference  string
-	PageCSS             []string
-	PageScripts         []string
-	Health              *healthPageView
-	Data                map[string]interface{}
-	TrackingMarkup      template.HTML
-	TrackingNoscript    template.HTML
-	Consent             ConsentView
+	Title                       string
+	DocumentTitle               string
+	ResourceLabelPlural         string
+	Description                 string
+	Version                     string
+	BuildDate                   string
+	BaseURL                     string
+	APIBase                     string
+	Lang                        string
+	Dir                         string
+	Theme                       string
+	Path                        string
+	NextTheme                   string
+	LanguageName                string
+	Languages                   []i18n.LanguageInfo
+	CSRFToken                   string
+	LanguagePreference          string
+	PageCSS                     []string
+	PageScripts                 []string
+	Health                      *healthPageView
+	Data                        map[string]interface{}
+	TrackingMarkup              template.HTML
+	TrackingNoscript            template.HTML
+	Consent                     ConsentView
+	Announcements               []AnnouncementView
+	SuppressAnnouncementDismiss bool
+}
+
+type AnnouncementView struct {
+	ID          string
+	Type        string
+	Icon        string
+	Title       string
+	Message     string
+	Dismissible bool
 }
 
 type ConsentView struct {
@@ -242,6 +253,7 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 	if data.Path == "" {
 		data.Path = r.URL.RequestURI()
 	}
+	data.SuppressAnnouncementDismiss = r.URL.Path == "/server/preferences"
 	if data.NextTheme == "" {
 		switch data.Theme {
 		case "dark":
@@ -262,6 +274,7 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 	data.LanguagePreference = i18n.LanguagePreference(r)
 	data.CSRFToken = ensureCSRFTokenWithSecure(w, r, preferenceCookieSecure(s, r))
 	data.Consent = s.consentView(r, data.CSRFToken)
+	data.Announcements = s.activeAnnouncements(r)
 	if s.trackingAllowed(r) {
 		provider := trackingProviderFor(s.currentConfig().Server.Tracking)
 		data.TrackingMarkup = provider.tags

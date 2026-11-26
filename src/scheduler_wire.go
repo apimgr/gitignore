@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -77,7 +78,7 @@ func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *
 			if _, err := os.Stat(filepath.Join(securityDir, pgpPublicFilename)); os.IsNotExist(err) {
 				return nil
 			}
-			return publishProjectPGPContext(ctx, current, securityDir)
+			return retryProjectPGP(ctx, current, securityDir)
 		}
 	}
 	if len(runtimeDeps) > 0 {
@@ -112,8 +113,7 @@ func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *
 	return s, nil
 }
 
-// backupTaskHandler returns a HandlerFunc that runs a full backup into the
-// backup directory, named by kind (daily/hourly).
+// backupTaskHandler runs the scheduled cumulative backup contract.
 func backupTaskHandler(cfg *config.Config, configDir, dataDir, kind string) scheduler.HandlerFunc {
 	return func(ctx context.Context) error {
 		backupDir := apppath.GetBackupDir()
@@ -121,14 +121,16 @@ func backupTaskHandler(cfg *config.Config, configDir, dataDir, kind string) sche
 			return err
 		}
 		name := fmt.Sprintf("%s-%s.tar.gz", projectName, kind)
-		dest := filepath.Join(backupDir, name)
-		if err := runBackup(cfg, configDir, dataDir, dest); err != nil {
+		if err := runScheduledBackup(cfg, configDir, dataDir, backupDir, kind, time.Now().UTC()); err != nil {
+			if errors.Is(err, scheduler.ErrSkipped) {
+				return err
+			}
 			// Dedicated failure notification; suppresses scheduler_error for
 			// this execution (AI.md PART 17 suppression rules).
 			emitBackupFailed(name, err.Error())
 			return err
 		}
-		emitBackupComplete(name, backupFileSize(dest, cfg.Server.I18n.DefaultLanguage))
+		emitBackupComplete(name, backupFileSize(filepath.Join(backupDir, name), cfg.Server.I18n.DefaultLanguage))
 		return nil
 	}
 }
@@ -184,7 +186,7 @@ func handleSchedulerCommand(args []string, cfg *config.Config, configDir, dataDi
 		os.Exit(exUsage)
 	}
 
-	if err := db.Init(dataDir); err != nil {
+	if err := db.Init(dataDir, databaseConnectionConfig(cfg)); err != nil {
 		fmt.Fprintln(os.Stderr, schedulerText(outputLanguage, "database_init_failed", "error", err))
 		os.Exit(exUnavailable)
 	}
@@ -328,10 +330,8 @@ func schedulerShow(s *scheduler.Scheduler, id, lang string) {
 	fmt.Printf("  %s: %s\n", schedulerText(lang, "field_skippable"), skippable)
 }
 
-// schedulerHistory prints the most recent execution summary. The mandated
-// persistent schema (AI.md PART 18 "Scheduler State") stores only the latest
-// run plus cumulative counts, not a per-execution log, so history reflects the
-// last recorded run.
+// schedulerHistory prints the persisted execution history and cumulative
+// counters for one task.
 func schedulerHistory(s *scheduler.Scheduler, id, lang string) {
 	t, ok := s.Task(id)
 	if !ok {
@@ -339,12 +339,19 @@ func schedulerHistory(s *scheduler.Scheduler, id, lang string) {
 		os.Exit(exUsage)
 	}
 	fmt.Printf("%s: %s (%s)\n", schedulerText(lang, "history_heading"), schedulerTaskName(lang, t), t.ID)
-	if t.LastRun.IsZero() {
-		fmt.Println("  " + schedulerText(lang, "no_executions"))
-		return
+	history, err := db.ListSchedulerHistory(id, 100)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "scheduler history unavailable: %v\n", err)
+		os.Exit(exIOErr)
 	}
-	fmt.Printf("  %s  %-8s  %s\n", fmtTime(t.LastRun),
-		schedulerStatusText(lang, nonEmpty(t.LastStatus, "pending")), t.LastError)
+	if len(history) == 0 {
+		fmt.Println("  " + schedulerText(lang, "no_executions"))
+	} else {
+		for _, run := range history {
+			fmt.Printf("  %s  %-8s  %s (%s)\n", fmtTime(run.StartedAt),
+				schedulerStatusText(lang, run.Status), run.Error, run.Duration.Round(time.Millisecond))
+		}
+	}
 	fmt.Printf("  %s: %s\n", schedulerText(lang, "totals"), schedulerText(lang, "run_counts", "success_count", displayformat.Count(t.RunCount, lang), "fail_count", displayformat.Count(t.FailCount, lang)))
 }
 

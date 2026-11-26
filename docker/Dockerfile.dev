@@ -35,7 +35,10 @@ RUN apk add --no-cache \
 	jq \
 	bind-tools \
 	tini \
-	tor
+	tor \
+	i2pd \
+	tzdata \
+	ca-certificates
 
 COPY --from=builder /build/bin/gitignore /usr/local/bin/gitignore
 COPY docker/rootfs/ /

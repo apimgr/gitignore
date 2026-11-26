@@ -238,6 +238,16 @@ func TestHandleGraphQL(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"name":"Go"`) {
 		t.Errorf("expected the Go template in the GraphQL response: %s", rec.Body.String())
 	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/graphql?query=%7Btemplate(name%3A%20%22Go%22)%7Bname%7D%7D", nil)
+	getResponse := httptest.NewRecorder()
+	s.handleGraphQL(getResponse, getRequest)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("GET alias status = %d, want 200: %s", getResponse.Code, getResponse.Body.String())
+	}
+	if !strings.Contains(getResponse.Body.String(), `"name":"Go"`) {
+		t.Errorf("expected the Go template in the GET GraphQL response: %s", getResponse.Body.String())
+	}
 }
 
 func TestHandleGraphQLSchema(t *testing.T) {
@@ -270,12 +280,15 @@ func TestHandleRobotsTxtDefaultWithoutConfig(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "Allow: /") {
 		t.Errorf("expected default Allow rule: %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "Sitemap: http://example.com/sitemap.xml") {
+		t.Errorf("expected absolute sitemap directive: %s", rec.Body.String())
+	}
 }
 
 func TestHandleRobotsTxtFromConfig(t *testing.T) {
 	s := newTestCompatServer(t)
-	s.config.Cfg.WebRobots.Allow = []string{"/foo"}
-	s.config.Cfg.WebRobots.Deny = []string{"/bar"}
+	s.config.Cfg.Web.Robots.Allow = []string{"/foo"}
+	s.config.Cfg.Web.Robots.Deny = []string{"/bar"}
 	req := httptest.NewRequest(http.MethodGet, "/robots.txt", nil)
 	rec := httptest.NewRecorder()
 	s.handleRobotsTxt(rec, req)
@@ -297,12 +310,28 @@ func TestHandleSecurityTxtOmitsUnconfiguredEmail(t *testing.T) {
 
 func TestHandleSecurityTxtConfiguredAdmin(t *testing.T) {
 	s := newTestCompatServer(t)
-	s.config.Cfg.WebSecurity.Admin = "custom@example.com"
+	s.config.Cfg.Web.Security.Admin = "custom@example.com"
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/security.txt", nil)
 	rec := httptest.NewRecorder()
 	s.handleSecurityTxt(rec, req)
 	if !strings.Contains(rec.Body.String(), "custom@example.com") {
 		t.Errorf("expected configured admin contact: %s", rec.Body.String())
+	}
+}
+
+func TestHandleSecurityTxtTorUsesOnlyTorContactAndOmitsLocale(t *testing.T) {
+	s := newTestCompatServer(t)
+	s.config.Cfg.Server.Tor.ContactEmail = "tor-security@example.onion"
+	s.SetTorOnionAddress("exampleonion")
+	req := httptest.NewRequest(http.MethodGet, "http://exampleonion.onion/.well-known/security.txt", nil)
+	rec := httptest.NewRecorder()
+	s.handleSecurityTxt(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, "github.com") || strings.Contains(body, "Preferred-Languages:") || strings.Contains(body, "custom@example.com") {
+		t.Fatalf("Tor security.txt leaked clearnet reporting or locale data: %s", body)
+	}
+	if !strings.Contains(body, "mailto:tor-security@example.onion") || !strings.Contains(body, "Policy: http://exampleonion.onion/server/security") {
+		t.Fatalf("Tor security.txt omitted Tor-specific contact details: %s", body)
 	}
 }
 

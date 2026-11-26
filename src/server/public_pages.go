@@ -225,7 +225,8 @@ func markdownFragment(source string) string {
 			level++
 		}
 		if level > 0 && len(line) > level && line[level] == ' ' {
-			fmt.Fprintf(&out, "<h%d>%s</h%d>", level, inlineMarkdownHTML(line[level+1:]), level)
+			headingLevel := min(level+1, 6)
+			fmt.Fprintf(&out, "<h%d>%s</h%d>", headingLevel, inlineMarkdownHTML(line[level+1:]), headingLevel)
 		} else if strings.HasPrefix(line, "- ") {
 			out.WriteString("<p>• " + inlineMarkdownHTML(line[2:]) + "</p>")
 		} else {
@@ -289,7 +290,7 @@ func sanitizePublicHTML(source string) string {
 			}
 			return
 		}
-		allowed := map[string]bool{"p": true, "div": true, "span": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "em": true, "strong": true, "b": true, "i": true, "ul": true, "ol": true, "li": true, "a": true, "table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true, "pre": true, "code": true, "blockquote": true, "hr": true, "dl": true, "dt": true, "dd": true, "sup": true, "sub": true, "br": true}
+		allowed := map[string]bool{"p": true, "div": true, "span": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "em": true, "strong": true, "b": true, "i": true, "ul": true, "ol": true, "li": true, "a": true, "table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true, "pre": true, "code": true, "blockquote": true, "hr": true, "dl": true, "dt": true, "dd": true, "sup": true, "sub": true, "br": true}
 		if !allowed[n.Data] {
 			if n.Data == "script" || n.Data == "style" || n.Data == "form" || n.Data == "iframe" || n.Data == "object" || n.Data == "embed" {
 				return

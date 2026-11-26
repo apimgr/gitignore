@@ -103,7 +103,7 @@ func writeWebhookAudit(logsDir, event string, fields map[string]string) {
 	}
 	_ = audit.Append(logsDir, audit.Entry{
 		Event: event, Category: "system", Severity: "warn",
-		Actor:   audit.Actor{Type: "system", IP: "127.0.0.1"},
+		Actor:   audit.Actor{Type: "system"},
 		Details: details, Result: "failure",
 	})
 }
@@ -113,6 +113,31 @@ func parseDurationOr(value string, fallback time.Duration) time.Duration {
 		return duration
 	}
 	return fallback
+}
+
+func databaseConnectionConfig(cfg *config.Config) db.ConnectionConfig {
+	if cfg == nil {
+		return db.ConnectionConfig{Driver: "sqlite"}
+	}
+	pool := cfg.Server.Database.Pool
+	return db.ConnectionConfig{
+		Driver: cfg.Server.Database.Driver,
+		URL:    cfg.Server.Database.URL,
+		Token:  cfg.Server.Database.Token,
+		Pool: db.PoolConfig{
+			MaxOpen:     pool.MaxOpen,
+			MaxIdle:     pool.MaxIdle,
+			MaxLifetime: parseDurationOr(pool.MaxLifetime, 5*time.Minute),
+			MaxIdleTime: parseDurationOr(pool.MaxIdleTime, time.Minute),
+		},
+		Cache: db.CacheConfig{
+			Enabled:      cfg.Server.Database.Cache.Enabled,
+			Path:         cfg.Server.Database.Cache.Path,
+			SyncInterval: parseDurationOr(cfg.Server.Database.Cache.SyncInterval, 30*time.Second),
+			OfflineMode:  cfg.Server.Database.Cache.OfflineMode,
+			MaxAge:       parseDurationOr(cfg.Server.Database.Cache.MaxAge, time.Hour),
+		},
+	}
 }
 
 // sysexits(3) exit codes — never invent custom schemes.
@@ -179,11 +204,12 @@ func main() {
 	serviceCmd := flag.String("service", "", "Service commands: start, stop, restart, reload, status, --install, --uninstall, --disable, --help")
 
 	// Maintenance commands
-	maintenanceCmd := flag.String("maintenance", "", "Maintenance commands: backup, restore, update, mode, setup")
+	maintenanceCmd := flag.String("maintenance", "", "Maintenance commands: backup, restore, update, mode, setup, token, data, compliance")
 
 	// Force/assume-yes (used by --service --uninstall and other prompts)
 	forceFlag := flag.Bool("force", false, "Assume yes to confirmation prompts")
 	flag.BoolVar(forceFlag, "y", false, "Assume yes to confirmation prompts (shorthand)")
+	flag.BoolVar(forceFlag, "yes", false, "Assume yes to confirmation prompts (shorthand)")
 
 	// Update commands
 	updateCmd := flag.String("update", "", "Update commands: check, yes, branch {stable|beta|devel}")
@@ -295,6 +321,12 @@ func main() {
 		pidFile = *pidFileFlag
 	}
 
+	if os.Geteuid() == 0 {
+		if err := service.EnsureSystemUser(dataDir); err != nil {
+			log.Printf("failed to prepare the service account: %v", err)
+			os.Exit(exUnavailable)
+		}
+	}
 	// Ensure all runtime directories exist with privilege-appropriate perms
 	// (AI.md PART 8 "Directory Validation Rules"): 0755 root / 0700 user.
 	for _, d := range []string{configDir, dataDir, logsDir, apppath.GetCacheDir(), apppath.GetBackupDir()} {
@@ -305,11 +337,15 @@ func main() {
 
 	// Load configuration (auto-creates with random 64xxx port on first run)
 	configPath := filepath.Join(configDir, "server.yml")
+	startupSettings := config.PeekStartupSettings(configPath)
 	config.SetAuditLogDir(logsDir)
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Printf("%s", cliText("cli.main.load_config_warning", "error", err))
 		cfg = config.DefaultConfig()
+	}
+	if !startupSettings.PIDFile && *pidFileFlag == "" {
+		pidFile = ""
 	}
 	setOutputLanguage(*langFlag, cfg.Server.I18n.DefaultLanguage)
 	flag.Visit(func(parsed *flag.Flag) {
@@ -374,7 +410,7 @@ func main() {
 
 	// Handle --maintenance flag
 	if *maintenanceCmd != "" {
-		handleMaintenanceCommand(*maintenanceCmd, configDir, dataDir, logsDir, configPath)
+		handleMaintenanceCommand(*maintenanceCmd, configDir, dataDir, logsDir, configPath, *forceFlag)
 		return
 	}
 
@@ -404,7 +440,7 @@ func main() {
 	// ── Daemonize ────────────────────────────────────────────────────────────
 	// Detach before acquiring any resources so only the child runs the server
 	// (AI.md PART 8 "--daemon"). The parent reports the child PID and exits 0.
-	if *daemonFlag || cfg.Server.Daemonize {
+	if *daemonFlag || startupSettings.Daemonize {
 		isParent, derr := daemonize()
 		if derr != nil {
 			log.Printf("%s", cliText("cli.main.daemonize_failed", "error", derr))
@@ -416,15 +452,21 @@ func main() {
 	}
 
 	// ── Initialize database ──────────────────────────────────────────────────
-	if err := db.Init(dataDir, db.ConnectionConfig{
-		Driver: cfg.Server.Database.Driver,
-		URL:    cfg.Server.Database.URL,
-		Token:  cfg.Server.Database.Token,
-	}); err != nil {
+	if err := db.Init(dataDir, databaseConnectionConfig(cfg)); err != nil {
 		log.Printf("%s", cliText("cli.main.initialize_database_failed", "error", err))
 		os.Exit(exUnavailable)
 	}
+	configureRateLimitCache(cfg.Server.Cache, configDir)
+	if err := audit.SetDatabaseSink(db.AppendAuditEntry); err != nil {
+		log.Printf("failed to persist buffered audit events: %v", err)
+	}
 	defer func() { _ = db.Close() }()
+	if _, err := applyBackupRetention(apppath.GetBackupDir(), cfg.Server.Backup.Retention, cfg.Server.Backup.EncryptionPassword); err != nil {
+		log.Printf("backup retention cleanup failed: %v", err)
+	}
+	if _, integrityErr := audit.VerifyAndReport(logsDir); integrityErr != nil {
+		log.Printf("audit chain verification found a broken entry: %v", integrityErr)
+	}
 
 	// ── Resolve server address & port ────────────────────────────────────────
 	serverAddress := cfg.Server.Address
@@ -609,6 +651,17 @@ func main() {
 	if devMode {
 		log.Println(cliText("cli.main.development_mode_enabled"))
 	}
+	ownershipRoots := []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, apppath.GetBackupDir()}
+	if db.IsSQLite() {
+		ownershipRoots = append(ownershipRoots, filepath.Dir(db.LocalDatabasePath(dataDir)))
+	}
+	if cfg.Server.Database.Cache.Enabled {
+		ownershipRoots = append(ownershipRoots, filepath.Dir(db.LocalCachePath(dataDir)))
+	}
+	if err := server.SetRuntimeOwnership("gitignore", "gitignore", ownershipRoots...); err != nil {
+		log.Printf("failed to set runtime directory ownership: %v", err)
+		os.Exit(exUnavailable)
+	}
 
 	errChan := make(chan error, 1)
 	go func() { errChan <- srv.Start() }()
@@ -617,6 +670,7 @@ func main() {
 	// Detects or tests SMTP and sets the process-wide notifier. Best-effort: no
 	// working SMTP simply leaves email disabled.
 	initEmail(cfg, configDir, dataDir, i2pRuntime.healthInfo)
+	srv.SetAbuseAlertHandler(emitAbuseSecurityAlert)
 
 	// First-run GeoIP download (AI.md PART 19): best-effort, non-blocking.
 	bootstrapGeoIP(context.Background(), geoipMgr, srv.RefreshHealth)
@@ -670,7 +724,14 @@ func main() {
 			log.Printf("%s %s fields=%v", level, message, fields)
 		},
 	})
+	auditRetention := cfg.Server.Logging.Audit.Keep
+	if auditRetention == "" {
+		auditRetention = cfg.Server.Logging.Defaults.Keep
+	}
+	auditCompress := cfg.Server.Logging.Audit.Compress != nil && *cfg.Server.Logging.Audit.Compress
 	runtimeDeps := scheduler.Deps{
+		AuditRetention: auditRetention,
+		AuditCompress:  auditCompress,
 		BlocklistUpdate: func(ctx context.Context) error {
 			_, updateErr := blocklist.Update(ctx, blocklistCfg)
 			var reloadErr error
@@ -713,6 +774,8 @@ func main() {
 			_, err := db.PurgeIdleOwners(ctx, time.Now().UTC().AddDate(0, 0, -cfg.Server.Tokens.IdlePurgeDays))
 			return err
 		},
+		ContactChallengeCleanup: func(ctx context.Context) error { return srv.CleanupExpiredContactChallenges(ctx) },
+		ExpiredIPBlocks:         srv.CleanupExpiredIPBlocks,
 	}
 	runtimeDeps.TaskState = srv.SchedulerMetricsObserver()
 	// ── Start the always-running task scheduler (AI.md PART 18) ───────────────
@@ -934,8 +997,9 @@ func installService() {
 	}
 }
 
-func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath string) {
+func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath string, assumeYes ...bool) {
 	args := flag.Args()
+	yes := len(assumeYes) > 0 && assumeYes[0]
 
 	switch cmd {
 	case "backup":
@@ -972,6 +1036,10 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 			return
 		}
 		cfg, _ := config.Load(configPath)
+		if err := db.Init(dataDir, databaseConnectionConfig(cfg)); err != nil {
+			log.Printf("%s", cliText("cli.main.initialize_database_failed", "error", err))
+			os.Exit(exUnavailable)
+		}
 		backupFile := ""
 		if len(args) > 0 {
 			backupFile = args[0]
@@ -985,9 +1053,11 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 			backupFile = filepath.Join(backupDir, fmt.Sprintf("gitignore_backup_%s.tar.gz", timestamp))
 		}
 		if err := runBackup(cfg, configDir, dataDir, backupFile); err != nil {
+			_ = db.Close()
 			log.Printf("%s", cliText("cli.main.backup_failed", "error", err))
 			os.Exit(exIOErr)
 		}
+		_ = db.Close()
 
 	case "restore":
 		if len(args) == 0 {
@@ -1061,6 +1131,19 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 			os.Exit(exConfig)
 		}
 
+	case "token", "data", "compliance":
+		cfg, err := config.Load(configPath)
+		if err == nil {
+			if yes {
+				args = append(args, "--yes")
+			}
+			err = handleOwnerMaintenance(cmd, cfg, dataDir, logsDir, args)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, cliText("cli.main.maintenance_failed", "error", err))
+			os.Exit(exConfig)
+		}
+
 	default:
 		fmt.Fprintln(os.Stderr, cliText("cli.main.unknown_maintenance_command", "command", cmd))
 		fmt.Fprintln(os.Stderr, cliText("cli.main.available_maintenance_commands"))
@@ -1122,13 +1205,8 @@ func serviceStatus() {
 }
 
 func serviceDisable() {
-	switch runtime.GOOS {
-	case "linux":
-		runCommand("systemctl", "disable", projectName)
-	case "darwin":
-		runCommand("launchctl", "unload", "/Library/LaunchDaemons/apimgr.gitignore.plist")
-	default:
-		fmt.Println(cliText("cli.main.service_disable_unsupported", "os", runtime.GOOS))
+	if err := service.Disable(); err != nil {
+		log.Printf("%s", cliText("cli.main.service_disable_failed", "error", err))
 	}
 }
 

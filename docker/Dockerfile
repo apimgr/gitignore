@@ -50,7 +50,10 @@ RUN apk add --no-cache \
     curl \
     bash \
     tini \
-    tor
+    tor \
+    i2pd \
+    tzdata \
+    ca-certificates
 
 # NO directory creation - the binary creates and owns all directories based on
 # CONFIG_DIR / DATA_DIR / DATABASE_DIR. Docker volume mounts auto-create mount

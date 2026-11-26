@@ -214,12 +214,16 @@ func TestHealthStatusesUsesCachedStateAndOmitesDisabled(t *testing.T) {
 	m.country = &fakeReader{}
 	m.cityV4 = &fakeReader{}
 	m.cityV6 = &fakeReader{}
-	m.lastUpdated = now.Add(-8 * 24 * time.Hour)
+	m.lastUpdated = now.Add(-22 * 24 * time.Hour)
 	statuses := m.HealthStatuses(now)
 	for _, key := range []string{"geoip_asn", "geoip_country", "geoip_city"} {
 		if statuses[key] != "degraded" {
 			t.Errorf("expected stale %s=degraded, got %q", key, statuses[key])
 		}
+	}
+	m.lastUpdated = now.Add(-20 * 24 * time.Hour)
+	if got := m.HealthStatuses(now)["geoip_country"]; got != "ok" {
+		t.Fatalf("GeoIP database at 20 days = %q, want ok", got)
 	}
 
 	m.lastUpdated = now

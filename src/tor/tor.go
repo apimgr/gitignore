@@ -86,7 +86,12 @@ func (s *TorService) Close() error {
 			if err := s.cmd.Process.Kill(); err != nil {
 				return err
 			}
-			<-s.done
+			if waitErr := <-s.done; waitErr != nil {
+				var exitErr *exec.ExitError
+				if !errors.As(waitErr, &exitErr) {
+					return waitErr
+				}
+			}
 		}
 	}
 	return nil
@@ -404,7 +409,10 @@ func startDedicatedTor(ctx context.Context, backendPort int, configDir, dataDir 
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 			select {
-			case <-done:
+			case waitErr := <-done:
+				if waitErr != nil {
+					log.Printf("tor: process exit while cleaning up startup failure: %v", waitErr)
+				}
 			default:
 			}
 		}
@@ -498,12 +506,16 @@ func torSecretKeyBlob(data []byte) (string, error) {
 	return blob, nil
 }
 
-func reserveLoopbackPort() (int, error) {
+func reserveLoopbackPort() (port int, resultErr error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() {
+		if closeErr := l.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 

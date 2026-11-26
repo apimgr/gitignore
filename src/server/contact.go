@@ -188,7 +188,7 @@ func (s *Server) handleAPIContact(w http.ResponseWriter, r *http.Request) {
 		"types":        types,
 		"form_token":   token,
 		"security_url": "/server/security",
-		"abuse_email":  s.publicAbuseEmail(),
+		"abuse_email":  s.responseContactEmail(r),
 		"captcha":      contactCaptchaDescriptor(s.contactCaptchaProviderForRequest(r), challengeID, question),
 		"fields":       contactFieldDescriptors(),
 	})
@@ -584,7 +584,7 @@ func (s *Server) renderContact(w http.ResponseWriter, r *http.Request, status in
 	data["challengeID"] = challengeID
 	data["challengeQuestion"] = question
 	data["success"] = ""
-	data["abuseEmail"] = s.publicAbuseEmail()
+	data["abuseEmail"] = s.responseContactEmail(r)
 	if r.URL.Query().Get("sent") == "1" {
 		message := requestTranslation(r, "contact.runtime.contact_success")
 		if s.currentConfig() != nil {
@@ -630,6 +630,13 @@ func (s *Server) publicAbuseEmail() string {
 		return email
 	}
 	return strings.TrimSpace(s.currentConfig().Server.Contact.General.Email)
+}
+
+func (s *Server) responseContactEmail(r *http.Request) string {
+	if s.isTorRequest(r) {
+		return s.responseSecurityContactEmail(r)
+	}
+	return s.publicAbuseEmail()
 }
 
 func contactFormValues(r *http.Request, securityID, message string) map[string]interface{} {
@@ -799,8 +806,9 @@ func (s *Server) handleSecurityReportSubmit(w http.ResponseWriter, r *http.Reque
 			if len(securityTargets) > 0 {
 				s.dispatchWebhook(r, notify.Event{
 					Role: "security", Event: "security.report_received",
-					Subject: i18n.TranslateFormat(lang, "contact.mail.security.subject", map[string]string{"tracking_id": trackingID}), Body: secureMail,
-					Severity: severity, TrackingID: trackingID,
+					Subject:  i18n.TranslateFormat(lang, "contact.mail.security.subject", map[string]string{"tracking_id": trackingID}),
+					Body:     i18n.TranslateFormat(lang, "contact.mail.security.summary", map[string]string{"tracking_id": trackingID, "severity": severityText}),
+					Severity: severity, Component: component, TrackingID: trackingID,
 				}, securityTargets)
 			}
 		}
@@ -909,14 +917,16 @@ func (s *Server) contactWebhookTargets(typeName string) []notify.Target {
 func (s *Server) dispatchContactWebhook(r *http.Request, typeName, subject, body, severity, trackingID string) {
 	targets := s.contactWebhookTargets(typeName)
 	role := typeName
-	if typeName == "dmca" {
+	switch typeName {
+	case "dmca":
 		role = "abuse"
-	} else if typeName == "privacy" {
+	case "privacy":
 		role = "general"
 	}
 	s.dispatchWebhook(r, notify.Event{
 		Role: role, Event: role + ".report_received",
-		Subject: subject, Body: body, Severity: severity, TrackingID: trackingID,
+		Subject: role + " report received", Body: role + " report received",
+		Severity: severity, Component: role, TrackingID: trackingID,
 	}, targets)
 }
 
@@ -1096,7 +1106,7 @@ func (s *Server) securityContactEmail() string {
 	if email := strings.TrimSpace(s.currentConfig().Server.Contact.Security.Email); email != "" {
 		return email
 	}
-	if email := strings.TrimSpace(s.currentConfig().WebSecurity.Admin); email != "" {
+	if email := strings.TrimSpace(s.currentConfig().Web.Security.Admin); email != "" {
 		return email
 	}
 	if email := strings.TrimSpace(s.currentConfig().Server.Contact.Admin.Email); email != "" {
@@ -1109,6 +1119,16 @@ func (s *Server) securityContactEmail() string {
 		return "security@" + fqdn
 	}
 	return ""
+}
+
+func (s *Server) responseSecurityContactEmail(r *http.Request) string {
+	if s.isTorRequest(r) {
+		if cfg := s.currentConfig(); cfg != nil {
+			return strings.TrimSpace(cfg.Server.Tor.ContactEmail)
+		}
+		return ""
+	}
+	return s.securityContactEmail()
 }
 
 func (s *Server) issueContactChallenge(r *http.Request) (string, string, error) {
@@ -1158,6 +1178,36 @@ func (s *Server) issueContactChallenge(r *http.Request) (string, string, error) 
 		expires:    now.Add(10 * time.Minute),
 	}
 	return challengeID, i18n.TranslateFormat(i18n.LangFromContext(r.Context()), "contact.captcha.question", map[string]interface{}{"left": int(left), "right": int(right)}), nil
+}
+
+// CleanupExpiredContactChallenges removes expired in-memory simple challenges
+// and stale request counters during the scheduled token-cleanup task.
+func (s *Server) CleanupExpiredContactChallenges(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now := time.Now()
+	s.contactMu.Lock()
+	defer s.contactMu.Unlock()
+	for id, challenge := range s.contactChallenges {
+		if !now.Before(challenge.expires) {
+			delete(s.contactChallenges, id)
+		}
+	}
+	for ip, requests := range s.contactRequests {
+		kept := requests[:0]
+		for _, created := range requests {
+			if now.Sub(created) < time.Minute {
+				kept = append(kept, created)
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.contactRequests, ip)
+		} else {
+			s.contactRequests[ip] = kept
+		}
+	}
+	return nil
 }
 
 func (s *Server) consumeContactChallenge(r *http.Request, id, answer string) bool {

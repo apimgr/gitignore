@@ -106,6 +106,25 @@ func TestSystemdServiceContentUsesRequiredProtectSystem(t *testing.T) {
 	if strings.Contains(content, "ProtectSystem=strict") {
 		t.Error("systemd service content uses forbidden ProtectSystem=strict")
 	}
+	for _, required := range []string{
+		"ExecStartPre=+/usr/bin/install -d -m 0755",
+		"ReadWritePaths=-/etc/apimgr/gitignore",
+		"ReadWritePaths=-/var/lib/apimgr/gitignore",
+		"ReadWritePaths=-/var/cache/apimgr/gitignore",
+		"ReadWritePaths=-/var/log/apimgr/gitignore",
+		"ReadWritePaths=-/var/run/apimgr/gitignore",
+		"ReadWritePaths=-/mnt/Backups/apimgr/gitignore",
+		"ReadWritePaths=-/usr/local/bin",
+		"StandardOutput=journal",
+		"StandardError=journal",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("systemd service content missing %q", required)
+		}
+	}
+	if strings.Contains(content, "\nUser=") || strings.Contains(content, "\nGroup=") {
+		t.Error("systemd service must start elevated so the server can bind before dropping privileges")
+	}
 }
 
 func TestGetBinaryPath(t *testing.T) {

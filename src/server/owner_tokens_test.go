@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,20 @@ import (
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/go-chi/chi/v5"
 )
+
+func TestOwnerTokenCookieNamesMatchIDEA(t *testing.T) {
+	idea, err := os.ReadFile("../../IDEA.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := string(idea)
+	if !strings.Contains(contents, "\nowner_token: "+ownerTokenCookieName+"\n") {
+		t.Fatalf("IDEA.md does not record owner cookie name %q", ownerTokenCookieName)
+	}
+	if !strings.Contains(contents, "\nowner_token_legacy: "+legacyOwnerTokenCookieName+"\n") {
+		t.Fatalf("IDEA.md does not record legacy owner cookie name %q", legacyOwnerTokenCookieName)
+	}
+}
 
 func TestOwnerTokenIssueAuthenticateAndEncrypt(t *testing.T) {
 	if err := db.Init(t.TempDir()); err != nil {
@@ -130,8 +145,52 @@ func TestOwnerCookieMiddlewareAndPageFlash(t *testing.T) {
 	pageRequest.AddCookie(&http.Cookie{Name: ownerTokenCookieName, Value: raw})
 	pageResponse := httptest.NewRecorder()
 	s.handleOwnerTokensPage(pageResponse, pageRequest)
-	if pageResponse.Code != http.StatusOK || !strings.Contains(pageResponse.Body.String(), "Owner tokens") || strings.Contains(pageResponse.Body.String(), raw) {
+	if pageResponse.Code != http.StatusOK || !strings.Contains(pageResponse.Body.String(), "Owner tokens") || !strings.Contains(pageResponse.Body.String(), `id="revoke-primary"`) || !strings.Contains(pageResponse.Body.String(), raw[len(raw)-4:]) || strings.Contains(pageResponse.Body.String(), raw) {
 		t.Fatalf("owner token page status=%d body=%s", pageResponse.Code, pageResponse.Body.String())
+	}
+	csrf := strings.Repeat("a", 64)
+	revokeRequest := httptest.NewRequest(http.MethodPost, "/server/preferences/token/revoke", strings.NewReader(fmt.Sprintf("csrf_token=%s&confirm=%s", csrf, raw[len(raw)-4:])))
+	revokeRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	revokeRequest.AddCookie(&http.Cookie{Name: ownerTokenCookieName, Value: raw})
+	revokeRequest.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrf})
+	revokeResponse := httptest.NewRecorder()
+	s.handleRevokePrimaryOwnerTokenWeb(revokeResponse, revokeRequest)
+	if revokeResponse.Code != http.StatusSeeOther || revokeResponse.Header().Get("Clear-Site-Data") != `"storage"` {
+		t.Fatalf("primary revoke status=%d headers=%v body=%s", revokeResponse.Code, revokeResponse.Header(), revokeResponse.Body.String())
+	}
+	if _, err := s.AuthenticateBearerToken(raw); err == nil {
+		t.Fatal("primary revoke left the owner token valid")
+	}
+}
+
+func TestOwnerCookieMiddlewareMigratesLegacyCookie(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	cfg := config.DefaultConfig()
+	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
+	s := New(&Config{Cfg: cfg})
+	raw, _, err := s.issueOwnerToken(time.Now().UTC(), "api", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/server/preferences/tokens", nil)
+	request.AddCookie(&http.Cookie{Name: legacyOwnerTokenCookieName, Value: raw})
+	response := httptest.NewRecorder()
+	s.ownerCookieMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(response, request)
+	cookies := response.Result().Cookies()
+	var migrated, expiredLegacy bool
+	for _, cookie := range cookies {
+		if cookie.Name == ownerTokenCookieName && cookie.Value == raw && cookie.MaxAge > 0 {
+			migrated = true
+		}
+		if cookie.Name == legacyOwnerTokenCookieName && cookie.MaxAge < 0 {
+			expiredLegacy = true
+		}
+	}
+	if !migrated || !expiredLegacy {
+		t.Fatalf("legacy cookie migration missing: migrated=%v expiredLegacy=%v cookies=%v", migrated, expiredLegacy, cookies)
 	}
 }
 
@@ -249,6 +308,22 @@ func TestOwnerTokenAPIIssueListLinkedActionsAndRotate(t *testing.T) {
 	}
 	if _, err := s.AuthenticateBearerToken(primaryRaw); err == nil {
 		t.Fatal("old primary token remained valid after rotation")
+	}
+	revokeRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/server/preferences/tokens/primary", strings.NewReader(`{"confirm":"wrong"}`))
+	revokeRequest.Header.Set("Authorization", "Bearer "+rotateResponse.Data.Value)
+	revokeRequest.Header.Set("Content-Type", "application/json")
+	revokeResponse := httptest.NewRecorder()
+	s.handleAPIPrimaryOwnerRevoke(revokeResponse, revokeRequest)
+	if revokeResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid primary revoke status=%d body=%s", revokeResponse.Code, revokeResponse.Body.String())
+	}
+	revokeRequest = httptest.NewRequest(http.MethodDelete, "/api/v1/server/preferences/tokens/primary", strings.NewReader(fmt.Sprintf(`{"confirm":%q}`, rotateResponse.Data.Value[len(rotateResponse.Data.Value)-4:])))
+	revokeRequest.Header.Set("Authorization", "Bearer "+rotateResponse.Data.Value)
+	revokeRequest.Header.Set("Content-Type", "application/json")
+	revokeResponse = httptest.NewRecorder()
+	s.handleAPIPrimaryOwnerRevoke(revokeResponse, revokeRequest)
+	if revokeResponse.Code != http.StatusOK || !strings.Contains(revokeResponse.Body.String(), `"resources":0`) {
+		t.Fatalf("primary API revoke status=%d body=%s", revokeResponse.Code, revokeResponse.Body.String())
 	}
 }
 

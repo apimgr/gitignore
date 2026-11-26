@@ -22,6 +22,20 @@ func ParseSchedule(expr string) (Schedule, error) {
 	if expr == "" {
 		return nil, fmt.Errorf("empty schedule expression")
 	}
+	original := expr
+	var location *time.Location
+	if strings.HasPrefix(expr, "CRON_TZ=") {
+		fields := strings.Fields(expr)
+		if len(fields) < 2 {
+			return nil, fmt.Errorf("timezone-qualified cron schedule has no expression")
+		}
+		var err error
+		location, err = time.LoadLocation(strings.TrimPrefix(fields[0], "CRON_TZ="))
+		if err != nil {
+			return nil, fmt.Errorf("invalid cron timezone: %w", err)
+		}
+		expr = strings.Join(fields[1:], " ")
+	}
 
 	if strings.HasPrefix(expr, "@every ") {
 		d, err := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(expr, "@every ")))
@@ -31,6 +45,9 @@ func ParseSchedule(expr string) (Schedule, error) {
 		if d <= 0 {
 			return nil, fmt.Errorf("@every duration must be positive: %q", expr)
 		}
+		if location != nil {
+			return nil, fmt.Errorf("CRON_TZ cannot be used with @every schedules")
+		}
 		return everySchedule{interval: d, raw: expr}, nil
 	}
 
@@ -38,8 +55,24 @@ func ParseSchedule(expr string) (Schedule, error) {
 		expr = macro
 	}
 
-	return parseCron(expr)
+	schedule, err := parseCron(expr)
+	if err != nil {
+		return nil, err
+	}
+	if location != nil {
+		return zonedSchedule{schedule: schedule, location: location, raw: original}, nil
+	}
+	return schedule, nil
 }
+
+type zonedSchedule struct {
+	schedule Schedule
+	location *time.Location
+	raw      string
+}
+
+func (s zonedSchedule) Next(after time.Time) time.Time { return s.schedule.Next(after.In(s.location)) }
+func (s zonedSchedule) String() string                 { return s.raw }
 
 var cronMacros = map[string]string{
 	"@hourly":   "0 * * * *",

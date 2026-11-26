@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +77,25 @@ func TestLoadKeepsLastGoodConfigurationAfterParseFailure(t *testing.T) {
 	}
 }
 
+func TestLoadRemovesDeprecatedServiceIdentitySettings(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "server.yml")
+	content := "server:\n  port: '64211'\n  user: custom-user\n  group: custom-group\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "user:") || strings.Contains(string(data), "group:") {
+		t.Fatalf("deprecated service identity keys were retained: %s", data)
+	}
+}
+
 func TestLoadIgnoresMalformedDropinWithoutDiscardingOtherFiles(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "server.yml")
@@ -146,6 +166,55 @@ func TestApplyYAMLConfigFileDuplicateKeyDefaultsOnlyDuplicateField(t *testing.T)
 	}
 	if cfg.Server.FQDN != "example.test" {
 		t.Errorf("fqdn = %q, want valid sibling value example.test", cfg.Server.FQDN)
+	}
+}
+
+func TestWebRobotsAndSecurityUseCanonicalNestedConfigWithLegacyReadSupport(t *testing.T) {
+	cfg := DefaultConfig()
+	canonical := []byte("web:\n  robots:\n    allow: [/public]\n  security:\n    contact: security@example.test\n")
+	if err := applyYAMLConfigFile(filepath.Join(t.TempDir(), "web.yml"), canonical, cfg); err != nil {
+		t.Fatalf("apply canonical web config: %v", err)
+	}
+	if len(cfg.Web.Robots.Allow) != 1 || cfg.Web.Robots.Allow[0] != "/public" {
+		t.Fatalf("web.robots.allow = %#v", cfg.Web.Robots.Allow)
+	}
+	if cfg.Web.Security.Contact != "security@example.test" {
+		t.Fatalf("web.security.contact = %q", cfg.Web.Security.Contact)
+	}
+
+	legacy := []byte("web_robots:\n  allow: [/legacy]\nweb_security:\n  contact: legacy@example.test\n")
+	if err := applyYAMLConfigFile(filepath.Join(t.TempDir(), "legacy.yml"), legacy, cfg); err != nil {
+		t.Fatalf("apply legacy web config: %v", err)
+	}
+	if len(cfg.Web.Robots.Allow) != 1 || cfg.Web.Robots.Allow[0] != "/legacy" {
+		t.Fatalf("legacy web_robots did not migrate: %#v", cfg.Web.Robots.Allow)
+	}
+	if cfg.Web.Security.Contact != "legacy@example.test" {
+		t.Fatalf("legacy web_security did not migrate: %q", cfg.Web.Security.Contact)
+	}
+}
+
+func TestUnknownConfigurationKeyIsReportedWithLocation(t *testing.T) {
+	previousStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	cfg := DefaultConfig()
+	applyErr := applyYAMLConfigFile(filepath.Join(t.TempDir(), "web.yml"), []byte("server:\n  unknown_setting: true\n"), cfg)
+	os.Stderr = previousStderr
+	_ = writer.Close()
+	if applyErr != nil {
+		t.Fatalf("apply config: %v", applyErr)
+	}
+	message, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reader.Close()
+	if !strings.Contains(string(message), "unknown configuration key server.unknown_setting") || !strings.Contains(string(message), "web.yml:2") {
+		t.Fatalf("unknown-key diagnostic = %q", message)
 	}
 }
 
@@ -232,12 +301,24 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Web.Reports.RateLimitPerMinute != 60 || cfg.Web.Reports.RateLimitPerIPBurst != 10 {
 		t.Errorf("web report limits = %d/minute with burst %d, want 60/minute and 10 burst", cfg.Web.Reports.RateLimitPerMinute, cfg.Web.Reports.RateLimitPerIPBurst)
 	}
+	if pool := cfg.Server.Database.Pool; pool.MaxOpen != 25 || pool.MaxIdle != 5 || pool.MaxLifetime != "5m" || pool.MaxIdleTime != "1m" {
+		t.Errorf("database pool defaults = %+v, want 25 open, 5 idle, 5m lifetime, 1m idle time", pool)
+	}
+	if cache := cfg.Server.Database.Cache; cache.Enabled || cache.SyncInterval != "30s" || !cache.OfflineMode || cache.MaxAge != "1h" {
+		t.Errorf("database cache defaults = %+v", cache)
+	}
+	if retention := cfg.Server.Backup.Retention; retention.MaxBackups != 1 || retention.MaxTotalSize != "10%" {
+		t.Errorf("backup retention defaults = %+v", retention)
+	}
+	if restore := cfg.Server.Restore; restore.MaxArchiveSize != "1G" || restore.MaxExpandedSize != "4G" || restore.MaxFiles != 10000 || restore.MaxFileSize != "512M" || restore.MaxRatio != 100 {
+		t.Errorf("restore defaults = %+v", restore)
+	}
 }
 
 func TestGeneratedConfigUsesCanonicalSchedulerAndLogs(t *testing.T) {
 	generated := generateConfigYAML(DefaultConfig())
 	for _, required := range []string{
-		"# This node only:", "server:", "  address:", "  api_version:", "  database:", "    driver:",
+		"# This node only:", "server:", "  address:", "  api_version:", "  database:", "    driver:", "    pool:", "      max_open: 25", "      max_idle: 5",
 	} {
 		if !strings.Contains(generated, required) {
 			t.Errorf("generated config missing %q", required)
@@ -320,6 +401,9 @@ func TestMigrateAreaConfigSplitsSectionsAndPreservesDropinPrecedence(t *testing.
 
 func TestDefaultTorConfig(t *testing.T) {
 	tc := DefaultTorConfig()
+	if tc.Expose || tc.ContactEmail != "" {
+		t.Errorf("Tor exposure/contact defaults = %t/%q, want false/empty", tc.Expose, tc.ContactEmail)
+	}
 	if tc.MaxCircuits != 32 {
 		t.Errorf("MaxCircuits = %d, want 32", tc.MaxCircuits)
 	}
@@ -328,6 +412,46 @@ func TestDefaultTorConfig(t *testing.T) {
 	}
 	if tc.UseNetwork {
 		t.Error("expected UseNetwork false by default")
+	}
+}
+
+func TestPeekStartupSettingsMergesOnlyStartupFields(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.yml")
+	if err := os.WriteFile(configPath, []byte("server:\n  port: '64123'\n  address: 127.0.0.1\n  daemonize: true\n  pidfile: false\nsecrets:\n  token: never-read\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dropins := filepath.Join(dir, "yaml.d")
+	if err := os.Mkdir(dropins, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dropins, "20-startup.yml"), []byte("server:\n  port: '64234'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := PeekStartupSettings(configPath)
+	if settings.Port != "64234" || settings.Address != "127.0.0.1" || !settings.Daemonize || settings.PIDFile {
+		t.Fatalf("startup settings = %+v", settings)
+	}
+}
+
+func TestPeekStartupSettingsInvalidValuesUseDefaults(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.yml")
+	if err := os.WriteFile(configPath, []byte("server:\n  port: '64123'\n  address: 127.0.0.1\n  daemonize: true\n  pidfile: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dropins := filepath.Join(dir, "yaml.d")
+	if err := os.Mkdir(dropins, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	invalid := "server:\n  port: null\n  address: 0.0.0.0\n  daemonize: true\n  daemonize: false\n  pidfile: perhaps\n"
+	if err := os.WriteFile(filepath.Join(dropins, "20-invalid.yml"), []byte(invalid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := PeekStartupSettings(configPath)
+	defaults := DefaultConfig().Server
+	if settings.Port != defaults.Port || settings.Address != "0.0.0.0" || settings.Daemonize != defaults.Daemonize || settings.PIDFile != defaults.PIDFile {
+		t.Fatalf("invalid startup values = %+v, want invalid keys reset to defaults", settings)
 	}
 }
 

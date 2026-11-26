@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/apimgr/gitignore/src/common/i18n"
 	graphapi "github.com/apimgr/gitignore/src/graphql"
@@ -36,13 +37,46 @@ func (s *Server) graphQLSchema(lang string) (*graphapi.Schema, error) {
 
 // handleGraphQL executes a read-only GraphQL query against the template catalog.
 func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGraphQLRequestBytes))
 	var request graphQLRequest
-	if err := decoder.Decode(&request); err != nil {
-		writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
+	switch r.Method {
+	case http.MethodGet:
+		values := r.URL.Query()
+		request.Query = values.Get("query")
+		request.OperationName = values.Get("operationName")
+		if len(request.Query) > maxGraphQLRequestBytes || len(values.Get("variables")) > maxGraphQLRequestBytes {
+			writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
+			return
+		}
+		if rawVariables := values.Get("variables"); rawVariables != "" {
+			if err := json.Unmarshal([]byte(rawVariables), &request.Variables); err != nil || request.Variables == nil {
+				writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
+				return
+			}
+		}
+		if strings.TrimSpace(request.Query) == "" {
+			setCacheHeaders(w, "api")
+			w.Header().Add("Vary", "Accept-Language")
+			w.Header().Add("Vary", "Cookie")
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, i18n.T(r, "graphql.get_usage")+"\n")
+			return
+		}
+	case http.MethodPost:
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGraphQLRequestBytes))
+		if err := decoder.Decode(&request); err != nil {
+			writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
+			return
+		}
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+	if request.Query == "" && r.Method == http.MethodPost {
 		writeGraphQLError(w, r, http.StatusBadRequest, "errors.bad_request")
 		return
 	}

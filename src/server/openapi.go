@@ -218,10 +218,33 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 			"responses": map[string]interface{}{"200": jsonOK, "400": jsonErr, "503": jsonErr},
 		},
 	}
+	graphQLGet := map[string]interface{}{
+		"get": map[string]interface{}{
+			"summary": text("swagger.openapi.operation.graphql_execute"),
+			"parameters": []interface{}{
+				map[string]interface{}{"name": "query", "in": "query", "required": false, "schema": map[string]interface{}{"type": "string"}},
+				map[string]interface{}{"name": "variables", "in": "query", "required": false, "description": "JSON-encoded GraphQL variables object", "schema": map[string]interface{}{"type": "string"}},
+				map[string]interface{}{"name": "operationName", "in": "query", "required": false, "schema": map[string]interface{}{"type": "string"}},
+			},
+			"responses": map[string]interface{}{
+				"200": map[string]interface{}{
+					"description": text("swagger.openapi.response.graphql_result"),
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}},
+						"text/plain":       map[string]interface{}{"schema": map[string]interface{}{"type": "string"}},
+					},
+				},
+				"400": map[string]interface{}{
+					"description": text("swagger.openapi.response.graphql_invalid_request"),
+					"content":     map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
+				},
+			},
+		},
+	}
 
 	paths := map[string]interface{}{
 		"/api/autodiscover":                        get(text("swagger.openapi.operation.autodiscover"), nil),
-		"/api/graphql":                             graphQLPost,
+		"/api/graphql":                             mergeOperations(graphQLGet, graphQLPost),
 		"/api/healthz":                             get(text("swagger.openapi.operation.health"), nil),
 		"/api/healthz.txt":                         get(text("swagger.openapi.operation.health_text"), nil),
 		"/api/mcp":                                 mcpPost,
@@ -233,7 +256,7 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 		api + "/server/healthz":                    get(text("swagger.openapi.operation.health"), nil),
 		api + "/server/healthz.txt":                get(text("swagger.openapi.operation.health_text"), nil),
 		api + "/server/swagger":                    get(text("swagger.openapi.operation.openapi_document"), nil),
-		api + "/server/graphql":                    graphQLPost,
+		api + "/server/graphql":                    mergeOperations(graphQLGet, graphQLPost),
 		api + "/server/mcp":                        mcpPost,
 		api + "/server/security":                   get(text("swagger.openapi.operation.security_info"), nil),
 		api + "/server/security/policy":            get(text("swagger.openapi.operation.security_policy"), nil),

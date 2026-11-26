@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,9 @@ import (
 	"time"
 
 	"github.com/apimgr/gitignore/src/blocklist"
+	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
+	apppath "github.com/apimgr/gitignore/src/path"
 )
 
 func TestRemoteHost(t *testing.T) {
@@ -289,6 +293,43 @@ func TestNewRateLimiterDefaultsWindow(t *testing.T) {
 	}
 }
 
+func TestReplaceConfigHotReloadsRateLimitSettings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.RateLimit.GlobalBurst = 3
+	cfg.Server.RateLimit.Read = config.RateLimitRuleConfig{Requests: 3, Window: 60}
+	s := New(&Config{Cfg: cfg})
+	global := s.limiter
+	read := s.rateLimiters["read"]
+	global.persistent = false
+	read.persistent = false
+	if !global.allowKey("client") || !read.allowKey("client") {
+		t.Fatal("first request should be recorded before config reload")
+	}
+
+	reloaded := config.DefaultConfig()
+	reloaded.Server.RateLimit.GlobalBurst = 1
+	reloaded.Server.RateLimit.Read = config.RateLimitRuleConfig{Requests: 1, Window: 30}
+	reloaded.Server.RateLimit.Write = config.RateLimitRuleConfig{Requests: 7, Window: 45}
+	reloaded.Server.RateLimit.Strict = config.RateLimitRuleConfig{Requests: 2, Window: 120}
+	s.ReplaceConfig(reloaded)
+
+	if s.limiter != global || s.rateLimiters["read"] != read {
+		t.Fatal("rate limiter instances were replaced during hot reload")
+	}
+	if global.limitValue() != 1 || read.limitValue() != 1 || read.windowValue() != 30*time.Second {
+		t.Fatalf("reloaded rate limits not applied: global=%d read=%d/%s", global.limitValue(), read.limitValue(), read.windowValue())
+	}
+	if global.allowKey("client") || read.allowKey("client") {
+		t.Fatal("hot reload discarded active rate limit counters")
+	}
+	if s.rateLimiters["write"].limitValue() != 7 || s.rateLimiters["write"].windowValue() != 45*time.Second {
+		t.Fatal("write rate-limit settings did not reload")
+	}
+	if s.strictTokenLimiter.limitValue() != 2 || s.strictTokenLimiter.windowValue() != 120*time.Second {
+		t.Fatal("strict-token rate-limit settings did not reload")
+	}
+}
+
 func TestRateLimiterAllow(t *testing.T) {
 	rl := newRateLimiter(2, 60)
 	if !rl.allow("1.2.3.4") {
@@ -324,6 +365,153 @@ func TestRateLimitMiddlewareRejectsOverLimit(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 	if rec2.Code == http.StatusOK {
 		t.Error("2nd request should have been rate limited")
+	}
+}
+
+func TestRequestFloodCountsRateLimitedRequestsAndPersistsBlock(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.RateLimit.GlobalBurst = 1000
+	cfg.Server.RateLimit.Read.Requests = 1
+	cfg.Server.Security.AbuseDetection.RequestFlood.Multiplier = 10
+	s := &Server{
+		config:  &Config{Cfg: cfg},
+		limiter: newRateLimiter(1000, 60),
+		rateLimiters: map[string]*rateLimiter{
+			"read":          newRateLimiter(1, 60),
+			"write":         newRateLimiter(10, 60),
+			"health":        newRateLimiter(10, 60),
+			"auth_failures": newRateLimiter(5, 900),
+		},
+		abuseRequests:   map[string][]abuseRequest{},
+		abuseAlerted:    map[string]time.Time{},
+		temporaryBlocks: map[string]db.IPBlock{},
+	}
+	alerts := 0
+	s.abuseAlertHandler = func(db.IPBlock) { alerts++ }
+	handler := s.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "198.51.100.21:1234"
+	for index := 1; index <= 10; index++ {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		want := http.StatusTooManyRequests
+		if index == 1 {
+			want = http.StatusNoContent
+		}
+		if response.Code != want {
+			t.Fatalf("request %d status = %d, want %d", index, response.Code, want)
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("flood-triggering request status = %d, want 403", response.Code)
+	}
+	if block, ok := s.temporaryBlocks["198.51.100.21"]; !ok || block.Reason != "request_flood" || block.OffenseCount != 11 {
+		t.Errorf("temporary block = %+v, %t", block, ok)
+	}
+	if alerts != 1 {
+		t.Errorf("flood alert count = %d, want 1", alerts)
+	}
+}
+
+func TestCleanupExpiredIPBlocksPreservesRenewedBlock(t *testing.T) {
+	expired := time.Now().UTC().Add(-time.Minute)
+	newer := expired.Add(time.Hour)
+	s := &Server{temporaryBlocks: map[string]db.IPBlock{
+		"192.0.2.1": {IP: "192.0.2.1", ExpiresAt: expired},
+		"192.0.2.2": {IP: "192.0.2.2", ExpiresAt: newer},
+	}}
+	s.CleanupExpiredIPBlocks([]db.IPBlock{{IP: "192.0.2.1", ExpiresAt: expired}, {IP: "192.0.2.2", ExpiresAt: expired}})
+	if _, ok := s.temporaryBlocks["192.0.2.1"]; ok {
+		t.Fatal("expired block remains in memory")
+	}
+	if got := s.temporaryBlocks["192.0.2.2"].ExpiresAt; !got.Equal(newer) {
+		t.Fatalf("renewed block expiry = %v, want %v", got, newer)
+	}
+}
+
+func TestSecurityRequestAuditIncludesAnonymousNetworkActor(t *testing.T) {
+	paths := apppath.New()
+	paths.SetLogsDir(t.TempDir())
+	s := &Server{config: &Config{Paths: paths}}
+	r := httptest.NewRequest(http.MethodGet, "/blocked", nil)
+	r.RemoteAddr = "192.0.2.21:1234"
+	s.auditSecurityRequestEvent(r, "security.ip_blocked", "warning", "failure", map[string]any{"ip": "192.0.2.21", "reason": "test"})
+	data, err := os.ReadFile(filepath.Join(paths.GetLogsDir(), "audit.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry struct {
+		Actor map[string]string `json:"actor"`
+	}
+	if err := json.Unmarshal(data[:len(data)-1], &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Actor["type"] != "anonymous" || entry.Actor["ip"] != "192.0.2.21" {
+		t.Fatalf("audit actor = %#v, want anonymous with client IP", entry.Actor)
+	}
+	if _, exists := entry.Actor["id"]; exists {
+		t.Fatalf("anonymous actor has ID: %#v", entry.Actor)
+	}
+}
+
+func TestFailedAuthenticationLimitBlocksFollowingRequests(t *testing.T) {
+	s := &Server{
+		limiter: newRateLimiter(100, 60),
+		rateLimiters: map[string]*rateLimiter{
+			"read":          newRateLimiter(100, 60),
+			"auth_failures": newRateLimiter(1, 900),
+		},
+	}
+	handler := s.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "203.0.113.9:1234"
+	request.Header.Set("Authorization", "Bearer invalid-token")
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, request)
+	if rejected.Code != http.StatusTooManyRequests {
+		t.Fatalf("failed-auth request status = %d, want 429", rejected.Code)
+	}
+	if rejected.Header().Get("Retry-After") == "" {
+		t.Fatal("failed-auth rejection omitted Retry-After")
+	}
+	request = httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "203.0.113.9:1234"
+	lockedOut := httptest.NewRecorder()
+	handler.ServeHTTP(lockedOut, request)
+	if lockedOut.Code != http.StatusTooManyRequests {
+		t.Fatalf("request after failed-auth limit status = %d, want 429", lockedOut.Code)
+	}
+}
+
+func TestStrictOwnerTokenActionsMatchSpecification(t *testing.T) {
+	cases := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{http.MethodPost, "/server/preferences/token/reveal", true},
+		{http.MethodPost, "/server/preferences/token/restore", true},
+		{http.MethodPost, "/server/preferences/tokens/17/reveal", true},
+		{http.MethodPost, "/server/preferences/tokens/17/rotate", true},
+		{http.MethodPost, "/api/v1/server/preferences/tokens/17/reveal", true},
+		{http.MethodPost, "/api/v1/server/preferences/tokens/17/rotate", true},
+		{http.MethodPost, "/api/v1/server/preferences/tokens/primary/rotate", true},
+		{http.MethodDelete, "/api/v1/server/preferences/tokens/primary", true},
+		{http.MethodPost, "/api/v1/server/preferences/tokens", false},
+		{http.MethodDelete, "/api/v1/server/preferences/tokens/17", false},
+		{http.MethodPost, "/server/preferences/tokens/17/revoke", false},
+		{http.MethodPost, "/server/preferences/tokens/17/extra/reveal", false},
+		{http.MethodGet, "/server/preferences/token/reveal", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		if got := isStrictOwnerTokenAction(req); got != tc.want {
+			t.Errorf("isStrictOwnerTokenAction(%s %s) = %v, want %v", tc.method, tc.path, got, tc.want)
+		}
 	}
 }
 

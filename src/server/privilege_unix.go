@@ -4,8 +4,10 @@ package server
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"syscall"
 )
@@ -55,5 +57,50 @@ func dropPrivileges(username, groupname string) error {
 		return fmt.Errorf("setuid: %w", err)
 	}
 
+	return nil
+}
+
+// SetRuntimeOwnership gives the service account ownership of runtime state
+// created during root startup, before the process permanently drops privileges.
+func SetRuntimeOwnership(username, groupname string, roots ...string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	usr, err := user.Lookup(username)
+	if err != nil {
+		return fmt.Errorf("service user %q not found: %w", username, err)
+	}
+	grp, err := user.LookupGroup(groupname)
+	if err != nil {
+		return fmt.Errorf("service group %q not found: %w", groupname, err)
+	}
+	uid, err := strconv.Atoi(usr.Uid)
+	if err != nil {
+		return fmt.Errorf("invalid uid %q: %w", usr.Uid, err)
+	}
+	gid, err := strconv.Atoi(grp.Gid)
+	if err != nil {
+		return fmt.Errorf("invalid gid %q: %w", grp.Gid, err)
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if _, err := os.Stat(root); os.IsNotExist(err) {
+			continue
+		}
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&fs.ModeSymlink != 0 {
+				return nil
+			}
+			return os.Chown(path, uid, gid)
+		})
+		if err != nil {
+			return fmt.Errorf("set service ownership for %s: %w", root, err)
+		}
+	}
 	return nil
 }

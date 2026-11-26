@@ -18,7 +18,7 @@ func (s *Server) handleLLMSTxt(w http.ResponseWriter, r *http.Request) {
 	name := "GitIgnore API"
 	description := "A curated catalog of .gitignore templates with a versioned REST API and server-rendered browser."
 	apiContact, securityContact := "", ""
-	rateLimit := i18n.T(r, "llms.rate_limit_disabled")
+	rateLimit := i18n.TF(r, "llms.requests_per_minute", "count", "120")
 	if cfg := s.currentConfig(); cfg != nil {
 		if value := strings.TrimSpace(cfg.Server.Branding.Title); value != "" {
 			name = value
@@ -28,14 +28,15 @@ func (s *Server) handleLLMSTxt(w http.ResponseWriter, r *http.Request) {
 		}
 		apiContact = strings.TrimSpace(cfg.Web.APIContact)
 		securityContact = strings.TrimSpace(cfg.Web.Security.Contact)
-		if cfg.Server.RateLimit.Enabled {
-			window := cfg.Server.RateLimit.Window
-			if window < 1 {
-				window = 60
-			}
-			requests := cfg.Server.RateLimit.Requests * 60 / window
-			rateLimit = i18n.TF(r, "llms.requests_per_minute", "count", fmt.Sprint(requests))
+		window := cfg.Server.RateLimit.Read.Window
+		if window < 1 {
+			window = 60
 		}
+		requests := cfg.Server.RateLimit.Read.Requests * 60 / window
+		if requests < 1 {
+			requests = 120
+		}
+		rateLimit = i18n.TF(r, "llms.requests_per_minute", "count", fmt.Sprint(requests))
 	}
 	baseURL := s.publicServerURL(r)
 	apiURL := baseURL + s.apiBasePath()

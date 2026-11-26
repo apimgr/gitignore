@@ -146,25 +146,12 @@ func TestSetSchedulerEnabledMissingTaskReturnsFalse(t *testing.T) {
 
 func TestCleanupExpiredTokens(t *testing.T) {
 	setupSchedulerTestDB(t)
-
-	// CleanupExpiredTokens compares expires_at against SQLite's CURRENT_TIMESTAMP
-	// as text, which sqlite renders as "YYYY-MM-DD HH:MM:SS" (no "T"/"Z"); the
-	// stored value must use that same layout for the string comparison to work.
-	const sqliteLayout = "2006-01-02 15:04:05"
-	past := time.Now().Add(-time.Hour).UTC().Format(sqliteLayout)
-	future := time.Now().Add(time.Hour).UTC().Format(sqliteLayout)
-
-	if _, err := conn.Exec(`INSERT INTO user_accounts (id, username, pass_hash) VALUES ('u1', 'alice', 'x')`); err != nil {
-		t.Fatalf("seed user: %v", err)
+	past := time.Now().UTC().Unix() - 7200
+	if _, err := conn.Exec(`INSERT INTO rate_limits(key, count, window_start, updated_at) VALUES ('stale', 1, ?, ?)`, past, past); err != nil {
+		t.Fatalf("seed stale rate counter: %v", err)
 	}
-	if _, err := conn.Exec(`INSERT INTO user_tokens (id, user_id, token_hash, expires_at) VALUES ('tok1', 'u1', 'h', ?)`, past); err != nil {
-		t.Fatalf("seed expired token: %v", err)
-	}
-	if _, err := conn.Exec(`INSERT INTO user_tokens (id, user_id, token_hash, expires_at) VALUES ('tok2', 'u1', 'h', ?)`, future); err != nil {
-		t.Fatalf("seed live token: %v", err)
-	}
-	if _, err := conn.Exec(`INSERT INTO user_sessions (id, user_id, expires_at) VALUES ('s1', 'u1', ?)`, past); err != nil {
-		t.Fatalf("seed expired session: %v", err)
+	if _, err := conn.Exec(`INSERT INTO rate_limit_events(key, occurred_at) VALUES ('stale', ?)`, past*1000); err != nil {
+		t.Fatalf("seed stale rate event: %v", err)
 	}
 
 	n, err := CleanupExpiredTokens()
@@ -172,15 +159,14 @@ func TestCleanupExpiredTokens(t *testing.T) {
 		t.Fatalf("CleanupExpiredTokens: %v", err)
 	}
 	if n != 2 {
-		t.Errorf("CleanupExpiredTokens() = %d, want 2 (1 token + 1 session)", n)
+		t.Errorf("CleanupExpiredTokens() = %d, want 2 stale rate records", n)
 	}
-
 	var remaining int
-	if err := conn.QueryRow(`SELECT COUNT(*) FROM user_tokens`).Scan(&remaining); err != nil {
-		t.Fatalf("count remaining tokens: %v", err)
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM rate_limit_events`).Scan(&remaining); err != nil {
+		t.Fatalf("count remaining rate events: %v", err)
 	}
-	if remaining != 1 {
-		t.Errorf("expected 1 live token remaining, got %d", remaining)
+	if remaining != 0 {
+		t.Errorf("expected stale rate event removed, got %d remaining", remaining)
 	}
 }
 

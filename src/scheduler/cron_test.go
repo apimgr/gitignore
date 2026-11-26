@@ -56,6 +56,23 @@ func TestCronDaily(t *testing.T) {
 	}
 }
 
+func TestTimezoneQualifiedCronUsesItsOwnZone(t *testing.T) {
+	s := mustParse(t, "CRON_TZ=UTC 0 0 * * *")
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Date(2025, 1, 15, 20, 0, 0, 0, location)
+	next := s.Next(after)
+	want := time.Date(2025, 1, 17, 0, 0, 0, 0, time.UTC)
+	if !next.Equal(want) || next.Location() != time.UTC {
+		t.Fatalf("timezone cron next = %v (%s), want %v UTC", next, next.Location(), want)
+	}
+	if _, err := ParseSchedule("CRON_TZ=No/Such_Zone 0 0 * * *"); err == nil {
+		t.Fatal("invalid cron timezone was accepted")
+	}
+}
+
 func TestCronMacros(t *testing.T) {
 	s := mustParse(t, "@hourly")
 	base := time.Date(2025, 1, 15, 1, 30, 0, 0, time.UTC)

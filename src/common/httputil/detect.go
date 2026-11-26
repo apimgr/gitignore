@@ -86,13 +86,16 @@ func IsNonInteractiveClient(r *http.Request) bool {
 
 // GetAPIResponseFormat determines the response format for /api/** routes.
 // API routes return raw data as plain text (no HTML conversion) and default to
-// JSON. Priority: .txt extension, then Accept: text/plain, then non-interactive
-// client detection, then JSON.
+// JSON. Priority: .txt extension, explicit JSON, explicit plain text, client
+// detection, then JSON.
 func GetAPIResponseFormat(r *http.Request) string {
 	if strings.HasSuffix(r.URL.Path, ".txt") {
 		return "text"
 	}
 	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "application/json") {
+		return "json"
+	}
 	if strings.Contains(accept, "text/plain") {
 		return "text"
 	}
@@ -116,6 +119,8 @@ func DetectResponseFormat(r *http.Request) string {
 
 	accept := r.Header.Get("Accept")
 	switch {
+	case strings.Contains(accept, "application/json"):
+		return "application/json"
 	case strings.Contains(accept, "text/html"):
 		return "text/html"
 	case strings.Contains(accept, "text/plain"):

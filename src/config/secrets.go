@@ -25,6 +25,13 @@ func SetAuditLogDir(dir string) {
 	configAuditLog.Unlock()
 }
 
+// AuditLogDir returns the configured audit log directory.
+func AuditLogDir() string {
+	configAuditLog.RLock()
+	defer configAuditLog.RUnlock()
+	return configAuditLog.dir
+}
+
 func writeGeneratedSecretAudit(key string) {
 	configAuditLog.RLock()
 	dir := configAuditLog.dir
@@ -34,7 +41,7 @@ func writeGeneratedSecretAudit(key string) {
 	}
 	if err := audit.Append(dir, audit.Entry{
 		Event: "config.secret_generated", Category: "config", Severity: "info",
-		Actor:  audit.Actor{Type: "system", IP: "127.0.0.1"},
+		Actor:  audit.Actor{Type: "system"},
 		Target: &audit.Target{Type: "config", ID: key}, Result: "success",
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, configText("cli.config.secret_audit_write_warning", "key", key))

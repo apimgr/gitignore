@@ -65,6 +65,8 @@ type Metrics struct {
 	DBQueriesTotal         *prometheus.CounterVec
 	DBQueryDuration        *prometheus.HistogramVec
 	DBErrorsTotal          *prometheus.CounterVec
+	DBBusyTotal            prometheus.Counter
+	DBWriteWait            prometheus.Histogram
 	AuthAttemptsTotal      *prometheus.CounterVec
 	CacheHitsTotal         *prometheus.CounterVec
 	CacheMissesTotal       *prometheus.CounterVec
@@ -148,6 +150,8 @@ func New(opts Options) *Metrics {
 		DBQueriesTotal:         prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Name: "db_queries_total", Help: "Total database queries."}, []string{"operation", "table"}),
 		DBQueryDuration:        prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: namespace, Name: "db_query_duration_seconds", Help: "Database query latency in seconds.", Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1}}, []string{"operation", "table"}),
 		DBErrorsTotal:          prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Name: "db_errors_total", Help: "Total database errors."}, []string{"operation", "error_type"}),
+		DBBusyTotal:            prometheus.NewCounter(prometheus.CounterOpts{Namespace: namespace, Name: "db_busy_total", Help: "SQLite writes that encountered a busy or locked error and were retried."}),
+		DBWriteWait:            prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: namespace, Name: "db_write_wait_seconds", Help: "Time waiting for the SQLite write handle and file lock.", Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}}),
 		AuthAttemptsTotal:      prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Name: "auth_attempts_total", Help: "Total authentication attempts."}, []string{"method", "status"}),
 		CacheHitsTotal:         prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Name: "cache_hits_total", Help: "Total cache hits."}, []string{"cache"}),
 		CacheMissesTotal:       prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Name: "cache_misses_total", Help: "Total cache misses."}, []string{"cache"}),
@@ -169,7 +173,7 @@ func New(opts Options) *Metrics {
 		m.HTTPRequestSize,
 		m.HTTPResponseSize,
 		m.HTTPActiveRequests,
-		m.DBQueriesTotal, m.DBQueryDuration, m.DBErrorsTotal,
+		m.DBQueriesTotal, m.DBQueryDuration, m.DBErrorsTotal, m.DBBusyTotal, m.DBWriteWait,
 		m.AuthAttemptsTotal,
 		m.CacheHitsTotal, m.CacheMissesTotal, m.CacheEvictionsTotal, m.CacheSize, m.CacheBytes,
 		m.SchedulerTasksTotal, m.SchedulerTaskDuration, m.SchedulerTasksRunning, m.SchedulerLastRun,

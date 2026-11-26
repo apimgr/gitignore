@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -26,13 +27,118 @@ type OwnerToken struct {
 	RevokedReason sql.NullString
 }
 
+type OwnerRecord struct {
+	ID         string
+	CreatedAt  int64
+	LastSeenAt int64
+}
+
+func OwnerTokenLast4(ownerID string) (string, error) {
+	c, err := ownerTokenDB()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	var value string
+	err = c.QueryRowContext(ctx, `SELECT token_last4 FROM api_tokens WHERE owner_id = ? AND kind = 'primary' AND revoked_at IS NULL`, ownerID).Scan(&value)
+	return value, err
+}
+
+func SetOwnerTokenLast4IfEmpty(tokenID int64, value string) error {
+	ctx, cancel := writeCtx()
+	defer cancel()
+	return Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE api_tokens SET token_last4 = ? WHERE id = ? AND token_last4 = ''`, value, tokenID)
+		return err
+	})
+}
+
+func GetOwner(ownerID string) (OwnerRecord, error) {
+	c, err := ownerTokenDB()
+	if err != nil {
+		return OwnerRecord{}, err
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	var owner OwnerRecord
+	err = c.QueryRowContext(ctx, `SELECT id, created_at, last_seen_at FROM owners WHERE id = ?`, ownerID).
+		Scan(&owner.ID, &owner.CreatedAt, &owner.LastSeenAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OwnerRecord{}, ErrOwnerTokenNotFound
+	}
+	return owner, err
+}
+
+func ListAllOwnerTokens() ([]OwnerToken, error) {
+	c, err := ownerTokenDB()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	rows, err := c.QueryContext(ctx, `SELECT id, owner_id, kind, name, token_hash, token_prefix, token_enc, created_at,
+rotated_at, expires_at, last_used_at, revoked_at, revoked_reason FROM api_tokens ORDER BY owner_id, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]OwnerToken, 0)
+	for rows.Next() {
+		var item OwnerToken
+		if err := rows.Scan(&item.ID, &item.OwnerID, &item.Kind, &item.Name, &item.TokenHash, &item.TokenPrefix, &item.TokenEnc,
+			&item.CreatedAt, &item.RotatedAt, &item.ExpiresAt, &item.LastUsedAt, &item.RevokedAt, &item.RevokedReason); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func OwnerAndActiveTokenCounts(now time.Time) (owners, tokens int, err error) {
+	c, err := ownerTokenDB()
+	if err != nil {
+		return 0, 0, err
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM owners`).Scan(&owners); err != nil {
+		return 0, 0, err
+	}
+	err = c.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_tokens WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`, now.UTC().Unix()).Scan(&tokens)
+	return owners, tokens, err
+}
+
+func DeleteOwner(ownerID string) (tokensDeleted int64, err error) {
+	ctx, cancel := writeCtx()
+	defer cancel()
+	err = Write(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_tokens WHERE owner_id = ?`, ownerID).Scan(&tokensDeleted); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `DELETE FROM owners WHERE id = ?`, ownerID)
+		if err != nil {
+			return err
+		}
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if deleted != 1 {
+			return ErrOwnerTokenNotFound
+		}
+		return nil
+	})
+	return tokensDeleted, err
+}
+
 func ownerTokenDB() (*sql.DB, error) {
 	mu.RLock()
 	defer mu.RUnlock()
-	if conn == nil {
+	if readConn == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
-	return conn, nil
+	return readConn, nil
 }
 
 // ActiveOwnerTokenCounts returns non-revoked, unexpired primary and linked
@@ -69,32 +175,24 @@ WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) GROUP BY kin
 	return primary, linked, nil
 }
 
-func CreateOwnerWithPrimary(ownerID, tokenHash, tokenPrefix, tokenEnc string, now time.Time) (OwnerToken, error) {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return OwnerToken{}, err
-	}
+func CreateOwnerWithPrimary(ownerID, tokenHash, tokenPrefix, tokenLast4, tokenEnc string, now time.Time) (OwnerToken, error) {
 	ctx, cancel := writeCtx()
 	defer cancel()
-	tx, err := c.BeginTx(ctx, nil)
-	if err != nil {
-		return OwnerToken{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 	stamp := now.UTC().Unix()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO owners(id, created_at, last_seen_at) VALUES(?, ?, ?)`, ownerID, stamp, stamp); err != nil {
-		return OwnerToken{}, fmt.Errorf("create owner: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens(owner_id, kind, token_hash, token_prefix, token_enc, created_at)
-VALUES(?, 'primary', ?, ?, ?, ?)`, ownerID, tokenHash, tokenPrefix, tokenEnc, stamp)
+	var id int64
+	err := Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO owners(id, created_at, last_seen_at) VALUES(?, ?, ?)`, ownerID, stamp, stamp); err != nil {
+			return fmt.Errorf("create owner: %w", err)
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens(owner_id, kind, token_hash, token_prefix, token_last4, token_enc, created_at)
+VALUES(?, 'primary', ?, ?, ?, ?, ?)`, ownerID, tokenHash, tokenPrefix, tokenLast4, tokenEnc, stamp)
+		if err != nil {
+			return fmt.Errorf("create primary owner token: %w", err)
+		}
+		id, err = result.LastInsertId()
+		return err
+	})
 	if err != nil {
-		return OwnerToken{}, fmt.Errorf("create primary owner token: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return OwnerToken{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return OwnerToken{}, err
 	}
 	return OwnerToken{ID: id, OwnerID: ownerID, Kind: "primary", TokenHash: tokenHash, TokenPrefix: tokenPrefix, TokenEnc: tokenEnc, CreatedAt: stamp}, nil
@@ -127,23 +225,7 @@ FROM api_tokens WHERE token_prefix = ? ORDER BY id`, prefix)
 }
 
 func MarkOwnerTokenUsed(tokenID int64, now time.Time) error {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := writeCtx()
-	defer cancel()
-	stamp := now.UTC().Unix()
-	result, err := c.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL
-AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at <= ?)`, stamp, tokenID, stamp, stamp-60)
-	if err != nil {
-		return err
-	}
-	if _, err := result.RowsAffected(); err != nil {
-		return err
-	}
-	_, err = c.ExecContext(ctx, `UPDATE owners SET last_seen_at = ? WHERE id = (SELECT owner_id FROM api_tokens WHERE id = ?)`, stamp, tokenID)
-	return err
+	return queueOwnerTokenUse(tokenID, now)
 }
 
 func ListOwnerTokens(ownerID string) ([]OwnerToken, error) {
@@ -207,67 +289,58 @@ AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`, ownerID, now
 // use predates cutoff. This catalog has no user-created resource rows, so every
 // owner is resource-free; the foreign key cascade removes its tokens.
 func PurgeIdleOwners(ctx context.Context, cutoff time.Time) (int64, error) {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return 0, err
+	var total int64
+	for {
+		var count int64
+		err := Write(ctx, func(tx *sql.Tx) error {
+			result, err := tx.ExecContext(ctx, `DELETE FROM owners WHERE id IN (SELECT id FROM owners WHERE last_seen_at < ? LIMIT 500)`, cutoff.UTC().Unix())
+			if err != nil {
+				return err
+			}
+			count, err = result.RowsAffected()
+			return err
+		})
+		if err != nil {
+			return total, err
+		}
+		total += count
+		if count < 500 {
+			return total, nil
+		}
+		runtime.Gosched()
 	}
-	tx, err := c.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `DELETE FROM owners WHERE last_seen_at < ?`, cutoff.UTC().Unix())
-	if err != nil {
-		return 0, err
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return count, nil
 }
 
-func CreateLinkedOwnerToken(ownerID, name, tokenHash, tokenPrefix, tokenEnc string, expiresAt *int64, maxLinked int, now time.Time) (OwnerToken, error) {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return OwnerToken{}, err
-	}
+func CreateLinkedOwnerToken(ownerID, name, tokenHash, tokenPrefix, tokenLast4, tokenEnc string, expiresAt *int64, maxLinked int, now time.Time) (OwnerToken, error) {
 	ctx, cancel := writeCtx()
 	defer cancel()
-	tx, err := c.BeginTx(ctx, nil)
-	if err != nil {
-		return OwnerToken{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_tokens WHERE owner_id = ? AND kind = 'linked'
+	var id int64
+	err := Write(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_tokens WHERE owner_id = ? AND kind = 'linked'
 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`, ownerID, now.UTC().Unix()).Scan(&active); err != nil {
-		return OwnerToken{}, err
-	}
-	if maxLinked > 0 && active >= maxLinked {
-		return OwnerToken{}, errors.New("maximum active linked token count reached")
-	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens(owner_id, kind, name, token_hash, token_prefix, token_enc, created_at, expires_at)
-SELECT ?, 'linked', ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM owners WHERE id = ?)`,
-		ownerID, name, tokenHash, tokenPrefix, tokenEnc, now.UTC().Unix(), expiresAt, ownerID)
+			return err
+		}
+		if maxLinked > 0 && active >= maxLinked {
+			return errors.New("maximum active linked token count reached")
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens(owner_id, kind, name, token_hash, token_prefix, token_last4, token_enc, created_at, expires_at)
+SELECT ?, 'linked', ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM owners WHERE id = ?)`,
+			ownerID, name, tokenHash, tokenPrefix, tokenLast4, tokenEnc, now.UTC().Unix(), expiresAt, ownerID)
+		if err != nil {
+			return fmt.Errorf("create linked owner token: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return ErrOwnerTokenNotFound
+		}
+		id, err = result.LastInsertId()
+		return err
+	})
 	if err != nil {
-		return OwnerToken{}, fmt.Errorf("create linked owner token: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return OwnerToken{}, err
-	}
-	if changed != 1 {
-		return OwnerToken{}, ErrOwnerTokenNotFound
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return OwnerToken{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return OwnerToken{}, err
 	}
 	item := OwnerToken{ID: id, OwnerID: ownerID, Kind: "linked", Name: sql.NullString{String: name, Valid: true}, TokenHash: tokenHash, TokenPrefix: tokenPrefix, TokenEnc: tokenEnc, CreatedAt: now.UTC().Unix()}
@@ -277,106 +350,110 @@ SELECT ?, 'linked', ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM owners WHERE id
 	return item, nil
 }
 
-func RotateOwnerToken(ownerID string, tokenID int64, tokenHash, tokenPrefix, tokenEnc string, now time.Time) error {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return err
-	}
+func RotateOwnerToken(ownerID string, tokenID int64, tokenHash, tokenPrefix, tokenLast4, tokenEnc string, now time.Time) error {
 	ctx, cancel := writeCtx()
 	defer cancel()
-	result, err := c.ExecContext(ctx, `UPDATE api_tokens SET token_hash = ?, token_prefix = ?, token_enc = ?, rotated_at = ?, revoked_at = NULL, revoked_reason = NULL
-WHERE owner_id = ? AND id = ? AND revoked_at IS NULL`, tokenHash, tokenPrefix, tokenEnc, now.UTC().Unix(), ownerID, tokenID)
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return ErrOwnerTokenNotFound
-	}
-	return nil
+	return Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE api_tokens SET token_hash = ?, token_prefix = ?, token_last4 = ?, token_enc = ?, rotated_at = ?, revoked_at = NULL, revoked_reason = NULL
+WHERE owner_id = ? AND id = ? AND revoked_at IS NULL`, tokenHash, tokenPrefix, tokenLast4, tokenEnc, now.UTC().Unix(), ownerID, tokenID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return ErrOwnerTokenNotFound
+		}
+		return nil
+	})
 }
 
 func UpdateLinkedOwnerToken(ownerID string, tokenID int64, name string, expiresAt *int64) error {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return err
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	result, err := c.ExecContext(ctx, `UPDATE api_tokens SET name = ?, expires_at = ?
+	return Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE api_tokens SET name = ?, expires_at = ?
 WHERE owner_id = ? AND id = ? AND kind = 'linked' AND revoked_at IS NULL`, name, expiresAt, ownerID, tokenID)
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return ErrOwnerTokenNotFound
-	}
-	return nil
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return ErrOwnerTokenNotFound
+		}
+		return nil
+	})
 }
 
 func RevokeLinkedOwnerToken(ownerID string, tokenID int64, now time.Time) error {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return err
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	result, err := c.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = ?, revoked_reason = 'owner_revoked'
+	return Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = ?, revoked_reason = 'owner_revoked'
 WHERE owner_id = ? AND id = ? AND kind = 'linked' AND revoked_at IS NULL`, now.UTC().Unix(), ownerID, tokenID)
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return ErrOwnerTokenNotFound
-	}
-	return nil
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return ErrOwnerTokenNotFound
+		}
+		return nil
+	})
 }
 
 func RevokeOwnerTokenPrefix(prefix string, now time.Time) (int64, error) {
-	c, err := ownerTokenDB()
-	if err != nil {
-		return 0, err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
-	tx, err := c.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var ownerID, kind string
-	if err := tx.QueryRowContext(ctx, `SELECT owner_id, kind FROM api_tokens WHERE token_prefix = ? AND revoked_at IS NULL ORDER BY id LIMIT 1`, prefix).Scan(&ownerID, &kind); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrOwnerTokenNotFound
+	var deletedCount int64
+	err := Write(ctx, func(tx *sql.Tx) error {
+		var ownerID, kind string
+		if err := tx.QueryRowContext(ctx, `SELECT owner_id, kind FROM api_tokens WHERE token_prefix = ? AND revoked_at IS NULL ORDER BY id LIMIT 1`, prefix).Scan(&ownerID, &kind); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrOwnerTokenNotFound
+			}
+			return err
 		}
-		return 0, err
-	}
-	var result sql.Result
-	if kind == "primary" {
-		result, err = tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = ?, revoked_reason = 'operator_action' WHERE owner_id = ? AND revoked_at IS NULL`, now.UTC().Unix(), ownerID)
-	} else {
-		result, err = tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = ?, revoked_reason = 'operator_action' WHERE token_prefix = ? AND revoked_at IS NULL`, now.UTC().Unix(), prefix)
-	}
-	if err != nil {
-		return 0, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return changed, nil
+		var result sql.Result
+		var err error
+		if kind == "primary" {
+			var tokenCount int64
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_tokens WHERE owner_id = ?`, ownerID).Scan(&tokenCount); err != nil {
+				return err
+			}
+			result, err = tx.ExecContext(ctx, `DELETE FROM owners WHERE id = ?`, ownerID)
+			if err != nil {
+				return err
+			}
+			deleted, rowsErr := result.RowsAffected()
+			if rowsErr != nil {
+				return rowsErr
+			}
+			if deleted != 1 {
+				return ErrOwnerTokenNotFound
+			}
+			deletedCount = tokenCount
+			return nil
+		} else {
+			result, err = tx.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = ?, revoked_reason = 'operator_action' WHERE token_prefix = ? AND revoked_at IS NULL`, now.UTC().Unix(), prefix)
+		}
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		deletedCount = changed
+		return nil
+	})
+	return deletedCount, err
 }

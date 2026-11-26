@@ -224,6 +224,9 @@ func TestHandleGraphiQLPage(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `data-graphql-url="/api/v1/server/graphql"`) {
 		t.Errorf("GraphiQL is not bound to the canonical API route: %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "<noscript>") || !strings.Contains(rec.Body.String(), `href="/api/v1/server/graphql"`) {
+		t.Errorf("GraphiQL page is missing its no-JavaScript GET link: %s", rec.Body.String())
+	}
 	if strings.Contains(rec.Body.String(), "<style") {
 		t.Error("GraphiQL page contains inline CSS")
 	}
@@ -238,5 +241,8 @@ func TestHandleAPIHelpMCPShape(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), expected) {
 			t.Errorf("MCP help response missing %s: %s", expected, rec.Body.String())
 		}
+	}
+	if strings.Contains(rec.Body.String(), `"tools_description"`) {
+		t.Fatal("MCP help response contains a field outside the defined response shape")
 	}
 }

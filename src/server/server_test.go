@@ -38,6 +38,20 @@ func TestConfiguredAPIVersionIsUsedByRouterAndDiscovery(t *testing.T) {
 	}
 }
 
+func TestTorCircuitIDUsesLow32BitsWithoutPrefixValidation(t *testing.T) {
+	s := &Server{}
+	r := httptest.NewRequest(http.MethodGet, "http://example.onion/", nil)
+	r.RemoteAddr = "[fd12:3456:789a:bcde:1111:2222:1234:5678]:9000"
+	marked := s.markTorRequest(r)
+	if marked.RemoteAddr != "tor:12345678" {
+		t.Fatalf("Tor remote address = %q, want tor:12345678", marked.RemoteAddr)
+	}
+	identity, ok := marked.Context().Value(torRequestContextKey{}).(torRequestIdentity)
+	if !ok || identity.circuitID != "12345678" {
+		t.Fatalf("Tor identity = %+v, present=%t", identity, ok)
+	}
+}
+
 func TestMCPPublicReadToolFlowAndAliases(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Token = "adm_testtoken0123456789012345678901234567"

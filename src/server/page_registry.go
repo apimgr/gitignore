@@ -8,6 +8,7 @@ import (
 
 type registeredPage struct {
 	path       string
+	template   string
 	titleKey   string
 	descKey    string
 	order      int
@@ -22,9 +23,9 @@ type hubPage struct {
 }
 
 var serverPageRegistry = []registeredPage{
-	{path: "/server/preferences/tokens", titleKey: "owner_tokens_page.title", descKey: "owner_tokens_page.description", order: 10, preference: true, enabled: func(*Server) bool { return true }},
-	{path: "/server/preferences/sync", titleKey: "preferences_page.sync_title", descKey: "preferences_page.sync_description", order: 20, preference: true, enabled: func(*Server) bool { return true }},
-	{path: "/server/help/mcp", titleKey: "help.mcp_title", descKey: "help.mcp_description", order: 10, enabled: func(*Server) bool { return true }},
+	{path: "/server/preferences/tokens", template: "preferences_tokens", titleKey: "owner_tokens_page.title", descKey: "owner_tokens_page.description", order: 10, preference: true, enabled: func(*Server) bool { return true }},
+	{path: "/server/preferences/sync", template: "preferences_sync", titleKey: "preferences_page.sync_title", descKey: "preferences_page.sync_description", order: 20, preference: true, enabled: func(*Server) bool { return true }},
+	{path: "/server/help/mcp", template: "mcp_help", titleKey: "help.mcp_title", descKey: "help.mcp_description", order: 10, enabled: func(*Server) bool { return true }},
 }
 
 func (s *Server) registeredHubPages(preferences bool, lang string) []hubPage {

@@ -20,9 +20,19 @@
 {{.TrackingMarkup}}
 </head>
 <body data-update-available="{{t .Lang "notifications.update_available"}}" data-update-now="{{t .Lang "common.update"}}" data-update-later="{{t .Lang "common.close"}}" data-recovery-title="{{t .Lang "pwa.recovery.title"}}" data-recovery-message="{{t .Lang "pwa.recovery.message"}}">
-{{.TrackingNoscript}}
 <a class="skip-link" href="#main-content">{{t .Lang "nav.skip_to_content"}}</a>
 <a class="skip-link" href="#navigation">{{t .Lang "nav.skip_to_navigation"}}</a>
+{{if .Consent.Show}}<aside id="cookie-consent" class="cookie-banner" data-sold="{{.Consent.DataSold}}" aria-label="{{t .Lang "nav.privacy"}}"><div class="cookie-banner-content"><span class="cookie-message">{{.Consent.Message}} - <a class="policy-link" href="{{path .Consent.PolicyURL}}">{{.Consent.PolicyText}}</a></span><div class="cookie-buttons"><form method="post" action="{{path "/server/consent"}}"><input type="hidden" name="csrf_token" value="{{.Consent.CSRFToken}}"><input type="hidden" name="redirect" value="{{.Path}}"><input type="hidden" name="choice" value="decline"><button class="btn-decline" type="submit">{{.Consent.DeclineText}}</button></form><form method="post" action="{{path "/server/consent"}}"><input type="hidden" name="csrf_token" value="{{.Consent.CSRFToken}}"><input type="hidden" name="redirect" value="{{.Path}}"><input type="hidden" name="choice" value="accept"><button class="btn-accept" type="submit">{{.Consent.AcceptText}}</button></form><a class="policy-link" href="{{path "/server/preferences"}}">{{.Consent.ManageText}}</a></div></div></aside>{{end}}
+{{range .Announcements}}<aside class="site-banner site-banner-{{.Type}}" role="{{if or (eq .Type "warning") (eq .Type "error")}}alert{{else}}status{{end}}" data-announcement-id="{{.ID}}">
+<span class="site-banner-icon" aria-hidden="true">{{.Icon}}</span>
+<span class="site-banner-text">{{if .Title}}<strong>{{.Title}}: </strong>{{end}}{{.Message}}</span>
+{{if and .Dismissible (not $.SuppressAnnouncementDismiss)}}<form method="post" action="{{path "/announcements/dismiss"}}" class="site-banner-dismiss">
+<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+<input type="hidden" name="id" value="{{.ID}}">
+<input type="hidden" name="return_to" value="{{$.Path}}">
+<button type="submit" class="site-banner-close" aria-label="{{t $.Lang "announcements.dismiss"}}">×</button>
+</form>{{end}}</aside>{{end}}
+{{.TrackingNoscript}}
 <input type="checkbox" id="nav-toggle" class="nav-checkbox" aria-controls="nav-panel" hidden>
 <header class="header">
 <a href="{{path "/"}}" class="site-brand">GitIgnore</a>
@@ -77,6 +87,5 @@
 {{range .PageScripts}}<script src="{{.}}" defer></script>
 {{end}}
 <script src="{{path "/static/js/app.js"}}" defer></script>
-{{if .Consent.Show}}<aside id="cookie-consent" class="cookie-banner" data-sold="{{.Consent.DataSold}}" aria-label="{{t .Lang "nav.privacy"}}"><div class="cookie-banner-content"><span class="cookie-message">{{.Consent.Message}} - <a class="policy-link" href="{{path .Consent.PolicyURL}}">{{.Consent.PolicyText}}</a></span><div class="cookie-buttons"><form method="post" action="{{path "/server/consent"}}"><input type="hidden" name="csrf_token" value="{{.Consent.CSRFToken}}"><input type="hidden" name="redirect" value="{{.Path}}"><input type="hidden" name="choice" value="decline"><button class="btn-decline" type="submit">{{.Consent.DeclineText}}</button></form><form method="post" action="{{path "/server/consent"}}"><input type="hidden" name="csrf_token" value="{{.Consent.CSRFToken}}"><input type="hidden" name="redirect" value="{{.Path}}"><input type="hidden" name="choice" value="accept"><button class="btn-accept" type="submit">{{.Consent.AcceptText}}</button></form><a class="policy-link" href="{{path "/server/preferences"}}">{{.Consent.ManageText}}</a></div></div></aside>{{end}}
 </body>
 </html>{{end}}

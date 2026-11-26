@@ -1,8 +1,10 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -27,49 +29,40 @@ func GetPGPKeyMetadata() (PGPKeyMetadata, error) {
 	ctx, cancel := readCtx()
 	defer cancel()
 	var metadata PGPKeyMetadata
-	err := conn.QueryRowContext(ctx, `SELECT fingerprint, created_at, expires_at, last_rotated_at, keyservers_published, revoked FROM pgp_key_metadata WHERE id = 1`).Scan(&metadata.Fingerprint, &metadata.CreatedAt, &metadata.ExpiresAt, &metadata.LastRotatedAt, &metadata.KeyserversPublished, &metadata.Revoked)
+	err := readConn.QueryRowContext(ctx, `SELECT fingerprint, created_at, expires_at, last_rotated_at, keyservers_published, revoked FROM pgp_key_metadata WHERE id = 1`).Scan(&metadata.Fingerprint, &metadata.CreatedAt, &metadata.ExpiresAt, &metadata.LastRotatedAt, &metadata.KeyserversPublished, &metadata.Revoked)
 	return metadata, err
 }
 
 // SavePGPKeyMetadata records a generated or imported keypair's public metadata.
 func SavePGPKeyMetadata(metadata PGPKeyMetadata) error {
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("database is not initialized")
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	_, err := conn.ExecContext(ctx, `INSERT INTO pgp_key_metadata(id, fingerprint, created_at, expires_at, last_rotated_at, keyservers_published, revoked)
+	return Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO pgp_key_metadata(id, fingerprint, created_at, expires_at, last_rotated_at, keyservers_published, revoked)
 VALUES(1, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint, created_at=excluded.created_at, expires_at=excluded.expires_at, last_rotated_at=excluded.last_rotated_at, keyservers_published=excluded.keyservers_published, revoked=excluded.revoked`, metadata.Fingerprint, metadata.CreatedAt, metadata.ExpiresAt, nullableStringValue(metadata.LastRotatedAt), metadata.KeyserversPublished, metadata.Revoked)
-	return err
+		return err
+	})
 }
 
 // SetPGPKeyserversPublished updates the recorded keyserver publication state.
 func SetPGPKeyserversPublished(state string) error {
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("database is not initialized")
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	_, err := conn.ExecContext(ctx, "UPDATE pgp_key_metadata SET keyservers_published = ? WHERE id = 1", state)
-	return err
+	return Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE pgp_key_metadata SET keyservers_published = ? WHERE id = 1", state)
+		return err
+	})
 }
 
 // RevokePGPKeyMetadata retains the fingerprint for the audit history on delete.
 func RevokePGPKeyMetadata() error {
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("database is not initialized")
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	_, err := conn.ExecContext(ctx, "UPDATE pgp_key_metadata SET revoked = TRUE WHERE id = 1")
-	return err
+	return Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE pgp_key_metadata SET revoked = TRUE WHERE id = 1")
+		return err
+	})
 }
 
 // RotatePGPReportBodies re-encrypts every PGP report and updates key metadata
@@ -77,65 +70,60 @@ func RevokePGPKeyMetadata() error {
 func RotatePGPReportBodies(metadata PGPKeyMetadata, reencrypt func([]byte) ([]byte, error), switchKey func() (func(), error)) error {
 	securityReportMu.Lock()
 	defer securityReportMu.Unlock()
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("database is not initialized")
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	type encryptedReport struct {
 		id   string
 		body []byte
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT tracking_id, body_enc FROM security_reports WHERE body_alg = 'pgp'")
+	var reports []encryptedReport
+	err := Read(ctx, func(ctx context.Context, reader *sql.DB) error {
+		rows, err := reader.QueryContext(ctx, "SELECT tracking_id, body_enc FROM security_reports WHERE body_alg = 'pgp'")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var report encryptedReport
+			if err := rows.Scan(&report.id, &report.body); err != nil {
+				return err
+			}
+			reports = append(reports, report)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return err
 	}
-	reports := make([]encryptedReport, 0)
-	for rows.Next() {
-		var report encryptedReport
-		if err := rows.Scan(&report.id, &report.body); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		reports = append(reports, report)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
+	updated := make(map[string][]byte, len(reports))
 	for _, report := range reports {
 		ciphertext, err := reencrypt(report.body)
 		if err != nil {
 			return fmt.Errorf("reencrypt security report %s: %w", report.id, err)
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE security_reports SET body_enc = ? WHERE tracking_id = ? AND body_alg = 'pgp'", ciphertext, report.id); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pgp_key_metadata(id, fingerprint, created_at, expires_at, last_rotated_at, keyservers_published, revoked)
-VALUES(1, ?, ?, ?, ?, ?, FALSE)
-ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint, created_at=excluded.created_at, expires_at=excluded.expires_at, last_rotated_at=excluded.last_rotated_at, keyservers_published=excluded.keyservers_published, revoked=FALSE`, metadata.Fingerprint, metadata.CreatedAt, metadata.ExpiresAt, nullableStringValue(metadata.LastRotatedAt), metadata.KeyserversPublished); err != nil {
-		return err
+		updated[report.id] = ciphertext
 	}
 	rollbackFiles, err := switchKey()
 	if err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	err = Write(ctx, func(tx *sql.Tx) error {
+		for id, ciphertext := range updated {
+			if _, err := tx.ExecContext(ctx, "UPDATE security_reports SET body_enc = ? WHERE tracking_id = ? AND body_alg = 'pgp'", ciphertext, id); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO pgp_key_metadata(id, fingerprint, created_at, expires_at, last_rotated_at, keyservers_published, revoked)
+VALUES(1, ?, ?, ?, ?, ?, FALSE)
+ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint, created_at=excluded.created_at, expires_at=excluded.expires_at, last_rotated_at=excluded.last_rotated_at, keyservers_published=excluded.keyservers_published, revoked=FALSE`, metadata.Fingerprint, metadata.CreatedAt, metadata.ExpiresAt, nullableStringValue(metadata.LastRotatedAt), metadata.KeyserversPublished); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		rollbackFiles()
-		return err
 	}
-	return nil
+	return err
 }
 
 func nullableStringValue(value sql.NullString) interface{} {
@@ -171,7 +159,7 @@ func SecurityReportContactCiphertext(trackingID string) ([]byte, error) {
 	ctx, cancel := readCtx()
 	defer cancel()
 	var encrypted []byte
-	if err := conn.QueryRowContext(ctx, "SELECT contact_enc FROM security_reports WHERE tracking_id = ?", trackingID).Scan(&encrypted); err != nil {
+	if err := readConn.QueryRowContext(ctx, "SELECT contact_enc FROM security_reports WHERE tracking_id = ?", trackingID).Scan(&encrypted); err != nil {
 		return nil, err
 	}
 	return encrypted, nil
@@ -180,22 +168,31 @@ func SecurityReportContactCiphertext(trackingID string) ([]byte, error) {
 // CleanupClosedSecurityReports removes only closed reports whose retention
 // deadline has passed. Public acknowledgments are retained independently.
 func CleanupClosedSecurityReports(before time.Time) (int64, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return 0, fmt.Errorf("database is not initialized")
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	result, err := conn.ExecContext(ctx, `DELETE FROM security_reports WHERE closed_at IS NOT NULL AND datetime(closed_at) < datetime(?)`, before.UTC().Format(time.RFC3339))
-	if err != nil {
-		return 0, fmt.Errorf("delete expired security reports: %w", err)
+	var total int64
+	for {
+		var count int64
+		err := Write(ctx, func(tx *sql.Tx) error {
+			result, err := tx.ExecContext(ctx, `DELETE FROM security_reports WHERE tracking_id IN (SELECT tracking_id FROM security_reports WHERE closed_at IS NOT NULL AND datetime(closed_at) < datetime(?) LIMIT 500)`, before.UTC().Format(time.RFC3339))
+			if err != nil {
+				return fmt.Errorf("delete expired security reports: %w", err)
+			}
+			count, err = result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("count deleted security reports: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
+			return total, err
+		}
+		total += count
+		if count < 500 {
+			return total, nil
+		}
+		runtime.Gosched()
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("count deleted security reports: %w", err)
-	}
-	return count, nil
 }
 
 // ListSecurityReports returns report metadata, optionally filtered by status.
@@ -215,7 +212,7 @@ func ListSecurityReports(status string) ([]SecurityReport, error) {
 		args = append(args, status)
 	}
 	query += " ORDER BY created_at DESC, tracking_id"
-	rows, err := conn.QueryContext(ctx, query, args...)
+	rows, err := readConn.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list security reports: %w", err)
 	}
@@ -244,7 +241,7 @@ func GetSecurityReport(trackingID string) (SecurityReport, error) {
 	ctx, cancel := readCtx()
 	defer cancel()
 	var report SecurityReport
-	err := conn.QueryRowContext(ctx, `SELECT tracking_id, status, severity, component, created_at, updated_at, researcher_comment, disclosure_date, credit_pref, COALESCE(credit_name, '')
+	err := readConn.QueryRowContext(ctx, `SELECT tracking_id, status, severity, component, created_at, updated_at, researcher_comment, disclosure_date, credit_pref, COALESCE(credit_name, '')
 		FROM security_reports WHERE tracking_id = ?`, trackingID).Scan(&report.TrackingID, &report.Status, &report.Severity, &report.Component, &report.CreatedAt, &report.UpdatedAt, &report.StatusComment, &report.DisclosureDate, &report.CreditPreference, &report.CreditName)
 	if err != nil {
 		return SecurityReport{}, err
@@ -270,18 +267,16 @@ func UpdateSecurityReport(trackingID, status, comment string, setComment bool, d
 	if status != "" && !validReportStatus(status) {
 		return "", report, fmt.Errorf("invalid status")
 	}
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return "", report, fmt.Errorf("database is not initialized")
-	}
 	ctx, cancel := writeCtx()
 	defer cancel()
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return "", report, err
-	}
-	defer func() { _ = tx.Rollback() }()
+	err = Write(ctx, func(tx *sql.Tx) error {
+		oldStatus, report, err = updateSecurityReportTx(ctx, tx, trackingID, status, comment, setComment, disclosureDate, severity)
+		return err
+	})
+	return oldStatus, report, err
+}
+
+func updateSecurityReportTx(ctx context.Context, tx *sql.Tx, trackingID, status, comment string, setComment bool, disclosureDate, severity string) (oldStatus string, report SecurityReport, err error) {
 	var closedAt sql.NullTime
 	if err := tx.QueryRowContext(ctx, `SELECT status, credit_pref, COALESCE(credit_name, ''), severity, closed_at FROM security_reports WHERE tracking_id = ?`, trackingID).Scan(&oldStatus, &report.CreditPreference, &report.CreditName, &report.Severity, &closedAt); err != nil {
 		return "", report, err
@@ -348,9 +343,6 @@ func UpdateSecurityReport(trackingID, status, comment string, setComment bool, d
 		}
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT tracking_id, status, severity, component, created_at, updated_at, researcher_comment, disclosure_date, credit_pref, COALESCE(credit_name, '') FROM security_reports WHERE tracking_id = ?`, trackingID).Scan(&report.TrackingID, &report.Status, &report.Severity, &report.Component, &report.CreatedAt, &report.UpdatedAt, &report.StatusComment, &report.DisclosureDate, &report.CreditPreference, &report.CreditName); err != nil {
-		return "", report, err
-	}
-	if err := tx.Commit(); err != nil {
 		return "", report, err
 	}
 	return oldStatus, report, nil

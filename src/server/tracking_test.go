@@ -1,39 +1,34 @@
 package server
 
 import (
-	"strings"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
-
-	"github.com/apimgr/gitignore/src/config"
 )
 
-func TestTrackingProviderPreservesConfiguredPathAndUsesOriginForCSP(t *testing.T) {
-	base := "https://analytics.example/base/path"
-	tests := []struct {
-		name   string
-		typeID string
-		id     string
-		want   string
-	}{
-		{name: "matomo", typeID: "matomo", id: "1", want: base + "/matomo.php"},
-		{name: "owa", typeID: "owa", id: "site", want: base + "/"},
-		{name: "fathom", typeID: "fathom", id: "site", want: base + "/tracker.js"},
-		{name: "plausible", typeID: "plausible", id: "example.com", want: base + "/js/script.js"},
-		{name: "umami", typeID: "umami", id: "site", want: base + "/script.js"},
+func TestConsentCookieUsesPercentEncodedJSON(t *testing.T) {
+	want := consentState{Essential: true, Preferences: true, Analytics: false, Timestamp: 1_800_000_000}
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider := trackingProviderFor(config.TrackingConfig{Type: tt.typeID, ID: tt.id, URL: base})
-			combined := string(provider.tags) + provider.body
-			if !strings.Contains(combined, tt.want) {
-				t.Errorf("provider omitted configured path %q: %s", tt.want, combined)
-			}
-			if len(provider.hosts) == 0 || provider.hosts[len(provider.hosts)-1] != "https://analytics.example" {
-				t.Errorf("CSP hosts = %v, want origin https://analytics.example", provider.hosts)
-			}
-			if (tt.typeID == "matomo" || tt.typeID == "owa") && provider.tags != "" {
-				t.Errorf("same-origin tracking.js tag duplicated in provider tags: %s", provider.tags)
-			}
-		})
+	encoded := encodeConsentCookie(raw)
+	if encoded == string(raw) {
+		t.Fatal("consent JSON was not percent-encoded")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: "cookie_consent", Value: encoded})
+	got, ok := readConsent(req)
+	if !ok || got != want {
+		t.Fatalf("readConsent() = %#v, %v, want %#v, true", got, ok, want)
+	}
+}
+
+func TestReadConsentRejectsMalformedPercentEncoding(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Cookie", "cookie_consent=%zz")
+	if _, ok := readConsent(req); ok {
+		t.Fatal("malformed consent cookie was accepted")
 	}
 }

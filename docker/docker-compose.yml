@@ -21,9 +21,9 @@ services:
     environment:
       PORT: 80
       TZ: ${TZ:-America/New_York}
-      ADDRESS: 0.0.0.0
       CONFIG_DIR: /config/gitignore
       DATA_DIR: /data/gitignore
+      CACHE_URL: valkey://gitignore-cache:6379
     volumes:
       - ./volumes/config:/config:z
       - ./volumes/data:/data:z
@@ -35,6 +35,26 @@ services:
       timeout: 15s
       retries: 3
       start_period: 10m
+    depends_on:
+      gitignore-cache:
+        condition: service_healthy
+    networks:
+      - gitignore
+
+  gitignore-cache:
+    image: valkey/valkey:alpine
+    container_name: gitignore-cache
+    restart: always
+    pull_policy: always
+    logging: *default-logging
+    volumes:
+      - ./volumes/data/db/valkey:/data:z
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - gitignore
 

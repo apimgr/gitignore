@@ -47,6 +47,13 @@ type Checker struct {
 	alerts map[string]time.Time
 }
 
+// MeasureVolume returns capacity information for a filesystem path.
+func MeasureVolume(path string) (VolumeUsage, error) {
+	usage, err := measureVolume(path)
+	usage.Path = path
+	return usage, err
+}
+
 // New constructs a checker. Omitted threshold and repeat values use the
 // defaults from AI.md PART 17.
 func New(config Config) *Checker {

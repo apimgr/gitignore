@@ -230,7 +230,7 @@ func (m *Manager) HealthStatuses(now time.Time) map[string]string {
 		state := "error"
 		if loaded[id] && !m.lastUpdated.IsZero() {
 			state = "ok"
-			if now.Sub(m.lastUpdated) > 7*24*time.Hour || m.lastUpdated.After(now.Add(5*time.Minute)) {
+			if now.Sub(m.lastUpdated) > 21*24*time.Hour || m.lastUpdated.After(now.Add(5*time.Minute)) {
 				state = "degraded"
 			}
 		}

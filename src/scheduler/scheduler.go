@@ -7,6 +7,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"sync"
@@ -110,16 +111,17 @@ type Config struct {
 
 // Scheduler owns the registered tasks and the background execution loop.
 type Scheduler struct {
-	mu      sync.Mutex
-	tasks   map[string]*Task
-	order   []string
-	loc     *time.Location
-	catchUp time.Duration
-	tick    time.Duration
-	now     func() time.Time
-	persist func(db.SchedulerState) error
-	onError func(id, name string, err error, nextRun time.Time)
-	onState func(id string, running bool, status string, duration time.Duration, lastRun time.Time)
+	mu             sync.Mutex
+	tasks          map[string]*Task
+	order          []string
+	loc            *time.Location
+	catchUp        time.Duration
+	tick           time.Duration
+	now            func() time.Time
+	persist        func(db.SchedulerState) error
+	persistHistory func(db.SchedulerHistory) error
+	onError        func(id, name string, err error, nextRun time.Time)
+	onState        func(id string, running bool, status string, duration time.Duration, lastRun time.Time)
 
 	stop    chan struct{}
 	done    chan struct{}
@@ -148,14 +150,15 @@ func New(cfg Config) *Scheduler {
 		tick = defaultTickEvery
 	}
 	return &Scheduler{
-		tasks:   make(map[string]*Task),
-		loc:     loc,
-		catchUp: catchUp,
-		tick:    tick,
-		now:     time.Now,
-		persist: db.UpsertSchedulerState,
-		onError: cfg.OnError,
-		onState: cfg.OnState,
+		tasks:          make(map[string]*Task),
+		loc:            loc,
+		catchUp:        catchUp,
+		tick:           tick,
+		now:            time.Now,
+		persist:        db.UpsertSchedulerState,
+		persistHistory: db.RecordSchedulerHistory,
+		onError:        cfg.OnError,
+		onState:        cfg.OnState,
 	}
 }
 
@@ -353,10 +356,7 @@ func (s *Scheduler) execute(ctx context.Context, t *Task, markRunning bool) {
 	}
 
 	start := s.now()
-	var err error
-	if handler != nil {
-		err = handler(ctx)
-	}
+	err := runTaskSafely(ctx, handler)
 	dur := s.now().Sub(start)
 
 	s.mu.Lock()
@@ -392,15 +392,37 @@ func (s *Scheduler) execute(ctx context.Context, t *Task, markRunning bool) {
 		}
 	}
 	s.saveTaskLocked(t)
+	if s.persistHistory != nil {
+		if historyErr := s.persistHistory(db.SchedulerHistory{
+			TaskID: t.ID, StartedAt: start, Finished: start.Add(dur),
+			Status: t.lastStatus, Error: t.lastError, Duration: dur,
+		}); historyErr != nil {
+			log.Printf("scheduler: failed to persist history for task %q: %v", t.ID, historyErr)
+		}
+	}
 	status := ""
-	if t.lastStatus == StatusSuccess {
+	switch t.lastStatus {
+	case StatusSuccess:
 		status = "success"
-	} else if t.lastStatus == StatusFailed {
+	case StatusFailed:
 		status = "error"
 	}
 	if s.onState != nil {
 		s.onState(t.ID, false, status, dur, start)
 	}
+}
+
+// runTaskSafely isolates task panics so one handler cannot stop the scheduler.
+func runTaskSafely(ctx context.Context, handler HandlerFunc) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = fmt.Errorf("task panic recovered")
+		}
+	}()
+	if handler == nil {
+		return nil
+	}
+	return handler(ctx)
 }
 
 // scheduleRetryLocked sets nextRun for a retry with exponential backoff, or the

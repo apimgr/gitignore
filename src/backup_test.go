@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestEncryptDecryptRoundtrip verifies AES-256-GCM + Argon2id encrypt/decrypt
@@ -23,6 +25,43 @@ func TestEncryptDecryptRoundtrip(t *testing.T) {
 	}
 	if _, err := decryptBackup(enc, "wrong password"); err == nil {
 		t.Fatal("expected wrong password to fail")
+	}
+	if !bytes.HasPrefix(enc, []byte(backupMagic)) {
+		t.Fatalf("encrypted archive header does not start with %q", backupMagic)
+	}
+	path := filepath.Join(t.TempDir(), "backup.tar.gz.enc")
+	if err := os.WriteFile(path, enc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if matches, err := backupArchiveKeyMatches(path, "correct horse battery staple"); err != nil || !matches {
+		t.Fatalf("matching archive key = %t, %v", matches, err)
+	}
+	if matches, err := backupArchiveKeyMatches(path, "wrong password"); err != nil || matches {
+		t.Fatalf("wrong archive key = %t, %v", matches, err)
+	}
+	tampered := append([]byte(nil), enc...)
+	tampered[len(backupMagic)] ^= 1
+	if _, err := decryptBackup(tampered, "correct horse battery staple"); err == nil {
+		t.Fatal("tampered authenticated header was accepted")
+	}
+}
+
+func TestVerifyBackupRejectsCorruptSQLiteDatabase(t *testing.T) {
+	dir := t.TempDir()
+	databasePath := filepath.Join(dir, "server.db")
+	if err := os.WriteFile(databasePath, []byte("not a SQLite database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := buildBackupArchiveAt([]backupSource{{archivePath: "db/server.db", diskPath: databasePath}}, false, time.Now().UTC(), "full", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "gitignore_backup_2026-01-01.tar.gz")
+	if err := os.WriteFile(path, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupFile(path, ""); err == nil {
+		t.Fatal("corrupt SQLite database passed backup verification")
 	}
 }
 

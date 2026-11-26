@@ -50,15 +50,15 @@ jobs:
 
       - name: Set build info
         run: |
-          echo "VERSION=$(printf '%s' "$GITHUB_REF_NAME" | sed 's/^v//')" >> "$GITHUB_ENV"
-          echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "VERSION=$(printf '%s' "$FORGEJO_REF_NAME" | sed 's/^v//')" >> "$FORGEJO_ENV"
+          echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $FORGEJO_ENV
           BUILD_EPOCH=$(date -u +%s)
-          echo "BUILD_EPOCH=${BUILD_EPOCH}" >> $GITHUB_ENV
-          echo "BUILD_DATE=$(date -u -d @${BUILD_EPOCH} +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+          echo "BUILD_EPOCH=${BUILD_EPOCH}" >> $FORGEJO_ENV
+          echo "BUILD_DATE=$(date -u -d @${BUILD_EPOCH} +"%Y-%m-%dT%H:%M:%SZ")" >> $FORGEJO_ENV
           if [ -f site.txt ]; then
-            echo "OFFICIAL_SITE=$(cat site.txt)" >> $GITHUB_ENV
+            echo "OFFICIAL_SITE=$(cat site.txt)" >> $FORGEJO_ENV
           else
-            echo "OFFICIAL_SITE=${{ secrets.OFFICIAL_SITE }}" >> $GITHUB_ENV
+            echo "OFFICIAL_SITE=${{ secrets.OFFICIAL_SITE }}" >> $FORGEJO_ENV
           fi
 
       - name: Build server
@@ -114,8 +114,8 @@ jobs:
         run: |
           TAG="$(git describe --tags --exact-match HEAD)"
           VERSION="$(printf '%s' "$TAG" | sed 's/^v//')"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$FORGEJO_ENV"
+          echo "RELEASE_TAG=$TAG" >> "$FORGEJO_ENV"
 
       - name: Create version.txt
         run: echo "${{ env.VERSION }}" > binaries/version.txt

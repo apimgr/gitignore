@@ -48,7 +48,7 @@ make test
 
 This target runs `go vet`, `govulncheck`, the Go test suite, and the coverage threshold inside the Go container. Translation-key consistency is covered by the test suite. Optional container/integration scripts are in `tests/`; consult their help or source before running them because some require Incus or a configured browser environment.
 
-`./tests/run_tests.sh` runs the basic Docker binary-validation suite. Run `./tests/incus.sh` separately for the full systemd and OpenRC service matrix; it also checks restart persistence, overlay-provider behavior, and uninstall cleanup. The browser suite is on-demand after major frontend changes and covers server-rendered, no-JavaScript, and full-JavaScript behavior:
+`./tests/run_tests.sh` runs the basic Docker binary-validation suite. Run `./tests/incus.sh` separately for the full systemd and OpenRC service matrix; it also checks restart persistence, overlay-provider behavior, and uninstall cleanup. If a temporary Incus guest cannot resolve its package mirror through the bridge, set `INCUS_DNS_SERVER` to an accessible IPv4 resolver; the override is scoped to that disposable guest. The browser suite is on-demand after major frontend changes and covers server-rendered, no-JavaScript, and full-JavaScript behavior:
 
 ```sh
 ./tests/e2e.sh

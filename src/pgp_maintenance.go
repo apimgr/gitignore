@@ -34,10 +34,20 @@ const (
 type pgpPublishRecord struct {
 	Fingerprint string    `json:"fingerprint"`
 	PublishedAt string    `json:"published_at,omitempty"`
+	NextAttempt string    `json:"next_attempt,omitempty"`
 	RetryAt     string    `json:"retry_at,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
 	Attempts    int       `json:"attempts,omitempty"`
+	Permanent   bool      `json:"permanent,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type pgpKeyserverHTTPError struct {
+	status int
+}
+
+func (e pgpKeyserverHTTPError) Error() string {
+	return cliText("cli.pgp.http_status", "status", e.status)
 }
 
 func handlePGPMaintenance(configDir, configPath, dataDir, logsDir string, args []string) error {
@@ -351,6 +361,14 @@ func publishRestoredProjectPGP(cfg *config.Config, dir string) error {
 }
 
 func publishProjectPGPWithForce(ctx context.Context, cfg *config.Config, dir string, force bool) error {
+	return publishProjectPGPMode(ctx, cfg, dir, force, false)
+}
+
+func retryProjectPGP(ctx context.Context, cfg *config.Config, dir string) error {
+	return publishProjectPGPMode(ctx, cfg, dir, false, true)
+}
+
+func publishProjectPGPMode(ctx context.Context, cfg *config.Config, dir string, force, retryOnly bool) error {
 	publicKey, err := os.ReadFile(filepath.Join(dir, pgpPublicFilename))
 	if err != nil {
 		return err
@@ -376,15 +394,35 @@ func publishProjectPGPWithForce(ctx context.Context, cfg *config.Config, dir str
 			failures = append(failures, err.Error())
 			continue
 		}
-		if record, ok := state[endpoint]; ok && record.Fingerprint == fingerprint {
+		record, known := state[endpoint]
+		if retryOnly {
+			if !known || record.Fingerprint != fingerprint || record.PublishedAt != "" || record.Permanent || record.Attempts >= 8 {
+				continue
+			}
+			nextAttempt := record.NextAttempt
+			if nextAttempt == "" {
+				nextAttempt = record.RetryAt
+			}
+			retryAt, parseErr := time.Parse(time.RFC3339, nextAttempt)
+			if parseErr != nil || time.Now().Before(retryAt) {
+				continue
+			}
+		} else if known && record.Fingerprint == fingerprint {
 			if record.PublishedAt != "" && !force {
 				continue
 			}
-			if retryAt, parseErr := time.Parse(time.RFC3339, record.RetryAt); !force && parseErr == nil && time.Now().Before(retryAt) {
+			if record.Permanent && !force || record.Attempts >= 8 && !force {
+				continue
+			}
+			nextAttempt := record.NextAttempt
+			if nextAttempt == "" {
+				nextAttempt = record.RetryAt
+			}
+			if retryAt, parseErr := time.Parse(time.RFC3339, nextAttempt); !force && parseErr == nil && time.Now().Before(retryAt) {
 				continue
 			}
 		}
-		record := state[endpoint]
+		record = state[endpoint]
 		if record.Fingerprint != fingerprint {
 			record = pgpPublishRecord{}
 		}
@@ -392,16 +430,32 @@ func publishProjectPGPWithForce(ctx context.Context, cfg *config.Config, dir str
 		record.UpdatedAt = time.Now().UTC()
 		if err := submitPGPKey(ctx, endpoint, string(publicKey)); err != nil {
 			record.LastError = err.Error()
-			record.Attempts++
-			backoff := time.Duration(1 << min(record.Attempts-1, 8))
-			record.RetryAt = time.Now().UTC().Add(backoff * time.Minute).Format(time.RFC3339)
+			var statusErr pgpKeyserverHTTPError
+			if errors.As(err, &statusErr) && statusErr.status != http.StatusTooManyRequests && statusErr.status < 500 {
+				record.Permanent = true
+				record.NextAttempt = ""
+				record.RetryAt = ""
+			} else {
+				record.Attempts++
+				if record.Attempts <= 8 {
+					backoff := time.Duration(1<<min(record.Attempts-1, 8)) * time.Minute
+					if backoff > 6*time.Hour {
+						backoff = 6 * time.Hour
+					}
+					record.NextAttempt = time.Now().UTC().Add(backoff).Format(time.RFC3339)
+				} else {
+					record.NextAttempt = ""
+				}
+			}
 			state[endpoint] = record
 			failures = append(failures, endpoint+": "+err.Error())
 			continue
 		}
 		record.PublishedAt = time.Now().UTC().Format(time.RFC3339)
+		record.NextAttempt = ""
 		record.RetryAt = ""
 		record.LastError = ""
+		record.Permanent = false
 		state[endpoint] = record
 	}
 	encoded, err := json.MarshalIndent(state, "", "  ")
@@ -459,41 +513,47 @@ func submitPGPKey(ctx context.Context, endpoint, publicKey string) error {
 		}
 		return nil
 	}}
-	values := url.Values{"keytext": {publicKey}}
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()))
-		if err != nil {
-			return err
+	payload := url.Values{"keytext": {publicKey}}.Encode()
+	contentType := "application/x-www-form-urlencoded"
+	if parsed, parseErr := url.Parse(endpoint); parseErr == nil && strings.EqualFold(parsed.Hostname(), "keys.openpgp.org") {
+		encoded, marshalErr := json.Marshal(map[string]string{"keytext": publicKey})
+		if marshalErr != nil {
+			return marshalErr
 		}
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		request.Header.Set("Accept", "application/json, text/plain")
-		response, err := client.Do(request)
-		if err == nil {
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
-			closeErr := response.Body.Close()
-			if response.StatusCode >= 200 && response.StatusCode < 300 && closeErr == nil {
-				return nil
-			}
-			if closeErr != nil {
-				lastErr = closeErr
-			} else {
-				lastErr = errors.New(cliText("cli.pgp.http_status", "status", response.StatusCode))
-			}
-		} else {
-			lastErr = err
-		}
-		if attempt < 2 {
-			timer := time.NewTimer(time.Duration(1<<attempt) * time.Second)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
+		payload = string(encoded)
+		contentType = "application/json"
 	}
-	return lastErr
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Accept", "application/json, text/plain")
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	closeErr := response.Body.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if response.StatusCode == http.StatusOK {
+		if contentType == "application/json" {
+			var result struct {
+				Fingerprint string `json:"key_fpr"`
+				Status      string `json:"status"`
+			}
+			if err := json.Unmarshal(body, &result); err != nil || result.Fingerprint == "" || result.Status == "" {
+				return pgpKeyserverHTTPError{status: http.StatusBadRequest}
+			}
+		}
+		return nil
+	}
+	return pgpKeyserverHTTPError{status: response.StatusCode}
 }
 
 func confirmPGPSensitive(cfg *config.Config, action string, requireReason bool) (string, error) {

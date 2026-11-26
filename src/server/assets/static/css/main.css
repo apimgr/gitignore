@@ -62,6 +62,14 @@ html.theme-light {
 .status-banner.status-ok { background: var(--color-success-bg); color: var(--color-success); }
 .status-banner.status-error { background: var(--color-error-bg); color: var(--color-error); }
 .status-banner.status-warning { background: var(--color-warning-bg); color: var(--color-warning); }
+.site-banner { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.875rem; background: var(--accent); color: #fff; }
+.site-banner-warning, .site-banner-error { background: var(--color-warning-bg); color: var(--fg); }
+.site-banner-error { background: var(--color-error-bg); }
+.site-banner-success { background: var(--color-success-bg); color: var(--color-success); }
+.site-banner-text { flex: 1; min-width: 0; text-align: center; overflow-wrap: anywhere; }
+.site-banner-dismiss { margin: 0; }
+.site-banner-close { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 1.25rem; }
+.mcp-endpoint-text { user-select: all; }
 .status { display: inline-flex; padding: 0 var(--space-2); border-radius: var(--radius-md); }
 .status.status-ok { background: var(--color-success-bg); color: var(--color-success); }
 .status.status-error { background: var(--color-error-bg); color: var(--color-error); }
@@ -211,9 +219,11 @@ body:has(.nav-checkbox:checked) { overflow: hidden; }
 .btn { min-height: 44px; padding: 0.5rem 1rem; border-radius: 6px; }
 .btn-primary { background: var(--accent); color: #fff; }
 .token-management-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 1.25rem; }
-.token-management-primary { display: grid; gap: 1.25rem; min-width: 0; }
-.token-management-linked { min-width: 0; }
-.token-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.token-management-primary { grid-column: 1; grid-row: 1; min-width: 0; }
+.token-management-linked { grid-column: 2; grid-row: 1 / span 3; min-width: 0; }
+.token-management-create { grid-column: 1; grid-row: 2; min-width: 0; }
+.token-management-browser { grid-column: 1; grid-row: 3; min-width: 0; }
+.token-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 0; padding: 0; list-style: none; }
 .token-card { min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: 0.5rem; }
 .token-card h3 { overflow-wrap: anywhere; }
 .token-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.35rem 0.75rem; }
@@ -225,12 +235,16 @@ body:has(.nav-checkbox:checked) { overflow: hidden; }
 .confirm-popover-content { position: absolute; z-index: 5; inset-inline-end: 0; top: calc(100% + 0.4rem); width: min(20rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border); border-radius: 0.5rem; background: var(--bg); box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 25%); }
 .confirm-popover-content form { display: flex; justify-content: flex-end; }
 .token-card .form-actions { justify-content: flex-start; align-items: start; }
+.btn-danger { border: 1px solid #c44; color: #c44; }
+.btn-danger-ghost { border: 1px solid transparent; color: #c44; background: transparent; }
 @media (min-width: 768px) and (max-width: 1023px) {
   .token-management-layout { grid-template-columns: minmax(0, 40rem); justify-content: center; }
+  .token-management-layout > * { grid-column: 1; grid-row: auto; }
   .token-card .form-group { display: inline-grid; vertical-align: top; width: calc(50% - 0.75rem); margin-inline-end: 0.5rem; }
 }
 @media (max-width: 767px) {
   .token-management-layout, .token-grid { grid-template-columns: minmax(0, 1fr); }
+  .token-management-layout > * { grid-column: 1; grid-row: auto; }
   .token-management-layout .btn, .token-management-layout form { width: 100%; }
   .token-management-layout .form-actions { align-items: stretch; flex-direction: column; }
   .token-management-layout .confirm-popover { width: 100%; }

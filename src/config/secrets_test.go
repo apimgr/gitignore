@@ -22,7 +22,11 @@ func TestLoadRecordsGeneratedSecretAuditEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open audit.log: %v", err)
 	}
-	defer file.Close()
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close audit log: %v", err)
+		}
+	})
 	var events []struct {
 		ID       string `json:"id"`
 		Time     string `json:"time"`
@@ -76,7 +80,7 @@ func TestLoadRecordsGeneratedSecretAuditEvents(t *testing.T) {
 			t.Errorf("unexpected secret audit event: %#v", event)
 			continue
 		}
-		if len(event.ID) != len("audit_")+26 || event.Time == "" || event.Category != "config" || event.Severity != "info" || event.Actor.Type != "system" || event.Actor.IP == "" || event.Result != "success" {
+		if len(event.ID) != len("audit_")+26 || event.Time == "" || event.Category != "config" || event.Severity != "info" || event.Actor.Type != "system" || event.Actor.IP != "" || event.Result != "success" {
 			t.Errorf("secret audit event is missing required AI.md fields: %#v", event)
 		}
 		if _, ok := want[event.Target.ID]; !ok {
@@ -272,6 +276,41 @@ func TestLoadSecretsConfigOverridesEarlierValuesAndSecuresPermissions(t *testing
 	}
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("secrets.yml mode = %04o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestLoadSecretsConfigDoesNotWarnForSecretStoreMetadata(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.yml")
+	secretsPath := filepath.Join(dir, "secrets.yml")
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	contents := "server:\n  token: operator-token\n  security:\n    encryption_key: " + key + "\n    encryption_key_version: 1\n"
+	if err := os.WriteFile(secretsPath, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	cfg := DefaultConfig()
+	applyErr := loadSecretsConfig(configPath, cfg)
+	os.Stderr = previousStderr
+	_ = writer.Close()
+	if applyErr != nil {
+		t.Fatalf("loadSecretsConfig: %v", applyErr)
+	}
+	message, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(message), "unknown configuration key") {
+		t.Fatalf("secret-store metadata produced an unknown-key warning: %q", message)
+	}
+	if cfg.Server.Security.EncryptionKey != key {
+		t.Fatalf("encryption key = %q, want protected value", cfg.Server.Security.EncryptionKey)
 	}
 }
 

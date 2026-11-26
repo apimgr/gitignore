@@ -19,7 +19,30 @@ func newTestScheduler() (*Scheduler, *sync.Map) {
 		store.Store(st.TaskID, st)
 		return nil
 	}
+	s.persistHistory = func(db.SchedulerHistory) error { return nil }
 	return s, &store
+}
+
+func TestExecuteRecoversTaskPanicAndPersistsFailure(t *testing.T) {
+	s, _ := newTestScheduler()
+	var history db.SchedulerHistory
+	s.persistHistory = func(run db.SchedulerHistory) error {
+		history = run
+		return nil
+	}
+	if err := s.RegisterTask("panics", "Panics", "@every 1h", false, func(context.Context) error {
+		panic("sensitive panic payload")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.execute(context.Background(), s.tasks["panics"], true)
+	info, _ := s.Task("panics")
+	if info.LastStatus != StatusFailed || info.LastError != "task panic recovered" {
+		t.Fatalf("panic outcome = %q / %q", info.LastStatus, info.LastError)
+	}
+	if history.TaskID != "panics" || history.Status != StatusFailed || history.Error != info.LastError {
+		t.Fatalf("panic history = %+v", history)
+	}
 }
 
 func TestRegisterInvalidSchedule(t *testing.T) {

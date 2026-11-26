@@ -12,4 +12,8 @@
 
 # Security-sensitive server code
 /src/server/ @casjay
-SECURITY.md @casjay
+/src/backup*.go @casjay
+/src/security* @casjay
+/src/pgp/ @casjay
+/src/updater/ @casjay
+/.github/SECURITY.md @casjay

@@ -22,12 +22,14 @@ services:
       DEBUG: true
       MODE: development
       TZ: ${TZ:-America/New_York}
-      ADDRESS: 0.0.0.0
       CONFIG_DIR: /config/gitignore
       DATA_DIR: /data/gitignore
+      CACHE_URL: valkey://gitignore-cache:6379
     volumes:
-      - ./volumes/config:/config:z
-      - ./volumes/data:/data:z
+      - type: tmpfs
+        target: /config
+      - type: tmpfs
+        target: /data
     ports:
       - "172.17.0.1:64181:80"
     healthcheck:
@@ -36,11 +38,31 @@ services:
       timeout: 15s
       retries: 3
       start_period: 90s
+    depends_on:
+      gitignore-cache:
+        condition: service_healthy
+    networks:
+      - gitignore
+
+  gitignore-cache:
+    image: valkey/valkey:alpine
+    pull_policy: always
+    container_name: gitignore-cache
+    restart: "no"
+    logging: *default-logging
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - gitignore
 
 networks:
   gitignore:
-    name: gitignore-test
+    name: gitignore
     external: false
     driver: bridge

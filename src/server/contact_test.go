@@ -95,8 +95,8 @@ func TestContactWebhookTargetsAndDispatchSupportWebhookOnlyPrivacy(t *testing.T)
 		if event.ProjectName != "gitignore" || event.ProjectVersion != "1.2.3" {
 			t.Errorf("project metadata = %q/%q", event.ProjectName, event.ProjectVersion)
 		}
-		if event.Body != "privacy request" {
-			t.Errorf("event body = %q", event.Body)
+		if strings.Contains(event.Body, "privacy request") || event.Component != "general" {
+			t.Errorf("webhook was not reduced to a category summary: body=%q component=%q", event.Body, event.Component)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("webhook dispatch did not happen asynchronously")
@@ -134,5 +134,33 @@ func TestVersionedContactErrorsUseAPIEnvelope(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "<!doctype html") {
 		t.Fatal("versioned contact error rendered HTML")
+	}
+}
+
+func TestCleanupExpiredContactChallenges(t *testing.T) {
+	now := time.Now()
+	s := New(&Config{Cfg: config.DefaultConfig()})
+	s.contactChallenges = map[string]contactChallenge{
+		"expired": {expires: now.Add(-time.Second)},
+		"active":  {expires: now.Add(time.Minute)},
+	}
+	s.contactRequests = map[string][]time.Time{
+		"198.51.100.1": {now.Add(-2 * time.Minute), now.Add(-time.Second)},
+		"198.51.100.2": {now.Add(-2 * time.Minute)},
+	}
+	if err := s.CleanupExpiredContactChallenges(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := s.contactChallenges["expired"]; exists {
+		t.Fatal("expired simple challenge was retained")
+	}
+	if _, exists := s.contactChallenges["active"]; !exists {
+		t.Fatal("active simple challenge was removed")
+	}
+	if got := len(s.contactRequests["198.51.100.1"]); got != 1 {
+		t.Fatalf("recent challenge request count = %d, want 1", got)
+	}
+	if _, exists := s.contactRequests["198.51.100.2"]; exists {
+		t.Fatal("stale challenge request bucket was retained")
 	}
 }

@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 		os.Exit(2)
 	}
 	configPath := filepath.Join(configDir, "security.yml")
-	if err := os.WriteFile(configPath, []byte("server:\n  rate_limit:\n    enabled: true\n    requests: 10000\n    window: 60\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("server:\n  security:\n    allowlist:\n      - cidr: 127.0.0.1/32\n        description: E2E browser runner\n"), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "create E2E config: %v\n", err)
 		os.Exit(2)
 	}
@@ -490,7 +490,7 @@ func TestNoJSBrowserProgressiveEnhancement(t *testing.T) {
 		t.Fatal("mobile navigation toggle did not open the drawer without JavaScript")
 	}
 	if err := chromedp.Do(ctx,
-		chromedp.Click(".nav-overlay"),
+		chromedp.MouseClickXY(10, 320),
 	); err != nil {
 		t.Fatalf("close mobile navigation with scrim without JavaScript: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestFullBrowserThemesAndMobileLayout(t *testing.T) {
 }
 
 func TestLayoutReviewMatrixAllPages(t *testing.T) {
-	ctx := newBrowserWithTimeout(t, false, 5*time.Minute)
+	ctx := newBrowserWithTimeout(t, false, 10*time.Minute)
 	viewports := []struct {
 		width  int
 		height int

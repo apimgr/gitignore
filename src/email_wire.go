@@ -13,6 +13,7 @@ import (
 	displayformat "github.com/apimgr/gitignore/src/common/format"
 	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/email"
 	"github.com/apimgr/gitignore/src/server"
 	"github.com/apimgr/gitignore/src/tor"
@@ -269,6 +270,18 @@ func emitBackupFailed(filename, errMsg string) {
 	notifier.emit("backup_failed", notifier.cfg.Server.Notifications.Email.Events.BackupFailed, map[string]string{
 		"filename": filename,
 		"error":    errMsg,
+	})
+}
+
+func emitAbuseSecurityAlert(block db.IPBlock) {
+	if notifier == nil {
+		return
+	}
+	details := fmt.Sprintf("Automatic temporary block for %s until %s (%d requests in the flood window).", block.Reason, block.ExpiresAt.UTC().Format(time.RFC3339), block.OffenseCount)
+	notifier.emit("security_alert", notifier.cfg.Server.Notifications.Email.Events.SecurityAlert, map[string]string{
+		"event":   "Request flood detected",
+		"ip":      block.IP,
+		"details": details,
 	})
 }
 

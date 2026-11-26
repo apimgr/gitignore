@@ -21,7 +21,7 @@ func TestRegisterBuiltinsRegistersAllTasks(t *testing.T) {
 	wantIDs := []string{
 		"ssl_renewal", "geoip_update", "blocklist_update", "cve_update",
 		"update_check", "token_cleanup", "log_rotation", "backup_daily",
-		"backup_hourly", "disk_check", "healthcheck_self", "health_registry_refresh", "security_cleanup",
+		"backup_hourly", "disk_check", "healthcheck_self", "health_registry_refresh", "ip_block_cleanup", "security_cleanup",
 	}
 	if len(tasks) != len(wantIDs) {
 		t.Fatalf("got %d tasks, want %d", len(tasks), len(wantIDs))
@@ -86,6 +86,31 @@ func TestRequiredHandlerDelegates(t *testing.T) {
 	}
 }
 
+func TestTemporaryIPBlockCleanupHandlerDeletesExpiredBlocks(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Now().UTC()
+	if err := db.SaveIPBlock(db.IPBlock{IP: "192.0.2.9", Type: "temporary", Reason: "request_flood", BlockedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute), OffenseCount: 11, AutoBlocked: true}); err != nil {
+		t.Fatal(err)
+	}
+	logsDir := t.TempDir()
+	if err := temporaryIPBlockCleanupHandler(Deps{LogsDir: logsDir})(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := db.LoadIPBlocks(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 0 {
+		t.Fatalf("expired block count = %d, want 0", len(blocks))
+	}
+	if _, err := os.Stat(filepath.Join(logsDir, "audit.log")); err != nil {
+		t.Fatalf("expired block audit log missing: %v", err)
+	}
+}
+
 func TestModeBoundHealthTasks(t *testing.T) {
 	s, _ := newTestScheduler()
 	if err := RegisterBuiltins(s, Deps{TorInstalled: true, I2PEnabled: true,
@@ -115,8 +140,10 @@ func TestPGPKeyserverRetryTaskRegistration(t *testing.T) {
 	if err := RegisterBuiltins(s, Deps{PGPKeyserverPublish: func(context.Context) error { return nil }}); err != nil {
 		t.Fatalf("RegisterBuiltins: %v", err)
 	}
-	if _, ok := s.Task("pgp_keyserver_publish"); !ok {
+	if task, ok := s.Task("keyserver_retry"); !ok {
 		t.Fatal("PGP keyserver retry task was not registered")
+	} else if task.Schedule != "@every 15m" {
+		t.Fatalf("keyserver_retry schedule = %q, want @every 15m", task.Schedule)
 	}
 }
 

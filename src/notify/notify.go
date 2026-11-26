@@ -38,6 +38,7 @@ type Event struct {
 	Subject        string    `json:"subject"`
 	Body           string    `json:"body"`
 	Severity       string    `json:"severity"`
+	Component      string    `json:"component,omitempty"`
 	Timestamp      time.Time `json:"timestamp"`
 	ProjectName    string    `json:"project_name"`
 	ProjectVersion string    `json:"project_version"`

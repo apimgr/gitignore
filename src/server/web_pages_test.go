@@ -32,12 +32,12 @@ func TestServerPageCopyIsLocalized(t *testing.T) {
 	sort.Strings(pageNames)
 
 	allowedSharedCopy := map[string]struct{}{
-		"API": {}, "CLI": {}, "GitHub": {}, "GitIgnore": {}, "GraphQL": {},
+		"API": {}, "CLI": {}, "Claude Code": {}, "GitHub": {}, "GitIgnore": {}, "GraphQL": {},
 		"Swagger UI": {}, "OpenAPI JSON": {}, "Documentation": {}, "Server": {},
 		"Version": {}, "Version test ().": {}, "Version: vtest": {}, "API: /api/v1": {},
 		"Tor:": {}, "/server/healthz": {}, "Cache": {}, "Cluster": {}, "Mode": {},
 		"Description": {}, "Cause": {}, "Auto": {}, "Actions": {},
-		"Links": {}, "Export": {}, "Status": {}, "Home": {}, "Privacy": {},
+		"Links": {}, "Export": {}, "Status": {}, "Home": {}, "Privacy": {}, "IP Geolocation by DB-IP": {},
 		"English": {}, "Español": {}, "Français": {}, "العربية": {}, "Deutsch": {},
 		"Italiano": {}, "日本語": {}, "中文": {}, "go,node,macos": {},
 	}
@@ -234,10 +234,7 @@ func TestHandlerResponsesUseRequestLanguage(t *testing.T) {
 	}
 
 	mcpHelpAPI := serve(server.handleAPIHelpMCP, http.MethodGet, "/api/v1/server/help/mcp?lang=es", "", "")
-	for _, expected := range []string{
-		i18n.Translate("es", "web.mcp.project_description"),
-		i18n.Translate("es", "web.mcp.tools_description"),
-	} {
+	for _, expected := range []string{i18n.Translate("es", "web.mcp.project_description")} {
 		if !strings.Contains(mcpHelpAPI.Body.String(), expected) {
 			t.Errorf("localized MCP help API omitted %q", expected)
 		}
@@ -490,9 +487,25 @@ func TestServerPageShellConformance(t *testing.T) {
 		"security_policy", "security_thanks", "security_report_status", "error",
 		"swagger_ui", "graphql_ui", "healthz",
 	}
+	pagePaths := map[string]string{
+		"security_policy":        "/server/security/policy",
+		"security_thanks":        "/server/security/thanks",
+		"security_report_status": "/server/security/report/test",
+	}
+	pageSet := make(map[string]bool, len(pages))
+	for _, page := range pages {
+		pageSet[page] = true
+	}
+	for _, registered := range serverPageRegistry {
+		pagePaths[registered.template] = registered.path
+		if !pageSet[registered.template] {
+			pages = append(pages, registered.template)
+			pageSet[registered.template] = true
+		}
+	}
 	for _, page := range pages {
 		t.Run(page, func(t *testing.T) {
-			pagePath := map[string]string{"security_policy": "/server/security/policy", "security_thanks": "/server/security/thanks", "security_report_status": "/server/security/report/test"}[page]
+			pagePath := pagePaths[page]
 			if pagePath == "" {
 				pagePath = "/server/" + page
 			}

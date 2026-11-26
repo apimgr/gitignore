@@ -179,7 +179,7 @@ func (s *Server) applyPreferences(w http.ResponseWriter, r *http.Request, values
 	state.Ignored = []string{}
 	if reset {
 		for _, cookie := range r.Cookies() {
-			if cookie.Name == "theme" || cookie.Name == "lang" || cookie.Name == "cookie_consent" || cookie.Name == "ccpa_opt_out" || cookie.Name == "gitignore_build" || strings.HasPrefix(cookie.Name, preferencePrefix) {
+			if cookie.Name == "theme" || cookie.Name == "lang" || cookie.Name == "cookie_consent" || cookie.Name == "ccpa_opt_out" || cookie.Name == "gitignore_build" || cookie.Name == dismissedAnnouncementsCookie || strings.HasPrefix(cookie.Name, preferencePrefix) {
 				expirePreferenceCookie(w, r, cookie.Name, s)
 			}
 		}

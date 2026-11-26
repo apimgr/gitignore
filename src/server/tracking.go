@@ -3,12 +3,15 @@ package server
 import (
 	"encoding/json"
 	"html/template"
+	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/audit"
 	"github.com/apimgr/gitignore/src/common/i18n"
 	"github.com/apimgr/gitignore/src/config"
 )
@@ -31,11 +34,19 @@ func readConsent(r *http.Request) (consentState, bool) {
 	if err != nil {
 		return consentState{}, false
 	}
+	value, err := url.PathUnescape(cookie.Value)
+	if err != nil {
+		return consentState{}, false
+	}
 	var consent consentState
-	if json.Unmarshal([]byte(cookie.Value), &consent) != nil || !consent.Essential || consent.Timestamp <= 0 {
+	if json.Unmarshal([]byte(value), &consent) != nil || !consent.Essential || consent.Timestamp <= 0 {
 		return consentState{}, false
 	}
 	return consent, true
+}
+
+func encodeConsentCookie(value []byte) string {
+	return url.PathEscape(string(value))
 }
 
 func (s *Server) trackingAllowed(r *http.Request) bool {
@@ -223,8 +234,52 @@ func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, i18n.T(r, "errors.save_consent_failed"), http.StatusInternalServerError)
 		return
 	}
-	setPreferenceCookie(w, r, "cookie_consent", string(value), s)
+	setPreferenceCookie(w, r, "cookie_consent", encodeConsentCookie(value), s)
+	s.auditConsentChange(r, "cookie_consent", map[string]bool{"essential": true, "preferences": state.Preferences, "analytics": state.Analytics})
 	redirectPreference(w, safePreferenceRedirect(s, r, "/"))
+}
+
+func (s *Server) auditConsentChange(r *http.Request, consentType string, value any) {
+	if s == nil || r == nil || s.config == nil || s.config.Paths == nil {
+		return
+	}
+	actor := audit.Actor{Type: "anonymous", IP: consentAuditIP(s, r)}
+	for _, cookie := range ownerCookies(r) {
+		identity, err := s.AuthenticateBearerToken(cookie.Value)
+		if err == nil && identity.OwnerID != "" {
+			actor.Type, actor.ID = "owner", identity.OwnerID
+			break
+		}
+	}
+	version := ""
+	if cfg := s.currentConfig(); cfg != nil {
+		version = cfg.Server.Privacy.Consent.Policy.Version
+	}
+	if err := audit.Append(s.config.Paths.GetLogsDir(), audit.Entry{
+		Event: "compliance.consent_updated", Category: "compliance", Severity: "info",
+		Actor: actor, Details: map[string]any{"consent_type": consentType, "new_value": value, "policy_version": version}, Result: "success",
+	}); err != nil {
+		log.Printf("audit event compliance.consent_updated could not be appended")
+	}
+}
+
+func consentAuditIP(s *Server, r *http.Request) string {
+	if identity, ok := r.Context().Value(torRequestContextKey{}).(torRequestIdentity); ok {
+		if identity.circuitID == "" || identity.circuitID == "tor" {
+			return "tor"
+		}
+		return "tor:" + identity.circuitID
+	}
+	address, err := netip.ParseAddr(s.clientIP(r))
+	if err != nil {
+		return ""
+	}
+	address = address.Unmap()
+	bits := 48
+	if address.Is4() {
+		bits = 24
+	}
+	return netip.PrefixFrom(address, bits).Masked().Addr().String()
 }
 
 func (s *Server) trackingCSP(r *http.Request, base string) string {

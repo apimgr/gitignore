@@ -7,7 +7,7 @@
 </section>
 <section class="section-card" id="endpoint" aria-labelledby="endpoint-title">
 <h2 id="endpoint-title">{{t .Lang "web.mcp.endpoint_title"}}</h2>
-<pre class="code-block"><code id="mcp-url">{{.Data.url}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
+<pre class="code-block"><code id="mcp-url" class="mcp-endpoint-text">{{.Data.url}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
 <p>{{t .Lang "common.aliases"}}</p><pre class="code-block"><code id="mcp-api-url">{{.Data.apiURL}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-api-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button><pre class="code-block"><code id="mcp-root-url">{{.Data.rootURL}}</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-root-url" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
 <p>{{t .Lang "web.mcp.endpoint_instructions"}}</p>
 </section>
@@ -18,7 +18,17 @@
 <section class="section-card" id="connect" aria-labelledby="connect-title">
 <h2 id="connect-title">{{t .Lang "web.mcp.connect_title"}}</h2>
 <p>{{t .Lang "web.mcp.connect_description"}}</p>
-<pre class="code-block"><code id="mcp-curl">curl -X POST '{{.Data.url}}' -H 'Authorization: Bearer YOUR_LINKED_TOKEN' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: initialize' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}'</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-curl" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
+<h3>{{t .Lang "web.mcp.claude_code"}}</h3><pre class="code-block"><code>claude mcp add --transport http {{.Data.projectName}} {{.Data.url}} --header "Authorization: Bearer $MCP_TOKEN"</code></pre>
+<h3>{{t .Lang "web.mcp.generic_client"}}</h3><pre class="code-block"><code>{
+  "mcpServers": {
+    "{{.Data.projectName}}": {
+      "type": "http",
+      "url": "{{.Data.url}}",
+      "headers": {"Authorization": "Bearer $MCP_TOKEN"}
+    }
+  }
+}</code></pre>
+<h3>{{t .Lang "web.mcp.verify_curl"}}</h3><pre class="code-block"><code id="mcp-curl">curl -X POST '{{.Data.url}}' -H "Authorization: Bearer $MCP_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}'</code></pre><button class="btn copy-btn" type="button" aria-live="polite" data-copy="mcp-curl" data-copied-label="{{t .Lang "common.copied"}}">{{t .Lang "common.copy"}}</button>
 </section>
 <section class="section-card" id="tools" aria-labelledby="tools-title">
 <h2 id="tools-title">{{t .Lang "web.mcp.tools_title"}}</h2>

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"testing"
 	"time"
@@ -28,6 +29,17 @@ func TestQueryLabels(t *testing.T) {
 				t.Fatalf("queryLabels(%q) = (%q, %q), want (%q, %q)", test.query, operation, table, test.operation, test.table)
 			}
 		})
+	}
+}
+
+func TestMapServerIdentifiers(t *testing.T) {
+	query := "CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_log(category); INSERT INTO owners(id) VALUES ('owners'); -- scheduler_tasks\nSELECT id FROM \"scheduler_tasks\""
+	want := "CREATE INDEX IF NOT EXISTS srv_idx_audit_category ON srv_audit_log(category); INSERT INTO srv_owners(id) VALUES ('owners'); -- scheduler_tasks\nSELECT id FROM \"srv_scheduler_tasks\""
+	if got := mapServerIdentifiers(query, true); got != want {
+		t.Fatalf("libSQL identifier mapping = %q, want %q", got, want)
+	}
+	if got := mapServerIdentifiers(query, false); got != query {
+		t.Fatalf("SQLite identifier mapping changed query: %q", got)
 	}
 }
 
@@ -70,6 +82,76 @@ func TestMetricsDriverObservesQueries(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no metrics event for INSERT")
+	}
+}
+
+func TestMetricsDriverRefreshesCacheAfterTransactionCommit(t *testing.T) {
+	database, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	connection, err := database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	if _, err := connection.ExecContext(context.Background(), "CREATE TABLE metric_probe (id INTEGER PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	var wrapped *instrumentedConn
+	if err := connection.Raw(func(raw any) error {
+		conn, ok := raw.(driver.Conn)
+		if !ok {
+			t.Fatalf("raw connection has type %T, want driver.Conn", raw)
+		}
+		wrapped = &instrumentedConn{Conn: conn, prefix: true}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	refreshes := 0
+	wrapped.refresh = func(context.Context) { refreshes++ }
+
+	ctx := context.Background()
+	rolledBack, err := wrapped.BeginTx(ctx, driver.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wrapped.ExecContext(ctx, "INSERT INTO metric_probe (id) VALUES (?)", []driver.NamedValue{{Ordinal: 1, Value: int64(1)}}); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 0 {
+		t.Fatalf("cache refreshed before rollback: %d refreshes", refreshes)
+	}
+	if err := rolledBack.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 0 {
+		t.Fatalf("cache refreshed after rollback: %d refreshes", refreshes)
+	}
+
+	committed, err := wrapped.BeginTx(ctx, driver.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement, err := wrapped.Prepare("INSERT INTO metric_probe (id) VALUES (?)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = statement.Close() }()
+	prepared := statement.(*instrumentedStmt)
+	if _, err := prepared.ExecContext(ctx, []driver.NamedValue{{Ordinal: 1, Value: int64(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 0 {
+		t.Fatalf("cache refreshed before commit: %d refreshes", refreshes)
+	}
+	if err := committed.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if refreshes != 1 {
+		t.Fatalf("cache refreshes after commit = %d, want 1", refreshes)
 	}
 }
 

@@ -21,7 +21,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const ownerTokenCookieName = "gitignore_owner_token_5qvQQyc5"
+const ownerTokenCookieName = "gitignore_owner_token_ksqmkkbi"
+
+const legacyOwnerTokenCookieName = "gitignore_owner_token_5qvQQyc5"
 
 var tokenAlphabet = []byte("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
@@ -100,6 +102,7 @@ func (s *Server) AuthenticateBearerToken(raw string) (TokenIdentity, error) {
 		if candidate.RevokedAt.Valid || candidate.ExpiresAt.Valid && candidate.ExpiresAt.Int64 <= now.Unix() {
 			return TokenIdentity{}, errInvalidBearerToken
 		}
+		_ = db.SetOwnerTokenLast4IfEmpty(candidate.ID, raw[len(raw)-4:])
 		if err := db.MarkOwnerTokenUsed(candidate.ID, now); err != nil {
 			return TokenIdentity{}, err
 		}
@@ -115,16 +118,32 @@ func (s *Server) ownerCookieMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		cookie, err := r.Cookie(ownerTokenCookieName)
-		if err == nil && cookie.Value != "" {
-			if _, authErr := s.AuthenticateBearerToken(cookie.Value); authErr != nil {
-				s.clearOwnerCookie(w, r)
-			} else {
-				s.setOwnerCookie(w, r, cookie.Value)
+		cookies := ownerCookies(r)
+		var valid *http.Cookie
+		for _, cookie := range cookies {
+			if _, authErr := s.AuthenticateBearerToken(cookie.Value); authErr == nil {
+				valid = cookie
+				break
 			}
+		}
+		if valid != nil {
+			s.setOwnerCookie(w, r, valid.Value)
+		} else if len(cookies) > 0 {
+			s.clearOwnerCookie(w, r)
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func ownerCookies(r *http.Request) []*http.Cookie {
+	cookies := make([]*http.Cookie, 0, 2)
+	if cookie, err := r.Cookie(ownerTokenCookieName); err == nil {
+		cookies = append(cookies, cookie)
+	}
+	if cookie, err := r.Cookie(legacyOwnerTokenCookieName); err == nil {
+		cookies = append(cookies, cookie)
+	}
+	return cookies
 }
 
 func parseBearerHeader(header string) (string, bool) {
@@ -142,11 +161,15 @@ func (s *Server) authenticateRequest(r *http.Request, allowCookie bool) (TokenId
 	if !allowCookie {
 		return TokenIdentity{}, errInvalidBearerToken
 	}
-	cookie, err := r.Cookie(ownerTokenCookieName)
-	if err != nil {
-		return TokenIdentity{}, errInvalidBearerToken
+	lastErr := errInvalidBearerToken
+	for _, cookie := range ownerCookies(r) {
+		identity, err := s.AuthenticateBearerToken(cookie.Value)
+		if err == nil {
+			return identity, nil
+		}
+		lastErr = err
 	}
-	return s.AuthenticateBearerToken(cookie.Value)
+	return TokenIdentity{}, lastErr
 }
 
 func (s *Server) requirePrimaryOwner(w http.ResponseWriter, r *http.Request, allowCookie bool) (TokenIdentity, bool) {
@@ -158,8 +181,12 @@ func (s *Server) requirePrimaryOwner(w http.ResponseWriter, r *http.Request, all
 		return TokenIdentity{}, false
 	}
 	if allowCookie && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
-		if cookie, cookieErr := r.Cookie(ownerTokenCookieName); cookieErr == nil {
-			s.setOwnerCookie(w, r, cookie.Value)
+		for _, cookie := range ownerCookies(r) {
+			cookieIdentity, err := s.AuthenticateBearerToken(cookie.Value)
+			if err == nil && cookieIdentity.OwnerID == identity.OwnerID && cookieIdentity.TokenID == identity.TokenID {
+				s.setOwnerCookie(w, r, cookie.Value)
+				break
+			}
 		}
 	}
 	return identity, true
@@ -234,7 +261,7 @@ func (s *Server) issueOwnerToken(now time.Time, source, ip string) (string, db.O
 		return "", db.OwnerToken{}, err
 	}
 	hash, prefix := hashOwnerToken(raw)
-	item, err := db.CreateOwnerWithPrimary(ownerID, hash, prefix, encoded, now)
+	item, err := db.CreateOwnerWithPrimary(ownerID, hash, prefix, raw[len(raw)-4:], encoded, now)
 	if err != nil {
 		return "", db.OwnerToken{}, err
 	}
@@ -252,7 +279,7 @@ func (s *Server) issueLinkedToken(ownerID, name string, expiry *int64, now time.
 		return "", db.OwnerToken{}, err
 	}
 	hash, prefix := hashOwnerToken(raw)
-	item, err := db.CreateLinkedOwnerToken(ownerID, name, hash, prefix, encoded, expiry, s.maxLinkedTokens(), now)
+	item, err := db.CreateLinkedOwnerToken(ownerID, name, hash, prefix, raw[len(raw)-4:], encoded, expiry, s.maxLinkedTokens(), now)
 	if err != nil {
 		return "", db.OwnerToken{}, err
 	}
@@ -300,6 +327,10 @@ func (s *Server) loadTokenPage(ownerID string, revealed map[int64]string, messag
 	var primary *map[string]interface{}
 	linked := make([]map[string]interface{}, 0, len(items))
 	now := time.Now().UTC()
+	linkedActive, err := db.CountActiveLinkedTokens(ownerID, now)
+	if err != nil {
+		return nil, err
+	}
 	for _, item := range items {
 		value := s.publicToken(item, now)
 		row := map[string]interface{}{
@@ -315,23 +346,31 @@ func (s *Server) loadTokenPage(ownerID string, revealed map[int64]string, messag
 			row["expires"] = time.Unix(item.ExpiresAt.Int64, 0).UTC().Format("2006-01-02 15:04 UTC")
 		}
 		if item.Kind == "primary" {
+			last4, err := db.OwnerTokenLast4(ownerID)
+			if err != nil {
+				return nil, err
+			}
+			row["token_last4"] = last4
 			primary = &row
 		} else {
 			linked = append(linked, row)
 		}
 	}
-	return map[string]interface{}{"authenticated": true, "primary": primary, "linked": linked, "message": message}, nil
+	return map[string]interface{}{"authenticated": true, "primary": primary, "linked": linked, "linkedCount": linkedActive, "message": message}, nil
 }
 
 func (s *Server) handleOwnerTokensPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
-	cookie, cookieErr := r.Cookie(ownerTokenCookieName)
+	var cookie *http.Cookie
 	identity, err := TokenIdentity{}, errInvalidBearerToken
-	if cookieErr == nil {
-		identity, err = s.AuthenticateBearerToken(cookie.Value)
+	for _, candidate := range ownerCookies(r) {
+		if candidateIdentity, candidateErr := s.AuthenticateBearerToken(candidate.Value); candidateErr == nil && candidateIdentity.Kind == "primary" {
+			cookie, identity, err = candidate, candidateIdentity, nil
+			break
+		}
 	}
 	if err != nil || identity.Kind != "primary" {
-		if cookieErr == nil && cookie.Value != "" {
+		if len(ownerCookies(r)) > 0 {
 			s.clearOwnerCookie(w, r)
 		}
 		s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false}})
@@ -360,6 +399,7 @@ func (s *Server) setOwnerCookie(w http.ResponseWriter, r *http.Request, raw stri
 		maxAge = parseCookieMaxAge(s.currentConfig().Server.Tokens.CookieMaxAge)
 	}
 	http.SetCookie(w, &http.Cookie{Name: ownerTokenCookieName, Value: raw, Path: "/", HttpOnly: true, Secure: preferenceCookieSecure(s, r), SameSite: http.SameSiteStrictMode, MaxAge: maxAge, Expires: time.Now().Add(time.Duration(maxAge) * time.Second)})
+	clearCookie(w, r, legacyOwnerTokenCookieName, s)
 }
 
 func storeOwnerTokenPageFlash(ownerID string, revealed map[int64]string, message string) {
@@ -397,11 +437,25 @@ func (s *Server) maxLinkedTokens() int {
 }
 
 func (s *Server) clearOwnerCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: ownerTokenCookieName, Value: "", Path: "/", HttpOnly: true, Secure: preferenceCookieSecure(s, r), SameSite: http.SameSiteStrictMode, MaxAge: -1, Expires: time.Unix(1, 0)})
+	clearCookie(w, r, ownerTokenCookieName, s)
+	clearCookie(w, r, legacyOwnerTokenCookieName, s)
+}
+
+func clearCookie(w http.ResponseWriter, r *http.Request, name string, s *Server) {
+	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", HttpOnly: true, Secure: preferenceCookieSecure(s, r), SameSite: http.SameSiteStrictMode, MaxAge: -1, Expires: time.Unix(1, 0)})
 }
 
 func (s *Server) tokenActionLimiter(w http.ResponseWriter, r *http.Request) bool {
-	if s.strictTokenLimiter != nil && !s.strictTokenLimiter.allow(s.clientIP(r)) {
+	if !isStrictOwnerTokenAction(r) {
+		return true
+	}
+	identity := "ip:" + s.clientIP(r)
+	if owner, err := s.authenticateRequest(r, true); err == nil {
+		identity = "owner:" + owner.OwnerID
+	}
+	if s.strictTokenLimiter != nil && !s.strictTokenLimiter.allowKey(identity) {
+		seconds := s.strictTokenLimiter.retryAfter(identity)
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			sendAPIResponseErrorLocalized(w, r, "RATE_LIMITED")
 		} else {
@@ -410,6 +464,38 @@ func (s *Server) tokenActionLimiter(w http.ResponseWriter, r *http.Request) bool
 		return false
 	}
 	return true
+}
+
+func isStrictOwnerTokenAction(r *http.Request) bool {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		return false
+	}
+	if strings.HasPrefix(path, "/server/preferences/") {
+		if path == "/server/preferences/token/reveal" ||
+			path == "/server/preferences/token/rotate" ||
+			path == "/server/preferences/token/restore" ||
+			path == "/server/preferences/token/create" ||
+			path == "/server/preferences/token/revoke" {
+			return true
+		}
+	}
+	if strings.Contains(path, "/tokens/primary") {
+		return path == "/api/v1/server/preferences/tokens/primary" ||
+			strings.HasSuffix(path, "/tokens/primary") ||
+			strings.HasSuffix(path, "/tokens/primary/reveal") ||
+			strings.HasSuffix(path, "/tokens/primary/rotate")
+	}
+	parts := strings.Split(path, "/")
+	for index, part := range parts {
+		if part != "tokens" || len(parts)-index != 3 || parts[index+1] == "" {
+			continue
+		}
+		if parts[index+2] == "reveal" || parts[index+2] == "rotate" {
+			return true
+		}
+	}
+	return strings.HasSuffix(path, "/tokens/reveal") || strings.HasSuffix(path, "/tokens/rotate")
 }
 
 func (s *Server) handleIssueOwnerTokenWeb(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +537,11 @@ func (s *Server) handleRestoreOwnerToken(w http.ResponseWriter, r *http.Request)
 	raw := strings.TrimSpace(r.FormValue("token"))
 	identity, err := s.AuthenticateBearerToken(raw)
 	if err != nil || identity.Kind != "primary" {
+		ip := s.clientIP(r)
+		if s.recordAuthFailure(ip) {
+			s.rejectRateLimited(w, r, s.rateLimiters["auth_failures"], "ip:"+ip)
+			return
+		}
 		s.logTokenAudit("token.restore_failed", "", "", "web", s.clientIP(r), "", false)
 		s.renderPageStatus(w, r, "preferences_tokens", http.StatusUnauthorized, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"authenticated": false, "message": i18n.T(r, "errors.token_invalid")}})
 		return
@@ -471,6 +562,84 @@ func (s *Server) handleForgetOwnerToken(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Clear-Site-Data", `"storage"`)
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.Redirect(w, r, "/server/preferences/tokens", http.StatusSeeOther)
+}
+
+func (s *Server) handleRevokePrimaryOwnerTokenWeb(w http.ResponseWriter, r *http.Request) {
+	if !s.tokenActionLimiter(w, r) {
+		return
+	}
+	if !validCSRFRequest(r) {
+		sendAPIResponseErrorLocalized(w, r, "CSRF_FAILED")
+		return
+	}
+	identity, ok := s.requirePrimaryOwner(w, r, true)
+	if !ok {
+		sendAPIResponseErrorLocalized(w, r, "FORBIDDEN")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		sendAPIResponseErrorLocalized(w, r, "BAD_REQUEST")
+		return
+	}
+	last4, err := db.OwnerTokenLast4(identity.OwnerID)
+	if err != nil || len(last4) != 4 || subtle.ConstantTimeCompare([]byte(r.FormValue("confirm")), []byte(last4)) != 1 {
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
+		return
+	}
+	deleted, err := db.DeleteOwner(identity.OwnerID)
+	if err != nil {
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
+		return
+	}
+	s.logOwnerDeletionAudit(identity.OwnerID, "web", deleted, 0, s.clientIP(r))
+	s.clearOwnerCookie(w, r)
+	w.Header().Set("Clear-Site-Data", `"storage"`)
+	w.Header().Set("Cache-Control", "private, no-store")
+	http.Redirect(w, r, "/server/preferences/tokens", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIPrimaryOwnerRevoke(w http.ResponseWriter, r *http.Request) {
+	if !s.tokenActionLimiter(w, r) {
+		return
+	}
+	identity, ok := s.requirePrimaryOwner(w, r, false)
+	if !ok {
+		s.sendBearerError(w, r)
+		return
+	}
+	var request struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request); err != nil {
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
+		return
+	}
+	last4, err := db.OwnerTokenLast4(identity.OwnerID)
+	if err != nil || len(last4) != 4 || subtle.ConstantTimeCompare([]byte(request.Confirm), []byte(last4)) != 1 {
+		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
+		return
+	}
+	deleted, err := db.DeleteOwner(identity.OwnerID)
+	if err != nil {
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
+		return
+	}
+	s.logOwnerDeletionAudit(identity.OwnerID, "api", deleted, 0, s.clientIP(r))
+	w.Header().Set("Cache-Control", "private, no-store")
+	sendPrivateAPIResponseOK(w, http.StatusOK, map[string]int64{"tokens": deleted, "resources": 0})
+}
+
+func (s *Server) logOwnerDeletionAudit(ownerID, source string, tokens, resources int64, ip string) {
+	if s.config == nil || s.config.Paths == nil {
+		return
+	}
+	_ = audit.Append(s.config.Paths.GetLogsDir(), audit.Entry{
+		Event: "token.revoked", Category: "security", Severity: "info",
+		Actor:   audit.Actor{Type: "owner", ID: ownerID, IP: safeSecurityLogField(ip)},
+		Target:  &audit.Target{Type: "owner", ID: ownerID},
+		Details: map[string]any{"scope": "owner", "tokens_deleted": tokens, "resources_deleted": resources, "source": source},
+		Result:  "success", Source: source,
+	})
 }
 
 func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Request) {
@@ -526,7 +695,7 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		hash, prefix := hashOwnerToken(raw)
-		if err := db.RotateOwnerToken(identity.OwnerID, target.ID, hash, prefix, encoded, now); err != nil {
+		if err := db.RotateOwnerToken(identity.OwnerID, target.ID, hash, prefix, raw[len(raw)-4:], encoded, now); err != nil {
 			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
@@ -808,7 +977,7 @@ func (s *Server) handleAPITokenAction(w http.ResponseWriter, r *http.Request, id
 			if err == nil {
 				var hash, prefix string
 				hash, prefix = hashOwnerToken(raw)
-				err = db.RotateOwnerToken(identity.OwnerID, item.ID, hash, prefix, encoded, now)
+				err = db.RotateOwnerToken(identity.OwnerID, item.ID, hash, prefix, raw[len(raw)-4:], encoded, now)
 			}
 		}
 		if err != nil {

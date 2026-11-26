@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -118,6 +120,7 @@ type Server struct {
 	server               *http.Server
 	baseHandler          atomic.Value
 	limiter              *rateLimiter
+	rateLimiters         map[string]*rateLimiter
 	reportLimiter        *reportRateLimiter
 	strictTokenLimiter   *rateLimiter
 	metrics              *metrics.Metrics
@@ -140,6 +143,15 @@ type Server struct {
 	healthCoreRefreshed  time.Time
 	allowlist            []netip.Prefix
 	blockedIPs           []netip.Prefix
+	abuseMu              sync.Mutex
+	abuseRequests        map[string][]abuseRequest
+	abuseAlerted         map[string]time.Time
+	abusePrunedAt        time.Time
+	temporaryBlocks      map[string]db.IPBlock
+	abuseAlertHandler    func(db.IPBlock)
+	securityPolicyMu     sync.RWMutex
+	blockedIPReasons     map[string]string
+	allowlistSnapshot    map[string]string
 	startTime            time.Time
 	stats                *statsCollector
 	contactMu            sync.Mutex
@@ -165,16 +177,36 @@ func New(config *Config) *Server {
 		trustedProxyStop:   make(chan struct{}),
 		reportLimiter:      newReportRateLimiter(),
 		stats:              newStatsCollector(),
-		strictTokenLimiter: newRateLimiter(5, 60),
-		contactChallenges:  map[string]contactChallenge{},
-		contactRequests:    map[string][]time.Time{},
-		contactTokens:      map[string]time.Time{},
-		contactReviews:     map[string]time.Time{},
-		learnedOrigins:     map[string]time.Time{},
+		strictTokenLimiter: newRateLimiterFor("strict", 10, 900),
+		rateLimiters: map[string]*rateLimiter{
+			"read":          newRateLimiterFor("read", 120, 60),
+			"write":         newRateLimiterFor("write", 10, 60),
+			"health":        newRateLimiterFor("health", 120, 60),
+			"auth_failures": newRateLimiterFor("auth_failures", 5, 900),
+		},
+		contactChallenges: map[string]contactChallenge{},
+		contactRequests:   map[string][]time.Time{},
+		contactTokens:     map[string]time.Time{},
+		contactReviews:    map[string]time.Time{},
+		learnedOrigins:    map[string]time.Time{},
+		abuseRequests:     map[string][]abuseRequest{},
+		abuseAlerted:      map[string]time.Time{},
+		temporaryBlocks:   map[string]db.IPBlock{},
+		blockedIPReasons:  map[string]string{},
+		allowlistSnapshot: map[string]string{},
 	}
 	s.torOnionAddress.Store("")
 	if config.Cfg != nil {
 		s.runtimeConfig.Store(config.Cfg)
+	}
+	if blocks, err := db.LoadIPBlocks(time.Now().UTC()); err != nil {
+		if !errors.Is(err, sql.ErrConnDone) {
+			log.Printf("security: failed to load temporary IP blocks: %v", err)
+		}
+	} else {
+		for _, block := range blocks {
+			s.temporaryBlocks[block.IP] = block
+		}
 	}
 
 	// Prometheus metrics subsystem (AI.md PART 20). Built on
@@ -217,33 +249,38 @@ func New(config *Config) *Server {
 				s.metrics.DBErrorsTotal.WithLabelValues(operation, db.QueryErrorType(err)).Inc()
 			}
 		})
+		writeMetricsEnabled := db.IsSQLite()
+		db.SetWriteObserver(func(wait time.Duration, busy bool) {
+			if !writeMetricsEnabled {
+				return
+			}
+			s.metrics.DBWriteWait.Observe(wait.Seconds())
+			if busy {
+				s.metrics.DBBusyTotal.Inc()
+			}
+		})
 	} else {
 		db.SetQueryObserver(nil)
+		db.SetWriteObserver(nil)
 	}
 
-	// Enable per-IP rate limiting only when the operator turns it on.
-	if config.Cfg != nil && config.Cfg.Server.RateLimit.Enabled {
-		s.limiter = newRateLimiter(config.Cfg.Server.RateLimit.Requests, config.Cfg.Server.RateLimit.Window)
+	if config.Cfg != nil {
+		rates := config.Cfg.Server.RateLimit
+		s.limiter = newRateLimiterFor("global", rates.GlobalBurst, 60)
+		s.rateLimiters = map[string]*rateLimiter{
+			"read":          newRateLimiterFor("read", rates.Read.Requests, rates.Read.Window),
+			"write":         newRateLimiterFor("write", rates.Write.Requests, rates.Write.Window),
+			"health":        newRateLimiterFor("health", rates.Health.Requests, rates.Health.Window),
+			"auth_failures": newRateLimiterFor("auth_failures", rates.AuthFailures.Requests, rates.AuthFailures.Window),
+		}
+		s.strictTokenLimiter = newRateLimiterFor("strict", rates.Strict.Requests, rates.Strict.Window)
 	}
 
 	// Parse the trusted-proxy allowlist once at startup (AI.md PART 12).
 	var additional []string
 	if config.Cfg != nil {
 		additional = config.Cfg.Server.TrustedProxies.Additional
-		for _, entry := range config.Cfg.Server.Security.Allowlist {
-			if prefix, ok := parseSecurityPrefix(entry.CIDR); ok && !overlyBroadSecurityPrefix(prefix) {
-				s.allowlist = append(s.allowlist, prefix)
-			} else {
-				log.Printf("config warning: server.security.allowlist entry has invalid or overly broad cidr and was skipped")
-			}
-		}
-		for _, entry := range config.Cfg.Server.Security.BlockedIPs {
-			if prefix, ok := parseSecurityPrefix(entry.CIDR); ok {
-				s.blockedIPs = append(s.blockedIPs, prefix)
-			} else {
-				log.Printf("config warning: server.security.blocked_ips entry has invalid cidr and was skipped")
-			}
-		}
+		s.refreshSecurityPolicy(config.Cfg, false)
 	}
 	s.trustedProxies = buildTrustedProxies(config.Address, additional)
 	s.registerHealthChecks()
@@ -288,6 +325,32 @@ func New(config *Config) *Server {
 	return s
 }
 
+// SetAbuseAlertHandler registers the best-effort email callback for flood alerts.
+func (s *Server) SetAbuseAlertHandler(handler func(db.IPBlock)) {
+	if s == nil {
+		return
+	}
+	s.abuseMu.Lock()
+	s.abuseAlertHandler = handler
+	s.abuseMu.Unlock()
+}
+
+// CleanupExpiredIPBlocks removes expired entries returned by the durable
+// cleanup task without deleting a newer block for the same address.
+func (s *Server) CleanupExpiredIPBlocks(expired []db.IPBlock) {
+	if s == nil || len(expired) == 0 {
+		return
+	}
+	s.abuseMu.Lock()
+	defer s.abuseMu.Unlock()
+	for _, block := range expired {
+		current, ok := s.temporaryBlocks[block.IP]
+		if ok && current.ExpiresAt.Equal(block.ExpiresAt) {
+			delete(s.temporaryBlocks, block.IP)
+		}
+	}
+}
+
 func (s *Server) currentConfig() *config.Config {
 	if s == nil {
 		return nil
@@ -304,6 +367,8 @@ func (s *Server) currentConfig() *config.Config {
 // ReplaceConfig atomically publishes a file-reloaded configuration snapshot.
 func (s *Server) ReplaceConfig(cfg *config.Config) {
 	if cfg != nil {
+		s.refreshSecurityPolicy(cfg, true)
+		s.refreshRateLimiters(cfg)
 		s.runtimeConfig.Store(cfg)
 		if s.server != nil {
 			var handler http.Handler = s.router
@@ -311,6 +376,105 @@ func (s *Server) ReplaceConfig(cfg *config.Config) {
 				handler = baseURLHandler(prefix, s.router)
 			}
 			s.baseHandler.Store(handler)
+		}
+	}
+}
+
+func (s *Server) refreshRateLimiters(cfg *config.Config) {
+	if s == nil || cfg == nil {
+		return
+	}
+	rates := cfg.Server.RateLimit
+	if s.limiter == nil {
+		s.limiter = newRateLimiterFor("global", rates.GlobalBurst, 60)
+	} else {
+		s.limiter.configure(rates.GlobalBurst, 60)
+	}
+	if s.rateLimiters == nil {
+		s.rateLimiters = make(map[string]*rateLimiter)
+	}
+	configured := map[string]config.RateLimitRuleConfig{
+		"read":          rates.Read,
+		"write":         rates.Write,
+		"health":        rates.Health,
+		"auth_failures": rates.AuthFailures,
+	}
+	for name, rule := range configured {
+		limiter := s.rateLimiters[name]
+		if limiter == nil {
+			s.rateLimiters[name] = newRateLimiterFor(name, rule.Requests, rule.Window)
+			continue
+		}
+		limiter.configure(rule.Requests, rule.Window)
+	}
+	if s.strictTokenLimiter == nil {
+		s.strictTokenLimiter = newRateLimiterFor("strict", rates.Strict.Requests, rates.Strict.Window)
+	} else {
+		s.strictTokenLimiter.configure(rates.Strict.Requests, rates.Strict.Window)
+	}
+}
+
+func (s *Server) refreshSecurityPolicy(cfg *config.Config, reportChanges bool) {
+	if s == nil || cfg == nil {
+		return
+	}
+	nextAllowlist := make(map[string]string, len(cfg.Server.Security.Allowlist))
+	allowPrefixes := make([]netip.Prefix, 0, len(cfg.Server.Security.Allowlist))
+	for _, entry := range cfg.Server.Security.Allowlist {
+		prefix, ok := parseSecurityPrefix(entry.CIDR)
+		if !ok || overlyBroadSecurityPrefix(prefix) {
+			continue
+		}
+		cidr := prefix.String()
+		nextAllowlist[cidr] = entry.Description
+		allowPrefixes = append(allowPrefixes, prefix)
+	}
+	nextBlocked := make([]netip.Prefix, 0, len(cfg.Server.Security.BlockedIPs))
+	nextReasons := make(map[string]string, len(cfg.Server.Security.BlockedIPs))
+	for _, entry := range cfg.Server.Security.BlockedIPs {
+		prefix, ok := parseSecurityPrefix(entry.CIDR)
+		if !ok {
+			continue
+		}
+		nextBlocked = append(nextBlocked, prefix)
+		nextReasons[prefix.String()] = entry.Reason
+	}
+	s.securityPolicyMu.Lock()
+	previous := s.allowlistSnapshot
+	s.allowlist = allowPrefixes
+	s.blockedIPs = nextBlocked
+	s.blockedIPReasons = nextReasons
+	s.allowlistSnapshot = nextAllowlist
+	s.securityPolicyMu.Unlock()
+	s.abuseMu.Lock()
+	var newlyAllowlisted []string
+	for ip := range s.temporaryBlocks {
+		address, err := netip.ParseAddr(ip)
+		if err != nil {
+			continue
+		}
+		for _, prefix := range allowPrefixes {
+			if prefix.Contains(address) {
+				newlyAllowlisted = append(newlyAllowlisted, ip)
+				break
+			}
+		}
+	}
+	s.abuseMu.Unlock()
+	for _, ip := range newlyAllowlisted {
+		s.releaseTemporaryBlock(ip, "allowlisted")
+	}
+	if !reportChanges {
+		return
+	}
+	for cidr, description := range nextAllowlist {
+		if _, exists := previous[cidr]; !exists {
+			s.auditSecurityEvent("security.ip_allowlisted", "info", "success", map[string]any{"cidr": cidr, "description": description})
+		}
+	}
+	for cidr := range previous {
+		if _, exists := nextAllowlist[cidr]; !exists {
+			s.auditSecurityEvent("security.ip_allowlist_removed", "info", "success", map[string]any{"cidr": cidr})
 		}
 	}
 }
@@ -414,6 +578,14 @@ func (s *Server) setupRoutes() {
 
 	// Special files (PWA, robots, security)
 	s.router.Get("/robots.txt", s.handleRobotsTxt)
+	s.router.Get("/sitemap.xml", s.handleSitemap)
+	s.router.Get("/sitemap-{part}.xml", s.handleSitemapPart)
+	s.router.Head("/sitemap.xml", s.handleSitemap)
+	s.router.Head("/sitemap-{part}.xml", s.handleSitemapPart)
+	s.router.Get("/feed.xml", s.handleAtomFeed)
+	s.router.Head("/feed.xml", s.handleAtomFeed)
+	s.router.Get("/rss.xml", s.handleRSSFeed)
+	s.router.Head("/rss.xml", s.handleRSSFeed)
 	s.router.Get("/security.txt", s.handleSecurityTxt)
 	s.router.Get("/.well-known/security.txt", s.handleSecurityTxt)
 	s.router.Get("/.well-known/llms.txt", s.handleLLMSTxt)
@@ -475,6 +647,7 @@ func (s *Server) setupRoutes() {
 	s.router.Post("/server/preferences/token/forget", s.handleForgetOwnerToken)
 	s.router.Post("/server/preferences/token/reveal", s.handleOwnerTokenWebAction)
 	s.router.Post("/server/preferences/token/rotate", s.handleOwnerTokenWebAction)
+	s.router.Post("/server/preferences/token/revoke", s.handleRevokePrimaryOwnerTokenWeb)
 	s.router.Post("/server/preferences/tokens", s.handleCreateLinkedOwnerTokenWeb)
 	s.router.Post("/server/preferences/tokens/{id}/reveal", s.handleOwnerTokenWebAction)
 	s.router.Post("/server/preferences/tokens/{id}/rotate", s.handleOwnerTokenWebAction)
@@ -491,6 +664,7 @@ func (s *Server) setupRoutes() {
 	s.router.Get("/server/tracking.js", s.handleTrackingJS)
 	s.router.Post("/server/consent", s.handleConsent)
 	s.router.Post("/server/ccpa", s.handleCCPA)
+	s.router.Post("/announcements/dismiss", s.handleAnnouncementDismiss)
 
 	// No-JS theme switch endpoint, also used by the shared preference control.
 	s.router.Post("/server/theme", s.handleThemeSet)
@@ -507,6 +681,7 @@ func (s *Server) setupRoutes() {
 	// wrappers over the canonical versioned handlers, no logic duplication.
 	s.router.Get("/api/swagger", s.handleOpenAPIJSON)
 	s.router.Post("/api/graphql", s.handleGraphQL)
+	s.router.Get("/api/graphql", s.handleGraphQL)
 	s.router.Handle("/api/mcp", http.HandlerFunc(s.handleMCP))
 	s.router.Handle("/mcp", http.HandlerFunc(s.handleMCP))
 	s.router.Get("/api/healthz", s.handleHealthz)
@@ -525,6 +700,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/server/reports/csp", s.handleCSPReport)
 		r.Post("/server/reports/default", s.handleDefaultReport)
 		r.Post("/server/reports/nel", s.handleNELReport)
+		r.Get("/server/graphql", s.handleGraphQL)
 		r.Post("/server/graphql", s.handleGraphQL)
 		r.Handle("/server/mcp", http.HandlerFunc(s.handleMCP))
 
@@ -537,6 +713,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/server/preferences/tokens/primary", s.handleAPIPrimaryOwnerToken)
 		r.Post("/server/preferences/tokens/primary/reveal", s.handleAPIPrimaryTokenAction)
 		r.Post("/server/preferences/tokens/primary/rotate", s.handleAPIPrimaryTokenAction)
+		r.Delete("/server/preferences/tokens/primary", s.handleAPIPrimaryOwnerRevoke)
 		r.Post("/server/preferences/tokens/{id}/reveal", s.handleAPILinkedTokenAction)
 		r.Post("/server/preferences/tokens/{id}/rotate", s.handleAPILinkedTokenAction)
 		r.Patch("/server/preferences/tokens/{id}", s.handleAPILinkedTokenAction)
@@ -609,19 +786,9 @@ func (s *Server) Start() error {
 	go s.refreshTrustedProxiesLoop()
 	defer s.stopTrustedProxyRefresh()
 
-	// Once the privileged port is bound, drop from root to the configured
-	// service user/group. No-op if not running as root, and no-op on
-	// Windows (which runs as a Virtual Service Account instead).
-	user, group := "gitignore", "gitignore"
-	if s.currentConfig() != nil {
-		if s.currentConfig().Server.User != "" {
-			user = s.currentConfig().Server.User
-		}
-		if s.currentConfig().Server.Group != "" {
-			group = s.currentConfig().Server.Group
-		}
-	}
-	if err := dropPrivileges(user, group); err != nil {
+	// Once the privileged port is bound, drop from root to the fixed project
+	// service identity. No-op when not running as root.
+	if err := dropPrivileges("gitignore", "gitignore"); err != nil {
 		_ = listener.Close()
 		return fmt.Errorf("failed to drop privileges: %w", err)
 	}
@@ -760,9 +927,6 @@ func parseCookieMaxAge(s string) int {
 func (s *Server) detectServerURL(r *http.Request) string {
 	if s.isTorRequest(r) {
 		address, _ := s.torOnionAddress.Load().(string)
-		if address == "" && s.currentConfig() != nil {
-			address = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s.currentConfig().Tor.OnionAddress)), ".onion")
-		}
 		if address != "" {
 			return "http://" + address + ".onion"
 		}

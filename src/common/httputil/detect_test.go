@@ -128,6 +128,7 @@ func TestGetAPIResponseFormat(t *testing.T) {
 	}{
 		{"txt extension wins", "/api/templates/go.txt", "gitignore-cli/1.0.0", "application/json", "text"},
 		{"accept text/plain", "/api/templates/go", "", "text/plain", "text"},
+		{"explicit json beats curl detection", "/api/templates/go", "curl/8.0.0", "application/json", "json"},
 		{"curl non-interactive", "/api/templates/go", "curl/8.0.0", "", "text"},
 		{"default json", "/api/templates/go", "Mozilla/5.0 Chrome/100", "", "json"},
 		{"our cli json", "/api/templates/go", "gitignore-cli/1.0.0", "", "json"},
@@ -154,6 +155,7 @@ func TestDetectResponseFormat(t *testing.T) {
 		{"api json default", "/api/templates/go", "Mozilla/5.0", "", "application/json"},
 		{"api text via curl", "/api/templates/go", "curl/8.0.0", "", "text/plain"},
 		{"frontend accept html", "/templates/go", "curl/8.0.0", "text/html", "text/html"},
+		{"frontend accept json beats curl detection", "/templates/go", "curl/8.0.0", "application/json", "application/json"},
 		{"frontend accept plain", "/templates/go", "Mozilla/5.0", "text/plain", "text/plain"},
 		{"frontend curl no accept", "/templates/go", "curl/8.0.0", "", "text/plain"},
 		{"frontend browser default html", "/templates/go", "Mozilla/5.0 Chrome/100", "", "text/html"},

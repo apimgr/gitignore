@@ -529,47 +529,96 @@ func installLaunchdUser() error {
 // User creation (Part 4 / Part 23)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// EnsureSystemUser creates the Linux system user/group if they don't
-// already exist. No-op on other platforms (see ensureMacOSServiceUser /
-// ensureBSDServiceUser for their platform-specific equivalents).
-func EnsureSystemUser() error {
-	if runtime.GOOS != "linux" {
+// EnsureSystemUser creates the dedicated service account when root startup needs
+// one. The optional home path is the resolved data directory.
+func EnsureSystemUser(homeDirs ...string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	homeDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
+	if len(homeDirs) > 0 && strings.TrimSpace(homeDirs[0]) != "" {
+		homeDir = strings.TrimSpace(homeDirs[0])
+	}
+	if homeDir == "" {
+		_, homeDir, _, _ = apppath.GetDefaultDirs(appName)
+	}
+	switch runtime.GOOS {
+	case "linux":
+		return ensureLinuxServiceUser(homeDir)
+	case "darwin":
+		return ensureMacOSServiceUser(homeDir)
+	case "freebsd", "openbsd", "netbsd":
+		return ensureBSDServiceUser(homeDir)
+	default:
+		return nil
+	}
+}
+
+func ensureLinuxServiceUser(homeDir string) error {
+	serviceUser, userErr := user.Lookup(appName)
+	serviceGroup, groupErr := user.LookupGroup(appName)
+	if userErr == nil && groupErr == nil {
+		uid, uidErr := strconv.Atoi(serviceUser.Uid)
+		gid, gidErr := strconv.Atoi(serviceGroup.Gid)
+		userGID, userGIDErr := strconv.Atoi(serviceUser.Gid)
+		if uidErr != nil || gidErr != nil || userGIDErr != nil || uid != gid || uid != userGID {
+			return fmt.Errorf("service account %s does not use a matching UID and GID", appName)
+		}
 		return nil
 	}
 
-	// Check if user already exists
-	if err := exec.Command("id", appName).Run(); err == nil {
-		return nil // already exists
+	id := 0
+	if userErr == nil {
+		uid, uidErr := strconv.Atoi(serviceUser.Uid)
+		userGID, gidErr := strconv.Atoi(serviceUser.Gid)
+		if uidErr != nil || gidErr != nil || uid != userGID || uid <= 0 {
+			return fmt.Errorf("service account %s does not use a matching UID and GID", appName)
+		}
+		id = uid
 	}
-
-	id, err := findAvailableSystemID()
-	if err != nil {
-		return fmt.Errorf("%s: %w", serviceText("cli.service.no_available_account_id", "range", "200-899"), err)
+	if groupErr == nil {
+		gid, gidErr := strconv.Atoi(serviceGroup.Gid)
+		if gidErr != nil {
+			return fmt.Errorf("invalid service group ID for %s: %w", appName, gidErr)
+		}
+		if userErr != nil {
+			if _, lookupErr := user.LookupId(strconv.Itoa(gid)); lookupErr == nil {
+				return fmt.Errorf("service group %s has a GID that is already assigned to another user", appName)
+			}
+			id = gid
+		} else if id != gid {
+			return fmt.Errorf("service account %s does not use a matching UID and GID", appName)
+		}
 	}
-
-	// Create group
-	if err := exec.Command("groupadd",
-		"--system",
-		"--gid", strconv.Itoa(id),
-		appName,
-	).Run(); err != nil {
-		return fmt.Errorf("%s: %w", serviceText("cli.service.create_group_failed", "group", appName), err)
+	if id == 0 {
+		var err error
+		id, err = findAvailableSystemID()
+		if err != nil {
+			return fmt.Errorf("%s: %w", serviceText("cli.service.no_available_account_id", "range", "200-899"), err)
+		}
 	}
-
-	// Create user
-	configDir := fmt.Sprintf("/etc/%s/%s", orgName, appName)
-	if err := exec.Command("useradd",
-		"--system",
-		"--uid", strconv.Itoa(id),
-		"--gid", strconv.Itoa(id),
-		"--home-dir", configDir,
-		"--shell", "/sbin/nologin",
-		"--comment", appName+" service account",
-		appName,
-	).Run(); err != nil {
-		return fmt.Errorf("%s: %w", serviceText("cli.service.create_user_failed", "user", appName), err)
+	if groupErr != nil {
+		groupArgs := []string{"--system", "--gid", strconv.Itoa(id), appName}
+		groupTool := "groupadd"
+		if _, err := exec.LookPath(groupTool); err != nil {
+			groupTool = "addgroup"
+			groupArgs = []string{"-S", "-g", strconv.Itoa(id), appName}
+		}
+		if err := exec.Command(groupTool, groupArgs...).Run(); err != nil {
+			return fmt.Errorf("%s: %w", serviceText("cli.service.create_group_failed", "group", appName), err)
+		}
 	}
-
+	if userErr != nil {
+		userTool := "useradd"
+		userArgs := []string{"--system", "--uid", strconv.Itoa(id), "--gid", strconv.Itoa(id), "--home-dir", homeDir, "--no-create-home", "--shell", "/sbin/nologin", "--comment", appName + " service account", appName}
+		if _, err := exec.LookPath(userTool); err != nil {
+			userTool = "adduser"
+			userArgs = []string{"-S", "-D", "-H", "-u", strconv.Itoa(id), "-G", appName, "-h", homeDir, "-s", "/sbin/nologin", "-g", appName + " service account", appName}
+		}
+		if err := exec.Command(userTool, userArgs...).Run(); err != nil {
+			return fmt.Errorf("%s: %w", serviceText("cli.service.create_user_failed", "user", appName), err)
+		}
+	}
 	fmt.Println(serviceText("cli.service.account_created", "mark", okMark(), "account", appName, "uid", id, "gid", id))
 	return nil
 }
@@ -687,11 +736,13 @@ func findAvailableSystemID() (int, error) {
 		if reservedIDs[id] {
 			continue
 		}
-		uidTaken := exec.Command("getent", "passwd", strconv.Itoa(id)).Run() == nil
-		gidTaken := exec.Command("getent", "group", strconv.Itoa(id)).Run() == nil
-		if !uidTaken && !gidTaken {
-			return id, nil
+		if _, err := user.LookupId(strconv.Itoa(id)); err == nil {
+			continue
 		}
+		if _, err := user.LookupGroupId(strconv.Itoa(id)); err == nil {
+			continue
+		}
+		return id, nil
 	}
 	return 0, fmt.Errorf("%s", serviceText("cli.service.no_available_account_id", "range", "200-899"))
 }
@@ -754,32 +805,41 @@ func installSystemd() error {
 
 func systemdServiceContent(binaryPath string) string {
 	return fmt.Sprintf(`[Unit]
-Description=gitignore API Server
-Documentation=https://gitignore.apimgr.us
+Description=%s service
+Documentation=https://%s.github.io/%s
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=%s
-Group=%s
 ExecStart=%s
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
-RestartSec=5s
+RestartSec=5
 LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
 
-# Security hardening
+# Security hardening; the server drops privileges after binding.
 NoNewPrivileges=true
 ProtectSystem=true
-ProtectHome=read-only
+ProtectHome=yes
 PrivateTmp=true
-ReadWritePaths=/var/lib/%s/%s /var/log/%s/%s /etc/%s/%s
+# Create the writable runtime directories before applying the filesystem sandbox.
+ExecStartPre=+/usr/bin/install -d -m 0755 /etc/%s/%s /var/lib/%s/%s /var/cache/%s/%s /var/log/%s/%s /var/run/%s/%s
+ReadWritePaths=-/etc/%s/%s
+ReadWritePaths=-/var/lib/%s/%s
+ReadWritePaths=-/var/cache/%s/%s
+ReadWritePaths=-/var/log/%s/%s
+ReadWritePaths=-/var/run/%s/%s
+ReadWritePaths=-/mnt/Backups/%s/%s
+ReadWritePaths=-/usr/local/bin
 
 [Install]
 WantedBy=multi-user.target
-`, appName, appName, binaryPath,
-		orgName, appName, orgName, appName, orgName, appName)
+`, appName, orgName, appName, binaryPath,
+		orgName, appName, orgName, appName, orgName, appName, orgName, appName, orgName, appName,
+		orgName, appName, orgName, appName, orgName, appName, orgName, appName, orgName, appName, orgName, appName)
 }
 
 func uninstallSystemd() error {
@@ -1377,6 +1437,41 @@ func Stop() error {
 		return exec.Command("sc.exe", "stop", appName).Run()
 	case ServiceBSDRC:
 		return exec.Command("service", appName, "stop").Run()
+	default:
+		return fmt.Errorf("%s", serviceText("cli.service.unsupported_manager"))
+	}
+}
+
+// Disable stops the service and removes it from automatic startup while
+// leaving its service definition and application data in place.
+func Disable() error {
+	switch DetectServiceManager() {
+	case ServiceSystemd:
+		return exec.Command("systemctl", "disable", "--now", appName).Run()
+	case ServiceOpenRC:
+		_ = exec.Command("rc-service", appName, "stop").Run()
+		return exec.Command("rc-update", "del", appName, "default").Run()
+	case ServiceRunit:
+		_ = exec.Command("sv", "down", appName).Run()
+		return os.Remove(filepath.Join("/var/service", appName))
+	case ServiceS6:
+		linkPath := filepath.Join(s6ScanDirectory(), appName)
+		_ = exec.Command("s6-svc", "-d", linkPath).Run()
+		return os.Remove(linkPath)
+	case ServiceSysVinit:
+		_ = exec.Command(filepath.Join("/etc/init.d", appName), "stop").Run()
+		if hasExecutable("update-rc.d") {
+			return exec.Command("update-rc.d", "-f", appName, "remove").Run()
+		}
+		return exec.Command("chkconfig", appName, "off").Run()
+	case ServiceLaunchd:
+		return exec.Command("launchctl", "unload", launchdPlist).Run()
+	case ServiceWindows:
+		_ = exec.Command("sc.exe", "stop", appName).Run()
+		return exec.Command("sc.exe", "config", appName, "start=", "disabled").Run()
+	case ServiceBSDRC:
+		_ = exec.Command("service", appName, "stop").Run()
+		return exec.Command("sysrc", appName+"_enable=NO").Run()
 	default:
 		return fmt.Errorf("%s", serviceText("cli.service.unsupported_manager"))
 	}

@@ -176,6 +176,26 @@ document.querySelectorAll('[data-action="theme-toggle"]').forEach(function (btn)
   });
 });
 
+document.querySelectorAll('.site-banner-dismiss').forEach(function (form) {
+  form.addEventListener('submit', function (event) {
+    if (!window.fetch || !window.URLSearchParams) return;
+    event.preventDefault();
+    fetch(form.action, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(new FormData(form)).toString()
+    }).then(function (response) {
+      if (response.ok) {
+        var banner = form.closest('.site-banner');
+        if (banner) banner.remove();
+      } else {
+        form.submit();
+      }
+    }).catch(function () { form.submit(); });
+  });
+});
+
 // Clipboard is an optional enhancement; the export text remains selectable
 // when clipboard access is unavailable or JavaScript is disabled.
 document.querySelectorAll('[data-copy]').forEach(function (btn) {

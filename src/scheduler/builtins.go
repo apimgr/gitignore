@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/audit"
 	"github.com/apimgr/gitignore/src/db"
 )
 
@@ -20,7 +21,7 @@ const (
 	schedCVEUpdate       = "0 5 * * *"
 	schedUpdateCheck     = "0 6 * * *"
 	schedTokenCleanup    = "@every 15m"
-	schedLogRotation     = "0 0 * * *"
+	schedLogRotation     = "CRON_TZ=UTC 0 0 * * *"
 	schedBackupDaily     = "0 2 * * *"
 	schedBackupHourly    = "@hourly"
 	schedHealthcheckSelf = "@every 5m"
@@ -28,7 +29,8 @@ const (
 	schedDiskCheck       = "@every 5m"
 	schedSecurityCleanup = "30 3 * * *"
 	schedHealthRefresh   = "@every 60s"
-	schedPGPKeyserver    = "@every 1m"
+	schedKeyserverRetry  = "@every 15m"
+	schedIPBlockCleanup  = "@every 60s"
 )
 
 // Deps carries runtime handles and subsystem callbacks needed by built-in
@@ -36,6 +38,8 @@ const (
 // task so incomplete wiring cannot be reported as a successful run.
 type Deps struct {
 	LogsDir               string
+	AuditRetention        string
+	AuditCompress         bool
 	ConfigDir             string
 	LogRetentionDays      int
 	SecurityRetentionDays int
@@ -58,15 +62,17 @@ type Deps struct {
 	DiskCheck         HandlerFunc
 	DiskCheckInterval string
 	// TorInstalled and I2PEnabled bind their health tasks to active modes.
-	TorInstalled        bool
-	I2PEnabled          bool
-	TorHealth           HandlerFunc
-	I2PHealth           HandlerFunc
-	OwnerIdlePurgeDays  int
-	PurgeIdleOwners     HandlerFunc
-	HealthRefresh       HandlerFunc
-	PGPKeyserverPublish HandlerFunc
-	TaskState           func(id string, running bool, status string, duration time.Duration, lastRun time.Time)
+	TorInstalled            bool
+	I2PEnabled              bool
+	TorHealth               HandlerFunc
+	I2PHealth               HandlerFunc
+	OwnerIdlePurgeDays      int
+	PurgeIdleOwners         HandlerFunc
+	ContactChallengeCleanup HandlerFunc
+	HealthRefresh           HandlerFunc
+	ExpiredIPBlocks         func([]db.IPBlock)
+	PGPKeyserverPublish     HandlerFunc
+	TaskState               func(id string, running bool, status string, duration time.Duration, lastRun time.Time)
 }
 
 // RegisterBuiltins registers the mandated AI.md PART 18 tasks. Tor and I2P
@@ -103,6 +109,7 @@ func RegisterBuiltins(s *Scheduler, d Deps) error {
 		{"disk_check", "Disk Space Check", diskSchedule, true, false, requiredHandler("disk_check", d.DiskCheck)},
 		{"healthcheck_self", "Health Check", schedHealthcheckSelf, false, false, healthcheckSelfHandler},
 		{"health_registry_refresh", "Health Registry Refresh", schedHealthRefresh, true, false, healthRegistryRefreshHandler(d)},
+		{"ip_block_cleanup", "Temporary IP Block Cleanup", schedIPBlockCleanup, false, false, temporaryIPBlockCleanupHandler(d)},
 		{"security_cleanup", "Security Report Cleanup", schedSecurityCleanup, false, false, securityCleanupHandler(d)},
 	}
 	if d.TorInstalled {
@@ -127,7 +134,7 @@ func RegisterBuiltins(s *Scheduler, d Deps) error {
 			skippable          bool
 			retry              bool
 			handler            HandlerFunc
-		}{"pgp_keyserver_publish", "PGP Keyserver Publication", schedPGPKeyserver, true, false, d.PGPKeyserverPublish})
+		}{"keyserver_retry", "Keyserver Retry", schedKeyserverRetry, true, false, d.PGPKeyserverPublish})
 	}
 
 	for _, t := range tasks {
@@ -150,6 +157,31 @@ func RegisterBuiltins(s *Scheduler, d Deps) error {
 		return err
 	}
 	return nil
+}
+
+func temporaryIPBlockCleanupHandler(d Deps) HandlerFunc {
+	return func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		expired, err := db.ExpireIPBlocks(time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if d.ExpiredIPBlocks != nil {
+			d.ExpiredIPBlocks(expired)
+		}
+		for _, block := range expired {
+			if d.LogsDir == "" {
+				continue
+			}
+			entry := audit.Entry{Event: "security.ip_unblocked", Category: "security", Severity: "info", Actor: audit.Actor{Type: "system"}, Details: map[string]any{"ip": block.IP, "reason": "expired"}, Result: "success", Source: "system"}
+			if err := audit.Append(d.LogsDir, entry); err != nil {
+				log.Printf("audit event security.ip_unblocked could not be appended")
+			}
+		}
+		return nil
+	}
 }
 
 func healthRegistryRefreshHandler(d Deps) HandlerFunc {
@@ -224,6 +256,11 @@ func tokenCleanupHandler(d Deps) HandlerFunc {
 		if n > 0 {
 			log.Printf("scheduler: token_cleanup removed %d expired records", n)
 		}
+		if d.ContactChallengeCleanup != nil {
+			if err := d.ContactChallengeCleanup(ctx); err != nil {
+				return err
+			}
+		}
 		if d.OwnerIdlePurgeDays > 0 {
 			if d.PurgeIdleOwners == nil {
 				return errors.New("scheduler: owner idle purge handler is unavailable")
@@ -294,6 +331,9 @@ func logRotationHandler(d Deps) HandlerFunc {
 		if d.LogsDir == "" {
 			return ErrSkipped
 		}
+		if err := audit.Rotate(d.LogsDir, d.AuditRetention, d.AuditCompress); err != nil {
+			return err
+		}
 		entries, err := os.ReadDir(d.LogsDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -304,7 +344,7 @@ func logRotationHandler(d Deps) HandlerFunc {
 		cutoff := time.Now().Add(-time.Duration(d.LogRetentionDays) * 24 * time.Hour)
 		removed := 0
 		for _, e := range entries {
-			if e.IsDir() || !isRotatedLog(e.Name()) {
+			if e.IsDir() || strings.HasPrefix(e.Name(), "audit.log.") || !isRotatedLog(e.Name()) {
 				continue
 			}
 			info, err := e.Info()

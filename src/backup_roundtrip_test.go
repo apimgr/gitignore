@@ -1,12 +1,143 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
 )
+
+func TestExtractToStagingEnforcesRestoreLimits(t *testing.T) {
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	tarWriter := tar.NewWriter(gz)
+	payload := bytes.Repeat([]byte("x"), 4096)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "payload.bin", Mode: 0o600, Size: int64(len(payload))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "second.bin", Mode: 0o600, Size: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defaults := config.DefaultConfig().Server.Restore
+	if staging, err := extractToStagingWithLimits(archive.Bytes(), defaults); err == nil {
+		_ = os.RemoveAll(staging)
+	} else {
+		t.Fatalf("valid archive rejected: %v", err)
+	}
+	for name, limits := range map[string]config.RestoreConfig{
+		"archive":       {MaxArchiveSize: "1", MaxExpandedSize: "4G", MaxFiles: 100, MaxFileSize: "512M", MaxRatio: 100},
+		"file count":    {MaxArchiveSize: "1G", MaxExpandedSize: "4G", MaxFiles: 1, MaxFileSize: "512M", MaxRatio: 100},
+		"file size":     {MaxArchiveSize: "1G", MaxExpandedSize: "4G", MaxFiles: 100, MaxFileSize: "1", MaxRatio: 100},
+		"expanded size": {MaxArchiveSize: "1G", MaxExpandedSize: "1", MaxFiles: 100, MaxFileSize: "512M", MaxRatio: 100},
+		"ratio":         {MaxArchiveSize: "1G", MaxExpandedSize: "4G", MaxFiles: 100, MaxFileSize: "512M", MaxRatio: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if staging, err := extractToStagingWithLimits(archive.Bytes(), limits); err == nil {
+				_ = os.RemoveAll(staging)
+				t.Fatal("archive exceeded configured limit without error")
+			}
+		})
+	}
+}
+
+func TestLoadAndVerifyManifestRejectsUnsafeContents(t *testing.T) {
+	staging := t.TempDir()
+	manifest, err := json.Marshal(backupManifest{Contents: []string{"../../outside"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "manifest.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadAndVerifyManifest(staging); err == nil {
+		t.Fatal("unsafe manifest contents path was accepted")
+	}
+}
+
+func TestVerifyIncrementalBackupRequiresValidBase(t *testing.T) {
+	dir := t.TempDir()
+	baseBytes, err := buildBackupArchiveAt(nil, false, time.Unix(1, 0), "full", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	basePath := filepath.Join(dir, "gitignore_backup_2026-01-01.tar.gz")
+	checksum := func(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
+	writeIncremental := func(baseHash string) string {
+		data, err := buildBackupArchiveAt(nil, false, time.Unix(2, 0), "incremental", filepath.Base(basePath), baseHash, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "gitignore-daily.tar.gz")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	incremental := writeIncremental(checksum(baseBytes))
+	if err := verifyBackupFile(incremental, ""); err == nil || !strings.Contains(err.Error(), "ERR_BASE_MISSING") {
+		t.Fatalf("missing base error = %v", err)
+	}
+	if err := os.WriteFile(basePath, []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupFile(incremental, ""); err == nil || !strings.Contains(err.Error(), "ERR_BASE_CORRUPT") {
+		t.Fatalf("corrupt base error = %v", err)
+	}
+	if err := os.WriteFile(basePath, baseBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupFile(incremental, ""); err != nil {
+		t.Fatalf("valid base rejected: %v", err)
+	}
+}
+
+func TestRunRestoreHonorsMaintenanceDropInLimits(t *testing.T) {
+	configDir, dataDir, backupDir := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configDir, "yaml.d"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "yaml.d", "maintenance.yml"), []byte("server:\n  restore:\n    max_archive_size: '1'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := buildBackupArchiveAt(nil, false, time.Now().UTC(), "full", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(backupDir, "backup.tar.gz")
+	if err := os.WriteFile(backupPath, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRestore(backupPath, configDir, dataDir); err == nil || !strings.Contains(err.Error(), "max_archive_size") {
+		t.Fatalf("restore with drop-in archive limit error = %v", err)
+	}
+}
+
+func TestParseRestoreSize(t *testing.T) {
+	for input, want := range map[string]int64{"1": 1, "1K": 1 << 10, "2MB": 2 << 20, "3GiB": 3 << 30, "bad": 99, "0": 99} {
+		if got := parseRestoreSize(input, 99); got != want {
+			t.Errorf("parseRestoreSize(%q) = %d, want %d", input, got, want)
+		}
+	}
+}
 
 // runBackup followed by runRestore exercises the full unencrypted
 // backup/restore cycle end to end, over tmp-only paths (configDir, dataDir,
@@ -21,13 +152,11 @@ func TestRunBackupRunRestoreRoundtrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "secrets.yml"), []byte("server:\n  token: test-token\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile secrets.yml: %v", err)
 	}
-	dbDir := filepath.Join(dataDir, "db")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll db dir: %v", err)
+	t.Setenv("DATABASE_DIR", "")
+	if err := db.Init(dataDir); err != nil {
+		t.Fatalf("db.Init: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dbDir, "server.db"), []byte("fake-sqlite-contents"), 0o644); err != nil {
-		t.Fatalf("WriteFile server.db: %v", err)
-	}
+	t.Cleanup(func() { _ = db.Close() })
 
 	backupFile := filepath.Join(t.TempDir(), "backup.tar.gz")
 	cfg := &config.Config{}
@@ -70,8 +199,8 @@ func TestRunBackupRunRestoreRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile restored server.db: %v", err)
 	}
-	if string(gotDB) != "fake-sqlite-contents" {
-		t.Errorf("restored server.db = %q, want original contents", gotDB)
+	if len(gotDB) < 16 || string(gotDB[:16]) != "SQLite format 3\x00" {
+		t.Errorf("restored server.db is not a valid SQLite database")
 	}
 }
 
@@ -81,13 +210,11 @@ func TestRunBackupUsesConfiguredEncryptionPassword(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "server.yml"), []byte("server: {}\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile server.yml: %v", err)
 	}
-	dbDir := filepath.Join(dataDir, "db")
-	if err := os.MkdirAll(dbDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll db dir: %v", err)
+	t.Setenv("DATABASE_DIR", "")
+	if err := db.Init(dataDir); err != nil {
+		t.Fatalf("db.Init: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dbDir, "server.db"), []byte("backup contents"), 0o600); err != nil {
-		t.Fatalf("WriteFile server.db: %v", err)
-	}
+	t.Cleanup(func() { _ = db.Close() })
 
 	password := "configured backup password"
 	cfg := config.DefaultConfig()
@@ -127,6 +254,62 @@ func TestRunBackupBlocksComplianceWithoutConfiguredPassword(t *testing.T) {
 	}
 	if _, statErr := os.Stat(backupPath); !os.IsNotExist(statErr) {
 		t.Fatalf("backup file exists after rejected backup: %v", statErr)
+	}
+}
+
+func TestScheduledIncrementalBackupRestoresChangesAndDeletions(t *testing.T) {
+	configDir, dataDir, backupDir := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "server.yml"), []byte("server:\n  port: 8080\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(configDir, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deletedPath := filepath.Join(configDir, "assets", "old.txt")
+	if err := os.WriteFile(deletedPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DATABASE_DIR", "")
+	if err := db.Init(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	cfg := config.DefaultConfig()
+	first := time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)
+	if err := runScheduledBackup(cfg, configDir, dataDir, backupDir, "daily", first); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "server.yml"), []byte("server:\n  port: 9090\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "assets", "new.txt"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := first.Add(24 * time.Hour)
+	if err := runScheduledBackup(cfg, configDir, dataDir, backupDir, "daily", second); err != nil {
+		t.Fatal(err)
+	}
+	incremental := filepath.Join(backupDir, projectName+"-daily.tar.gz")
+	restoreConfig, restoreData := t.TempDir(), t.TempDir()
+	if err := runRestore(incremental, restoreConfig, restoreData); err != nil {
+		t.Fatal(err)
+	}
+	server, err := os.ReadFile(filepath.Join(restoreConfig, "server.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(server) != "server:\n  port: 9090\n" {
+		t.Fatalf("restored server.yml = %q", server)
+	}
+	if _, err := os.Stat(filepath.Join(restoreConfig, "assets", "old.txt")); !os.IsNotExist(err) {
+		t.Fatalf("deleted file remains after restore: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(restoreConfig, "assets", "new.txt"))
+	if err != nil || string(contents) != "new" {
+		t.Fatalf("new file = %q, %v", contents, err)
 	}
 }
 

@@ -100,7 +100,7 @@ func TestPreferenceSaveCodeOverridesSubmittedValues(t *testing.T) {
 func TestPreferenceResetExpiresOnlySitePreferences(t *testing.T) {
 	s := newTestPageServer()
 	req := httptest.NewRequest(http.MethodPost, "/server/preferences", nil)
-	for _, name := range []string{"theme", "lang", "cookie_consent", "ccpa_opt_out", "gitignore_build", preferencePrefix + "sort", "csrf_token", "owner_token"} {
+	for _, name := range []string{"theme", "lang", "cookie_consent", "ccpa_opt_out", "gitignore_build", dismissedAnnouncementsCookie, preferencePrefix + "sort", "csrf_token", "owner_token"} {
 		req.AddCookie(&http.Cookie{Name: name, Value: "present"})
 	}
 	recorder := httptest.NewRecorder()
@@ -115,7 +115,7 @@ func TestPreferenceResetExpiresOnlySitePreferences(t *testing.T) {
 		}
 		seen[cookie.Name] = true
 	}
-	for _, name := range []string{"theme", "lang", "cookie_consent", "ccpa_opt_out", "gitignore_build", preferencePrefix + "sort"} {
+	for _, name := range []string{"theme", "lang", "cookie_consent", "ccpa_opt_out", "gitignore_build", dismissedAnnouncementsCookie, preferencePrefix + "sort"} {
 		if !seen[name] {
 			t.Errorf("reset did not expire %q", name)
 		}

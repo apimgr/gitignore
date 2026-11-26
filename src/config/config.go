@@ -46,18 +46,9 @@ func configText(key string, values ...interface{}) string {
 
 // Config represents the complete server configuration
 type Config struct {
-	Server      ServerConfig      `yaml:"server"`
-	Tor         TorIdentityConfig `yaml:"tor"`
-	Web         WebConfig         `yaml:"web"`
-	WebRobots   WebRobotsConfig   `yaml:"web_robots"`
-	WebSecurity WebSecurityConfig `yaml:"web_security"`
-	Data        DataConfig        `yaml:"data"`
-}
-
-// TorIdentityConfig contains public identity used to detect and render onion requests.
-type TorIdentityConfig struct {
-	OnionAddress string `yaml:"onion_address"`
-	ContactEmail string `yaml:"contact_email"`
+	Server ServerConfig `yaml:"server"`
+	Web    WebConfig    `yaml:"web"`
+	Data   DataConfig   `yaml:"data"`
 }
 
 // ServerConfig contains server-related settings
@@ -70,8 +61,6 @@ type ServerConfig struct {
 	APIVersion     string               `yaml:"api_version"`
 	Daemonize      bool                 `yaml:"daemonize"`
 	Mode           string               `yaml:"mode"`
-	User           string               `yaml:"user"`
-	Group          string               `yaml:"group"`
 	PIDFile        bool                 `yaml:"pidfile"`
 	Branding       BrandingConfig       `yaml:"branding"`
 	SEO            SEOConfig            `yaml:"seo"`
@@ -87,6 +76,7 @@ type ServerConfig struct {
 	Logging        LoggingConfig        `yaml:"logs"`
 	Maintenance    MaintenanceConfig    `yaml:"maintenance"`
 	Backup         BackupConfig         `yaml:"backup"`
+	Restore        RestoreConfig        `yaml:"restore"`
 	I18n           I18nConfig           `yaml:"i18n"`
 	Tor            TorConfig            `yaml:"tor"`
 	I2P            I2PConfig            `yaml:"i2p"`
@@ -219,8 +209,9 @@ type PrivacyConsentConfig struct {
 	Message               string `yaml:"message"`
 	MessageIfSold         string `yaml:"message_if_sold"`
 	Policy                struct {
-		Text string `yaml:"text"`
-		URL  string `yaml:"url"`
+		Text    string `yaml:"text"`
+		URL     string `yaml:"url"`
+		Version string `yaml:"version"`
 	} `yaml:"policy"`
 	Buttons struct {
 		Decline string `yaml:"decline"`
@@ -318,11 +309,24 @@ type TrackingConfig struct {
 // ServerSecurityConfig contains cryptographic material required for encrypted
 // security-report storage.
 type ServerSecurityConfig struct {
-	EncryptionKey string                `yaml:"encryption_key"`
-	Reports       SecurityReportsConfig `yaml:"reports"`
-	Blocklists    BlocklistsConfig      `yaml:"blocklists"`
-	Allowlist     []AllowlistEntry      `yaml:"allowlist"`
-	BlockedIPs    []BlockedIPEntry      `yaml:"blocked_ips"`
+	EncryptionKey  string                `yaml:"encryption_key"`
+	Reports        SecurityReportsConfig `yaml:"reports"`
+	Blocklists     BlocklistsConfig      `yaml:"blocklists"`
+	AbuseDetection AbuseDetectionConfig  `yaml:"abuse_detection"`
+	Allowlist      []AllowlistEntry      `yaml:"allowlist"`
+	BlockedIPs     []BlockedIPEntry      `yaml:"blocked_ips"`
+}
+
+type AbuseDetectionConfig struct {
+	RequestFlood AbuseRequestFloodConfig `yaml:"request_flood"`
+	AutoBlockIP  bool                    `yaml:"auto_block_ip"`
+	AutoAlert    bool                    `yaml:"auto_alert"`
+}
+
+type AbuseRequestFloodConfig struct {
+	Multiplier    int    `yaml:"multiplier"`
+	Window        string `yaml:"window"`
+	BlockDuration string `yaml:"block_duration"`
 }
 
 type AllowlistEntry struct {
@@ -567,6 +571,8 @@ func ApplySMTPEnv(cfg *Config) {
 // config-driven: an external "tor" binary is launched only when found and the
 // server never fails to start if Tor is unavailable.
 type TorConfig struct {
+	Expose       bool   `yaml:"expose" json:"expose"`
+	ContactEmail string `yaml:"contact_email" json:"contact_email"`
 	// Binary is the path to the external tor executable. Empty means
 	// auto-detect from PATH and common install locations.
 	Binary string `yaml:"binary" json:"binary"`
@@ -604,6 +610,8 @@ type TorConfig struct {
 // DefaultTorConfig returns the AI.md PART 31 default Tor settings.
 func DefaultTorConfig() TorConfig {
 	return TorConfig{
+		Expose:                    false,
+		ContactEmail:              "",
 		Binary:                    "",
 		UseNetwork:                false,
 		MaxCircuits:               32,
@@ -678,7 +686,19 @@ type OperatorPageContent struct {
 
 // SEOConfig contains SEO-related settings
 type SEOConfig struct {
-	Keywords []string `yaml:"keywords"`
+	Keywords []string         `yaml:"keywords"`
+	Sitemap  SitemapSEOConfig `yaml:"sitemap"`
+	Feed     FeedSEOConfig    `yaml:"feed"`
+}
+
+type SitemapSEOConfig struct {
+	MaxURLs       int  `yaml:"max_urls"`
+	IncludeImages bool `yaml:"include_images"`
+}
+
+type FeedSEOConfig struct {
+	MaxItems int    `yaml:"max_items"`
+	Title    string `yaml:"title"`
 }
 
 // AdminConfig contains admin panel settings (NOT credentials — those live in the database)
@@ -722,11 +742,19 @@ type ScheduleConfig struct {
 	CatchUpWindow string `yaml:"catch_up_window"`
 }
 
-// RateLimitConfig contains rate limiting settings
+// RateLimitConfig contains the always-on endpoint and global rate budgets.
 type RateLimitConfig struct {
-	Enabled  bool `yaml:"enabled"`
-	Requests int  `yaml:"requests"`
-	Window   int  `yaml:"window"`
+	Read         RateLimitRuleConfig `yaml:"read"`
+	Write        RateLimitRuleConfig `yaml:"write"`
+	Health       RateLimitRuleConfig `yaml:"health"`
+	Strict       RateLimitRuleConfig `yaml:"strict"`
+	AuthFailures RateLimitRuleConfig `yaml:"auth_failures"`
+	GlobalBurst  int                 `yaml:"global_burst"`
+}
+
+type RateLimitRuleConfig struct {
+	Requests int `yaml:"requests"`
+	Window   int `yaml:"window"`
 }
 
 // MetricsConfig controls the internal metrics services (AI.md PART 20).
@@ -775,15 +803,34 @@ type TrustedProxiesConfig struct {
 
 // DatabaseConfig contains database connection settings
 type DatabaseConfig struct {
-	Driver   string `yaml:"driver"`
-	URL      string `yaml:"url,omitempty"`
-	Token    string `yaml:"token,omitempty"`
-	Host     string `yaml:"host,omitempty"`
-	Port     int    `yaml:"port,omitempty"`
-	Name     string `yaml:"name,omitempty"`
-	Username string `yaml:"username,omitempty"`
-	Password string `yaml:"password,omitempty"`
-	SSLMode  string `yaml:"sslmode,omitempty"`
+	Driver   string              `yaml:"driver"`
+	URL      string              `yaml:"url,omitempty"`
+	Token    string              `yaml:"token,omitempty"`
+	Pool     DatabasePoolConfig  `yaml:"pool"`
+	Cache    DatabaseCacheConfig `yaml:"cache"`
+	Host     string              `yaml:"host,omitempty"`
+	Port     int                 `yaml:"port,omitempty"`
+	Name     string              `yaml:"name,omitempty"`
+	Username string              `yaml:"username,omitempty"`
+	Password string              `yaml:"password,omitempty"`
+	SSLMode  string              `yaml:"sslmode,omitempty"`
+}
+
+// DatabaseCacheConfig controls the optional local SQLite replica of libSQL.
+type DatabaseCacheConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Path         string `yaml:"path,omitempty"`
+	SyncInterval string `yaml:"sync_interval"`
+	OfflineMode  bool   `yaml:"offline_mode"`
+	MaxAge       string `yaml:"max_age"`
+}
+
+// DatabasePoolConfig controls open database connections.
+type DatabasePoolConfig struct {
+	MaxOpen     int    `yaml:"max_open"`
+	MaxIdle     int    `yaml:"max_idle"`
+	MaxLifetime string `yaml:"max_lifetime"`
+	MaxIdleTime string `yaml:"max_idle_time"`
 }
 
 // CacheConfig describes the optional in-process or remote Valkey/Redis cache.
@@ -883,6 +930,24 @@ type NotifyConfig struct {
 type BackupConfig struct {
 	Encryption         BackupEncryptionConfig `yaml:"encryption"`
 	EncryptionPassword string                 `yaml:"encryption_password"`
+	Retention          BackupRetentionConfig  `yaml:"retention"`
+}
+
+type RestoreConfig struct {
+	MaxArchiveSize  string `yaml:"max_archive_size"`
+	MaxExpandedSize string `yaml:"max_expanded_size"`
+	MaxFiles        int    `yaml:"max_files"`
+	MaxFileSize     string `yaml:"max_file_size"`
+	MaxRatio        int    `yaml:"max_ratio"`
+}
+
+// BackupRetentionConfig controls historical full and incremental backups.
+type BackupRetentionConfig struct {
+	MaxBackups   int    `yaml:"max_backups"`
+	KeepWeekly   int    `yaml:"keep_weekly"`
+	KeepMonthly  int    `yaml:"keep_monthly"`
+	KeepYearly   int    `yaml:"keep_yearly"`
+	MaxTotalSize string `yaml:"max_total_size"`
 }
 
 // BackupEncryptionConfig controls whether backup encryption is configured.
@@ -892,12 +957,29 @@ type BackupEncryptionConfig struct {
 
 // WebConfig contains frontend/web settings
 type WebConfig struct {
-	UI         WebUIConfig       `yaml:"ui"`
-	Reports    WebReportsConfig  `yaml:"reports"`
-	CORS       string            `yaml:"cors"`
-	Security   WebSecurityConfig `yaml:"security"`
-	APIContact string            `yaml:"api_contact"`
-	LLMS       LLMSConfig        `yaml:"llms"`
+	UI            WebUIConfig            `yaml:"ui"`
+	Robots        WebRobotsConfig        `yaml:"robots"`
+	Reports       WebReportsConfig       `yaml:"reports"`
+	Announcements WebAnnouncementsConfig `yaml:"announcements"`
+	CORS          string                 `yaml:"cors"`
+	Security      WebSecurityConfig      `yaml:"security"`
+	APIContact    string                 `yaml:"api_contact"`
+	LLMS          LLMSConfig             `yaml:"llms"`
+}
+
+type WebAnnouncementsConfig struct {
+	Enabled  bool                    `yaml:"enabled"`
+	Messages []WebAnnouncementConfig `yaml:"messages"`
+}
+
+type WebAnnouncementConfig struct {
+	ID          string `yaml:"id"`
+	Type        string `yaml:"type"`
+	Title       string `yaml:"title"`
+	Message     string `yaml:"message"`
+	Start       string `yaml:"start"`
+	End         string `yaml:"end"`
+	Dismissible bool   `yaml:"dismissible"`
 }
 
 // WebReportsConfig limits public browser reporting endpoints.
@@ -967,8 +1049,6 @@ func DefaultConfig() *Config {
 			APIVersion: "v1",
 			Daemonize:  false,
 			Mode:       "production",
-			User:       "gitignore",
-			Group:      "gitignore",
 			PIDFile:    true,
 			Update: UpdateConfig{
 				Branch:      "stable",
@@ -983,6 +1063,8 @@ func DefaultConfig() *Config {
 			Privacy: DefaultPrivacyConfig(),
 			SEO: SEOConfig{
 				Keywords: []string{},
+				Sitemap:  SitemapSEOConfig{MaxURLs: 50000},
+				Feed:     FeedSEOConfig{MaxItems: 50},
 			},
 			Admin: AdminConfig{
 				Email: "",
@@ -1005,9 +1087,12 @@ func DefaultConfig() *Config {
 				CatchUpWindow: "1h",
 			},
 			RateLimit: RateLimitConfig{
-				Enabled:  true,
-				Requests: 120,
-				Window:   60,
+				Read:         RateLimitRuleConfig{Requests: 120, Window: 60},
+				Write:        RateLimitRuleConfig{Requests: 10, Window: 60},
+				Health:       RateLimitRuleConfig{Requests: 120, Window: 60},
+				Strict:       RateLimitRuleConfig{Requests: 10, Window: 900},
+				AuthFailures: RateLimitRuleConfig{Requests: 5, Window: 900},
+				GlobalBurst:  240,
 			},
 			Metrics: MetricsConfig{
 				Enabled:         true,
@@ -1026,6 +1111,8 @@ func DefaultConfig() *Config {
 			CORS: CORSConfig{AllowedOrigins: []string{"*"}, AllowCredentials: true, MaxAge: 86400},
 			Database: DatabaseConfig{
 				Driver: "sqlite",
+				Pool:   DatabasePoolConfig{MaxOpen: 25, MaxIdle: 5, MaxLifetime: "5m", MaxIdleTime: "1m"},
+				Cache:  DatabaseCacheConfig{Enabled: false, SyncInterval: "30s", OfflineMode: true, MaxAge: "1h"},
 			},
 			Cache: CacheConfig{
 				Type: "memory", Host: "localhost", Port: 6379, TLSSkipVerify: true,
@@ -1066,7 +1153,9 @@ func DefaultConfig() *Config {
 					Enabled: false,
 				},
 				EncryptionPassword: "",
+				Retention:          BackupRetentionConfig{MaxBackups: 1, MaxTotalSize: "10%"},
 			},
+			Restore:    RestoreConfig{MaxArchiveSize: "1G", MaxExpandedSize: "4G", MaxFiles: 10000, MaxFileSize: "512M", MaxRatio: 100},
 			Compliance: ComplianceConfig{Enabled: false},
 			I18n: I18nConfig{
 				Enabled:            true,
@@ -1084,6 +1173,10 @@ func DefaultConfig() *Config {
 			Security: ServerSecurityConfig{
 				Reports:    SecurityReportsConfig{RetentionDays: 365},
 				Blocklists: BlocklistsConfig{Enabled: true, ExtraSources: []BlocklistSourceConfig{}},
+				AbuseDetection: AbuseDetectionConfig{
+					RequestFlood: AbuseRequestFloodConfig{Multiplier: 10, Window: "60s", BlockDuration: "1h"},
+					AutoBlockIP:  true, AutoAlert: true,
+				},
 			},
 			Pages: PagesConfig{
 				Contact: ContactPageConfig{
@@ -1098,6 +1191,8 @@ func DefaultConfig() *Config {
 			},
 		},
 		Web: WebConfig{
+			Announcements: WebAnnouncementsConfig{Enabled: true, Messages: []WebAnnouncementConfig{}},
+			Robots:        WebRobotsConfig{Allow: []string{"/", "/api"}, Deny: []string{"/debug"}},
 			UI: WebUIConfig{
 				Theme: "dark",
 			},
@@ -1108,17 +1203,11 @@ func DefaultConfig() *Config {
 			CORS: "*",
 			LLMS: LLMSConfig{IncludeEndpoints: true},
 			Security: WebSecurityConfig{
+				Admin:         "",
+				CORS:          "*",
 				PublishPGPKey: true,
 				Keyservers:    []string{},
 			},
-		},
-		WebRobots: WebRobotsConfig{
-			Allow: []string{"/", "/api"},
-			Deny:  []string{"/debug"},
-		},
-		WebSecurity: WebSecurityConfig{
-			Admin: "",
-			CORS:  "*",
 		},
 		Data: DataConfig{
 			SecurityDir: "{data_dir}/security",
@@ -1168,6 +1257,8 @@ func Load(path string) (*Config, error) {
 			return nil, err
 		}
 		validateBackupConfig(cfg)
+		validateRestoreConfig(cfg)
+		validateAbuseDetectionConfig(cfg)
 		warnIgnoredConnectionEnvironment(cfg)
 		applyConnectionURLTypes(cfg)
 		if err := applyI2PEnvironment(cfg); err != nil {
@@ -1222,6 +1313,8 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	validateBackupConfig(cfg)
+	validateRestoreConfig(cfg)
+	validateAbuseDetectionConfig(cfg)
 	warnIgnoredConnectionEnvironment(cfg)
 	applyConnectionURLTypes(cfg)
 	if err := applyI2PEnvironment(cfg); err != nil {
@@ -1278,6 +1371,123 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// StartupSettings contains the four non-secret values needed before normal
+// configuration loading during startup.
+type StartupSettings struct {
+	Port      string
+	Address   string
+	Daemonize bool
+	PIDFile   bool
+}
+
+// PeekStartupSettings reads only server.port, server.address,
+// server.daemonize, and server.pidfile from server.yml and ordered drop-ins.
+// It is read-only and ignores files that cannot be parsed; Load reports those
+// errors during the full configuration pass.
+func PeekStartupSettings(path string) StartupSettings {
+	defaults := DefaultConfig().Server
+	settings := StartupSettings{Port: defaults.Port, Address: defaults.Address, Daemonize: defaults.Daemonize, PIDFile: defaults.PIDFile}
+	paths := []string{path}
+	dir := filepath.Join(filepath.Dir(path), "yaml.d")
+	if entries, err := os.ReadDir(dir); err == nil {
+		var dropins []string
+		for _, entry := range entries {
+			if entry.IsDir() || ignoredDropinName(entry.Name()) || !isYAMLDropin(entry.Name()) {
+				continue
+			}
+			filePath := filepath.Join(dir, entry.Name())
+			if entry.Type()&os.ModeSymlink != 0 {
+				resolved, err := filepath.EvalSymlinks(filePath)
+				if err != nil || !pathWithinDirectory(dir, resolved) {
+					continue
+				}
+				filePath = resolved
+			}
+			info, err := os.Stat(filePath)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			dropins = append(dropins, filePath)
+		}
+		sort.Strings(dropins)
+		paths = append(paths, dropins...)
+	}
+	for _, filePath := range paths {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+		var document yaml.Node
+		if yaml.Unmarshal(data, &document) != nil || len(document.Content) == 0 {
+			continue
+		}
+		root := document.Content[0]
+		for i := 0; i+1 < len(root.Content); i += 2 {
+			if root.Content[i].Value != "server" || root.Content[i+1].Kind != yaml.MappingNode {
+				continue
+			}
+			server := root.Content[i+1]
+			for j := 0; j+1 < len(server.Content); j += 2 {
+				key, value := server.Content[j].Value, server.Content[j+1]
+				occurrences := 0
+				for k := 0; k+1 < len(server.Content); k += 2 {
+					if server.Content[k].Value == key {
+						occurrences++
+					}
+				}
+				if occurrences != 1 || value.Kind != yaml.ScalarNode || value.Tag == "!!null" {
+					resetStartupSetting(&settings, defaults, key)
+					continue
+				}
+				switch key {
+				case "port":
+					var parsed string
+					if value.Decode(&parsed) == nil {
+						settings.Port = parsed
+					} else {
+						settings.Port = defaults.Port
+					}
+				case "address":
+					var parsed string
+					if value.Decode(&parsed) == nil {
+						settings.Address = parsed
+					} else {
+						settings.Address = defaults.Address
+					}
+				case "daemonize":
+					var parsed bool
+					if value.Decode(&parsed) == nil {
+						settings.Daemonize = parsed
+					} else {
+						settings.Daemonize = defaults.Daemonize
+					}
+				case "pidfile":
+					var parsed bool
+					if value.Decode(&parsed) == nil {
+						settings.PIDFile = parsed
+					} else {
+						settings.PIDFile = defaults.PIDFile
+					}
+				}
+			}
+		}
+	}
+	return settings
+}
+
+func resetStartupSetting(settings *StartupSettings, defaults ServerConfig, key string) {
+	switch key {
+	case "port":
+		settings.Port = defaults.Port
+	case "address":
+		settings.Address = defaults.Address
+	case "daemonize":
+		settings.Daemonize = defaults.Daemonize
+	case "pidfile":
+		settings.PIDFile = defaults.PIDFile
+	}
+}
+
 func migrateLegacyServerConfig(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -1297,6 +1507,8 @@ func migrateLegacyServerConfig(path string) error {
 	if server == nil || server.Kind != yaml.MappingNode {
 		return nil
 	}
+	removedIdentity := removeConfigMapping(server, "user") != nil
+	removedIdentity = removeConfigMapping(server, "group") != nil || removedIdentity
 	if legacySchedule := mappingValue(server, "schedule"); legacySchedule != nil && legacySchedule.Kind == yaml.MappingNode {
 		for index := len(legacySchedule.Content) - 2; index >= 0; index -= 2 {
 			key := legacySchedule.Content[index].Value
@@ -1305,7 +1517,7 @@ func migrateLegacyServerConfig(path string) error {
 			}
 		}
 	}
-	changed := moveConfigMapping(server, "schedule", "scheduler")
+	changed := removedIdentity || moveConfigMapping(server, "schedule", "scheduler")
 	changed = moveConfigMapping(server, "logging", "logs") || changed
 	if scheduler := mappingValue(server, "scheduler"); scheduler != nil && scheduler.Kind == yaml.MappingNode {
 		if removeConfigMapping(scheduler, "enabled") != nil {
@@ -1977,11 +2189,61 @@ func applyYAMLConfigFile(path string, data []byte, current *Config) error {
 	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
 		return fmt.Errorf("%s", configText("cli.config.document_mapping_required"))
 	}
+	root := document.Content[0]
+	migrateLegacyRateLimitConfig(path, root)
+	web := mappingValue(root, "web")
+	if web == nil {
+		web = ensureConfigMapping(root, "web")
+	}
+	if web.Kind == yaml.MappingNode {
+		for legacyKey, canonicalKey := range map[string]string{"web_robots": "robots", "web_security": "security"} {
+			if legacy := removeConfigMapping(root, legacyKey); legacy != nil {
+				if nested := mappingValue(web, canonicalKey); nested == nil {
+					web.Content = append(web.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: canonicalKey}, legacy)
+				} else {
+					mergeConfigNodeMissing(nested, legacy)
+				}
+			}
+		}
+	}
 	defaults := reflect.ValueOf(DefaultConfig()).Elem()
 	target := reflect.ValueOf(current).Elem()
-	applyConfigMapping(path, document.Content[0], target, defaults, "")
+	applyConfigMapping(path, root, target, defaults, "")
 	lastGoodConfigYAML[configFileCacheKey(path)] = append([]byte(nil), data...)
 	return nil
+}
+
+func migrateLegacyRateLimitConfig(path string, root *yaml.Node) {
+	server := mappingValue(root, "server")
+	limits := mappingValue(server, "rate_limit")
+	if limits == nil || limits.Kind != yaml.MappingNode {
+		return
+	}
+	if enabled := removeConfigMapping(limits, "enabled"); enabled != nil {
+		fmt.Fprintln(os.Stderr, configText("cli.config.unknown_key_error", "file", filepath.Base(path), "line", enabled.Line, "key", "server.rate_limit.enabled"))
+	}
+	requests := removeConfigMapping(limits, "requests")
+	window := removeConfigMapping(limits, "window")
+	if requests == nil && window == nil {
+		return
+	}
+	for _, ruleName := range []string{"read", "write", "health"} {
+		rule := mappingValue(limits, ruleName)
+		if rule == nil {
+			rule = ensureConfigMapping(limits, ruleName)
+		}
+		if rule.Kind != yaml.MappingNode {
+			continue
+		}
+		if requests != nil && mappingValue(rule, "requests") == nil {
+			value := *requests
+			rule.Content = append(rule.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "requests"}, &value)
+		}
+		if window != nil && mappingValue(rule, "window") == nil {
+			value := *window
+			rule.Content = append(rule.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "window"}, &value)
+		}
+	}
 }
 
 func applyConfigMapping(path string, node *yaml.Node, target, defaults reflect.Value, prefix string) {
@@ -1995,8 +2257,16 @@ func applyConfigMapping(path string, node *yaml.Node, target, defaults reflect.V
 			continue
 		}
 		key := keyNode.Value
+		if filepath.Base(path) == "secrets.yml" && ((prefix == "server" && key == "token") || (prefix == "server.security" && key == "encryption_key_version")) {
+			continue
+		}
 		fieldIndex := configFieldIndex(target.Type(), key)
 		if fieldIndex < 0 {
+			fieldPath := key
+			if prefix != "" {
+				fieldPath = prefix + "." + key
+			}
+			fmt.Fprintln(os.Stderr, configText("cli.config.unknown_key_error", "file", filepath.Base(path), "line", valueNode.Line, "key", fieldPath))
 			continue
 		}
 		field := target.Field(fieldIndex)
@@ -2310,7 +2580,7 @@ func persistChangedConfigAreas(previous, current *Config, path string) error {
 	if !reflect.DeepEqual(previous.Server.Branding, current.Server.Branding) || !reflect.DeepEqual(previous.Server.SEO, current.Server.SEO) || !reflect.DeepEqual(previous.Web.UI, current.Web.UI) {
 		areas = append(areas, "branding")
 	}
-	if !reflect.DeepEqual(previous.Web, current.Web) || !reflect.DeepEqual(previous.WebSecurity, current.WebSecurity) || !reflect.DeepEqual(previous.WebRobots, current.WebRobots) || !reflect.DeepEqual(previous.Server.Healthz, current.Server.Healthz) || !reflect.DeepEqual(previous.Server.I18n, current.Server.I18n) {
+	if !reflect.DeepEqual(previous.Web, current.Web) || !reflect.DeepEqual(previous.Server.Healthz, current.Server.Healthz) || !reflect.DeepEqual(previous.Server.I18n, current.Server.I18n) {
 		areas = append(areas, "web")
 	}
 	if !reflect.DeepEqual(previous.Server.Pages, current.Server.Pages) {
@@ -2357,7 +2627,7 @@ func writeConfigArea(configPath, area string, cfg *Config) error {
 	case "branding":
 		value = map[string]interface{}{"server": map[string]interface{}{"branding": cfg.Server.Branding, "seo": cfg.Server.SEO}, "web": map[string]interface{}{"ui": cfg.Web.UI}}
 	case "web":
-		value = map[string]interface{}{"server": map[string]interface{}{"healthz": cfg.Server.Healthz, "i18n": cfg.Server.I18n}, "web": cfg.Web, "web_robots": cfg.WebRobots, "web_security": cfg.WebSecurity}
+		value = map[string]interface{}{"server": map[string]interface{}{"healthz": cfg.Server.Healthz, "i18n": cfg.Server.I18n}, "web": cfg.Web}
 	case "pages":
 		pages := cfg.Server.Pages
 		pages.Contact.CaptchaSecretKey = ""
@@ -2513,6 +2783,54 @@ func saveConfig(cfg *Config, path string) error {
 
 func validateBackupConfig(cfg *Config) {
 	cfg.Server.Backup.Encryption.Enabled = cfg.Server.Backup.EncryptionPassword != ""
+}
+
+func validateRestoreConfig(cfg *Config) {
+	defaults := DefaultConfig().Server.Restore
+	checkSize := func(value *string, fallback, key string) {
+		if validByteSize(*value) {
+			return
+		}
+		*value = fallback
+		fmt.Fprintln(os.Stderr, configText("cli.config.invalid_value_warning", "file", "yaml.d/maintenance.yml", "line", "?", "key", key))
+	}
+	checkSize(&cfg.Server.Restore.MaxArchiveSize, defaults.MaxArchiveSize, "server.restore.max_archive_size")
+	checkSize(&cfg.Server.Restore.MaxExpandedSize, defaults.MaxExpandedSize, "server.restore.max_expanded_size")
+	checkSize(&cfg.Server.Restore.MaxFileSize, defaults.MaxFileSize, "server.restore.max_file_size")
+	if cfg.Server.Restore.MaxFiles < 1 {
+		cfg.Server.Restore.MaxFiles = defaults.MaxFiles
+		fmt.Fprintln(os.Stderr, configText("cli.config.invalid_value_warning", "file", "yaml.d/maintenance.yml", "line", "?", "key", "server.restore.max_files"))
+	}
+	if cfg.Server.Restore.MaxRatio < 1 {
+		cfg.Server.Restore.MaxRatio = defaults.MaxRatio
+		fmt.Fprintln(os.Stderr, configText("cli.config.invalid_value_warning", "file", "yaml.d/maintenance.yml", "line", "?", "key", "server.restore.max_ratio"))
+	}
+}
+
+func validateAbuseDetectionConfig(cfg *Config) {
+	defaults := DefaultConfig().Server.Security.AbuseDetection
+	flood := &cfg.Server.Security.AbuseDetection.RequestFlood
+	if flood.Multiplier < 1 {
+		flood.Multiplier = defaults.RequestFlood.Multiplier
+		warnInvalidConfigKey("server.security.abuse_detection.request_flood.multiplier")
+	}
+	if duration, err := time.ParseDuration(flood.Window); err != nil || duration <= 0 {
+		flood.Window = defaults.RequestFlood.Window
+		warnInvalidConfigKey("server.security.abuse_detection.request_flood.window")
+	}
+	if duration, err := time.ParseDuration(flood.BlockDuration); err != nil || duration <= 0 {
+		flood.BlockDuration = defaults.RequestFlood.BlockDuration
+		warnInvalidConfigKey("server.security.abuse_detection.request_flood.block_duration")
+	}
+}
+
+func validByteSize(value string) bool {
+	value = strings.TrimSpace(strings.ToUpper(value))
+	for _, suffix := range []string{"KIB", "MIB", "GIB", "TIB", "KB", "MB", "GB", "TB", "K", "M", "G", "T", "B"} {
+		value = strings.TrimSuffix(value, suffix)
+	}
+	n, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	return err == nil && n > 0
 }
 
 func applyI2PEnvironment(cfg *Config) error {

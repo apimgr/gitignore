@@ -46,9 +46,6 @@ func (s *Server) isTorRequest(r *http.Request) bool {
 		return false
 	}
 	address, _ := s.torOnionAddress.Load().(string)
-	if address == "" && s.currentConfig() != nil {
-		address = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s.currentConfig().Tor.OnionAddress)), ".onion")
-	}
 	if address == "" {
 		return false
 	}
@@ -65,9 +62,7 @@ func (s *Server) markTorRequest(r *http.Request) *http.Request {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		if address, parseErr := netip.ParseAddr(host); parseErr == nil && address.Is6() {
 			bytes := address.As16()
-			if bytes[0] == 0xfc {
-				circuitID = fmt.Sprintf("%016x", binary.BigEndian.Uint64(bytes[8:]))
-			}
+			circuitID = fmt.Sprintf("%08x", binary.BigEndian.Uint32(bytes[12:]))
 		}
 	}
 	ctx := context.WithValue(r.Context(), torRequestContextKey{}, torRequestIdentity{circuitID: circuitID})

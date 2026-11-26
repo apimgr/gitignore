@@ -263,11 +263,12 @@ func (s *Server) handleMCPHelpPage(w http.ResponseWriter, r *http.Request) {
 	tools := s.mcpToolsForRequest(r)
 	project := s.mcpProjectDescription(r)
 	data := map[string]interface{}{
-		"url":     serverURL + s.apiBasePath() + "/server/mcp",
-		"apiURL":  serverURL + "/api/mcp",
-		"rootURL": serverURL + "/mcp",
-		"tools":   tools,
-		"project": project,
+		"url":         serverURL + s.apiBasePath() + "/server/mcp",
+		"apiURL":      serverURL + "/api/mcp",
+		"rootURL":     serverURL + "/mcp",
+		"projectName": "gitignore",
+		"tools":       tools,
+		"project":     project,
 	}
 	s.renderPage(w, r, "mcp_help", PageData{Title: requestTranslation(r, "web.handler.title.mcp_help"), Data: data})
 }
@@ -281,13 +282,12 @@ func (s *Server) handleAPIHelpMCP(w http.ResponseWriter, r *http.Request) {
 		descriptions = append(descriptions, map[string]string{"name": tool.Name, "description": tool.Description})
 	}
 	sendAPIResponseOK(w, map[string]interface{}{
-		"enabled":           true,
-		"url":               serverURL + s.apiBasePath() + "/server/mcp",
-		"aliases":           []string{serverURL + "/api/mcp", serverURL + "/mcp"},
-		"auth":              map[string]string{"scheme": "Bearer"},
-		"tools":             descriptions,
-		"project":           project,
-		"tools_description": requestTranslation(r, "web.mcp.tools_description"),
+		"enabled": true,
+		"url":     serverURL + s.apiBasePath() + "/server/mcp",
+		"aliases": []string{serverURL + "/api/mcp", serverURL + "/mcp"},
+		"auth":    map[string]string{"scheme": "Bearer"},
+		"tools":   descriptions,
+		"project": project,
 	})
 }
 
@@ -324,7 +324,7 @@ func (s *Server) handleSecurityPage(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		reportURL = securityReportURL(serverURL, id)
 	}
-	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.ReportURL) != "" {
+	if !s.isTorRequest(r) && s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.ReportURL) != "" {
 		reportURL = strings.TrimSpace(s.currentConfig().Web.Security.ReportURL)
 	}
 	expires := time.Now().UTC().AddDate(1, 0, 0).Format(time.RFC3339)
@@ -342,7 +342,8 @@ func (s *Server) handleSecurityPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, r, "security", PageData{
 		Title: requestTranslation(r, "web.handler.title.security"),
 		Data: map[string]interface{}{
-			"email":          s.securityContactEmail(),
+			"email":          s.responseSecurityContactEmail(r),
+			"torRequest":     s.isTorRequest(r),
 			"expires":        expires,
 			"reportURL":      reportURL,
 			"pgpAvailable":   pgpAvailable,
@@ -363,11 +364,14 @@ func (s *Server) handleAPISecurity(w http.ResponseWriter, r *http.Request) {
 	if s.currentConfig() != nil && strings.TrimSpace(s.currentConfig().Web.Security.ReportURL) != "" {
 		githubReportURL = strings.TrimSpace(s.currentConfig().Web.Security.ReportURL)
 	}
-	contacts := []map[string]string{{"type": "github", "value": githubReportURL}}
+	contacts := []map[string]string{}
+	if !s.isTorRequest(r) {
+		contacts = append(contacts, map[string]string{"type": "github", "value": githubReportURL})
+	}
 	if s.contactPageEnabled() {
 		contacts = append(contacts, map[string]string{"type": "contact_form", "value": securityReportURL(serverURL, id)})
 	}
-	if email := s.securityContactEmail(); email != "" {
+	if email := s.responseSecurityContactEmail(r); email != "" {
 		contacts = append(contacts, map[string]string{"type": "email", "value": "mailto:" + email})
 	}
 	pgpData := map[string]interface{}{"available": false, "url": nil, "fingerprint": nil}
@@ -401,7 +405,7 @@ func (s *Server) handleSecurityPolicyPage(w http.ResponseWriter, r *http.Request
 	}
 	s.renderPage(w, r, "security_policy", PageData{
 		Title: requestTranslation(r, "web.handler.title.security_policy"),
-		Data:  map[string]interface{}{"email": s.securityContactEmail(), "policy": policy},
+		Data:  map[string]interface{}{"email": s.responseSecurityContactEmail(r), "policy": policy},
 	})
 }
 
@@ -479,11 +483,9 @@ func (s *Server) handleThemeSet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePreferencesPage(w http.ResponseWriter, r *http.Request) {
 	consent := map[string]interface{}{}
-	if cookie, err := r.Cookie("cookie_consent"); err == nil {
-		var decoded map[string]interface{}
-		if json.Unmarshal([]byte(cookie.Value), &decoded) == nil {
-			consent = decoded
-		}
+	if state, valid := readConsent(r); valid {
+		consent["preferences"] = state.Preferences
+		consent["analytics"] = state.Analytics
 	}
 	ccpaSet := false
 	if cookie, err := r.Cookie("ccpa_opt_out"); err == nil && cookie.Value == "true" {
@@ -516,13 +518,17 @@ func (s *Server) handlePreferencesSave(w http.ResponseWriter, r *http.Request) {
 	values := preferenceInput(r, true, true)
 	s.applyPreferences(w, r, values, false)
 	if r.FormValue("consent_form") == "1" {
-		consent, _ := json.Marshal(map[string]interface{}{"essential": true, "preferences": r.FormValue("consent_preferences") == "on", "analytics": r.FormValue("consent_analytics") == "on", "timestamp": time.Now().Unix()})
-		setPreferenceCookie(w, r, "cookie_consent", string(consent), s)
+		consentState := map[string]interface{}{"essential": true, "preferences": r.FormValue("consent_preferences") == "on", "analytics": r.FormValue("consent_analytics") == "on", "timestamp": time.Now().Unix()}
+		consent, _ := json.Marshal(consentState)
+		setPreferenceCookie(w, r, "cookie_consent", encodeConsentCookie(consent), s)
+		s.auditConsentChange(r, "cookie_consent", map[string]bool{"essential": true, "preferences": consentState["preferences"].(bool), "analytics": consentState["analytics"].(bool)})
 		if s.config != nil && s.currentConfig() != nil && s.currentConfig().Server.Privacy.Data.Sold {
 			if r.FormValue("ccpa_opt_out") == "on" {
 				setPreferenceCookie(w, r, "ccpa_opt_out", "true", s)
+				s.auditConsentChange(r, "ccpa_opt_out", true)
 			} else {
 				expirePreferenceCookie(w, r, "ccpa_opt_out", s)
+				s.auditConsentChange(r, "ccpa_opt_out", false)
 			}
 		}
 	}
@@ -557,8 +563,10 @@ func (s *Server) handleCCPA(w http.ResponseWriter, r *http.Request) {
 	switch r.FormValue("choice") {
 	case "opt-out":
 		setPreferenceCookie(w, r, "ccpa_opt_out", "true", s)
+		s.auditConsentChange(r, "ccpa_opt_out", true)
 	case "opt-in":
 		expirePreferenceCookie(w, r, "ccpa_opt_out", s)
+		s.auditConsentChange(r, "ccpa_opt_out", false)
 	default:
 		http.Error(w, requestTranslation(r, "web.handler.error.choice_invalid"), http.StatusBadRequest)
 		return

@@ -4,7 +4,7 @@
 <section class="section-card" aria-labelledby="report-vulnerability">
 <h2 id="report-vulnerability">{{t .Lang "web.security.report"}}</h2>
 <ol>
-<li><a href="https://github.com/apimgr/gitignore/security/advisories/new" rel="noopener noreferrer">{{t .Lang "web.security.github_private_reporting"}}</a></li>
+{{if not .Data.torRequest}}<li><a href="https://github.com/apimgr/gitignore/security/advisories/new" rel="noopener noreferrer">{{t .Lang "web.security.github_private_reporting"}}</a></li>{{end}}
 <li><a href="{{.Data.reportURL}}">{{t .Lang "web.security.deployed_report"}}</a></li>
 <li>{{tf .Lang "web.security.email_report" "email" .Data.email}}</li>
 </ol>

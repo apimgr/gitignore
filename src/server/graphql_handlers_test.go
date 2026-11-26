@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -29,6 +30,39 @@ func TestGraphQLHandlerAndSchemaEndpoint(t *testing.T) {
 	s.handleGraphQLSchema(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/server/graphql", nil))
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "type Query") {
 		t.Fatalf("GraphQL SDL response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGraphQLGETSupportsQueryVariablesAndUsage(t *testing.T) {
+	templates, err := template.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(&Config{Templates: templates})
+	values := url.Values{
+		"query":         {"query GetTemplate($name: String!) { template(name: $name) { name } }"},
+		"operationName": {"GetTemplate"},
+		"variables":     {`{"name":"Go"}`},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/server/graphql?"+values.Encode(), nil)
+	recorder := httptest.NewRecorder()
+	s.handleGraphQL(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"name":"Go"`) {
+		t.Fatalf("GraphQL GET response = %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/server/graphql", nil)
+	recorder = httptest.NewRecorder()
+	s.handleGraphQL(recorder, request)
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "text/plain; charset=utf-8" || !strings.Contains(recorder.Body.String(), "query parameter") {
+		t.Fatalf("GraphQL GET usage response = %d %q %s", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/server/graphql?query=%7B%20list%20%7B%20name%20%7D%20%7D&variables=%5B%5D", nil)
+	recorder = httptest.NewRecorder()
+	s.handleGraphQL(recorder, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "errors") {
+		t.Fatalf("invalid GraphQL GET variables returned %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 

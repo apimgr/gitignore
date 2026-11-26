@@ -33,8 +33,8 @@ jobs:
           elif [ "${{ forgejo.event_name }}" = "pull_request" ]; then
             BASE="${{ forgejo.event.pull_request.base.sha }}"; HEAD="${{ forgejo.event.pull_request.head.sha }}"
           fi
-          echo "base=$BASE" >> "$GITHUB_OUTPUT"
-          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$FORGEJO_OUTPUT"
+          echo "head=$HEAD" >> "$FORGEJO_OUTPUT"
 
       - name: Scan for secrets (truffleHog)
         uses: trufflesecurity/trufflehog@b2b0a92070f206ab7b5a1105d82a7f2f48d92341  # v3.99.0
@@ -153,15 +153,15 @@ jobs:
 
       - name: Set build info
         run: |
-          echo "VERSION=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
-          echo "COMMIT_ID=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          echo "VERSION=$(git rev-parse --short=7 HEAD)" >> "$FORGEJO_ENV"
+          echo "COMMIT_ID=$(git rev-parse --short=7 HEAD)" >> "$FORGEJO_ENV"
           BUILD_EPOCH=$(date -u +%s)
-          echo "BUILD_EPOCH=$BUILD_EPOCH" >> "$GITHUB_ENV"
-          echo "BUILD_DATE=$(date -u -d @${BUILD_EPOCH} +\"%Y-%m-%dT%H:%M:%SZ\")" >> "$GITHUB_ENV"
+          echo "BUILD_EPOCH=$BUILD_EPOCH" >> "$FORGEJO_ENV"
+          echo "BUILD_DATE=$(date -u -d @${BUILD_EPOCH} +\"%Y-%m-%dT%H:%M:%SZ\")" >> "$FORGEJO_ENV"
           if [ -f site.txt ]; then
-            echo "OFFICIAL_SITE=$(cat site.txt)" >> "$GITHUB_ENV"
+            echo "OFFICIAL_SITE=$(cat site.txt)" >> "$FORGEJO_ENV"
           else
-            echo "OFFICIAL_SITE=${{ secrets.OFFICIAL_SITE }}" >> "$GITHUB_ENV"
+            echo "OFFICIAL_SITE=${{ secrets.OFFICIAL_SITE }}" >> "$FORGEJO_ENV"
           fi
 
       - name: Build server and CLI
@@ -172,7 +172,7 @@ jobs:
           TEMP_ROOT="${TMPDIR:-/tmp}/${{ forgejo.repository_owner }}"
           mkdir -p "$TEMP_ROOT"
           OUTPUT_DIR=$(mktemp -d "$TEMP_ROOT/${{ forgejo.event.repository.name }}-XXXXXX")
-          echo "OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$OUTPUT_DIR" >> "$FORGEJO_ENV"
           LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.CommitID=${COMMIT_ID}' -X 'main.BuildEpoch=${BUILD_EPOCH}' -X 'main.OfficialSite=${OFFICIAL_SITE}'"
           go build -buildvcs=false -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT_DIR/gitignore${{ matrix.ext }}" ./src
           go build -buildvcs=false -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT_DIR/gitignore-cli${{ matrix.ext }}" ./src/client

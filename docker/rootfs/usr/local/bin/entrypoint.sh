@@ -21,10 +21,10 @@ log() { echo "[entrypoint] $(date '+%Y-%m-%dT%H:%M:%S%z') $*"; }
 log "Starting ${APP_NAME}..."
 
 # Build flags from environment
-FLAGS="--address ${ADDRESS:-0.0.0.0} --port ${PORT:-80}"
-[[ "${DEBUG:-false}" == "true" ]] && FLAGS="$FLAGS --debug"
+FLAGS=(--address "${LISTEN:-[::]}" --port "${PORT:-80}")
+[[ "${DEBUG:-false}" == "true" ]] && FLAGS+=(--debug)
 
 # Exec the binary so it replaces this shell as PID 1 and receives signals
 # directly from tini. The binary handles all setup: dirs, perms, user/group,
 # Tor, etc.
-exec "$APP_BIN" $FLAGS "$@"
+exec "$APP_BIN" "${FLAGS[@]}" "$@"

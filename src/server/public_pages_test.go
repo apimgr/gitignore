@@ -8,7 +8,16 @@ import (
 	"testing"
 
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/template"
 )
+
+func TestOperatorContentCannotIntroducePageH1(t *testing.T) {
+	if got := string(renderPublicContent("# Operator title\n\n<h1>Injected title</h1>", "md")); strings.Contains(got, "<h1>") {
+		t.Fatalf("operator content introduced h1: %s", got)
+	} else if !strings.Contains(got, "<h2>Operator title</h2>") {
+		t.Fatalf("Markdown level-one heading was not rendered as h2: %s", got)
+	}
+}
 
 func TestPrivacyPageRendersNoJSCCPAFormAndPersistsChoice(t *testing.T) {
 	cfg := config.DefaultConfig()
@@ -67,6 +76,94 @@ func TestPrivacyPageRendersNoJSCCPAFormAndPersistsChoice(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("opt-in did not clear ccpa_opt_out")
+	}
+}
+
+func TestAnnouncementPageAndNoJSDismissal(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Web.Announcements.Messages = []config.WebAnnouncementConfig{{
+		ID: "maintenance-window", Type: "warning", Title: "Maintenance",
+		Message: "Service will pause briefly.", Dismissible: true,
+	}}
+	s := New(&Config{Version: "test", Cfg: cfg})
+	manager, err := template.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.config.Templates = manager
+	page := httptest.NewRecorder()
+	s.router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("home page status = %d", page.Code)
+	}
+	body := page.Body.String()
+	if !strings.Contains(body, `class="site-banner site-banner-warning" role="alert"`) || !strings.Contains(body, "Service will pause briefly.") {
+		t.Fatal("configured announcement was not rendered")
+	}
+	skip := strings.Index(body, `href="#main-content"`)
+	announcement := strings.Index(body, `class="site-banner site-banner-warning"`)
+	if skip < 0 || announcement < 0 || skip > announcement {
+		t.Fatal("announcement rendered before the skip links")
+	}
+	if consent := strings.Index(body, `id="cookie-consent"`); consent < 0 || consent > announcement {
+		t.Fatal("cookie consent banner did not precede site announcements")
+	}
+	preferences := httptest.NewRecorder()
+	s.router.ServeHTTP(preferences, httptest.NewRequest(http.MethodGet, "/server/preferences", nil))
+	if !strings.Contains(preferences.Body.String(), `data-announcement-id="maintenance-window"`) || strings.Contains(preferences.Body.String(), `action="/announcements/dismiss"`) {
+		t.Fatal("preferences page must show announcements without adding a second POST form")
+	}
+	csrf := ""
+	for _, cookie := range page.Result().Cookies() {
+		if cookie.Name == "csrf_token" {
+			csrf = cookie.Value
+		}
+	}
+	if csrf == "" {
+		t.Fatal("page did not issue a CSRF cookie")
+	}
+	form := url.Values{"csrf_token": {csrf}, "id": {"maintenance-window"}, "return_to": {"/server/about?from=notice"}}
+	request := httptest.NewRequest(http.MethodPost, "/announcements/dismiss", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrf})
+	response := httptest.NewRecorder()
+	s.router.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/server/about?from=notice" {
+		t.Fatalf("dismiss status/location = %d/%q", response.Code, response.Header().Get("Location"))
+	}
+	found := false
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == dismissedAnnouncementsCookie && cookie.Value == "maintenance-window" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("dismissal did not persist the announcement ID")
+	}
+	dismissedPage := httptest.NewRecorder()
+	dismissedRequest := httptest.NewRequest(http.MethodGet, "/server/about", nil)
+	dismissedRequest.AddCookie(&http.Cookie{Name: dismissedAnnouncementsCookie, Value: "maintenance-window"})
+	s.router.ServeHTTP(dismissedPage, dismissedRequest)
+	if strings.Contains(dismissedPage.Body.String(), `data-announcement-id="maintenance-window"`) {
+		t.Fatal("dismissed announcement was rendered again")
+	}
+}
+
+func TestAnnouncementDismissalRejectsExternalReturnURL(t *testing.T) {
+	if got := safeAnnouncementReturn("//attacker.example/path"); got != "/" {
+		t.Fatalf("unsafe announcement return target = %q", got)
+	}
+}
+
+func TestAnnouncementDismissalRequiresCSRF(t *testing.T) {
+	s := newTestPageServer()
+	s.setupRoutes()
+	request := httptest.NewRequest(http.MethodPost, "/announcements/dismiss", strings.NewReader("id=maintenance-window"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	s.router.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("dismiss without CSRF status = %d, want %d", response.Code, http.StatusForbidden)
 	}
 }
 

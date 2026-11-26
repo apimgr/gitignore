@@ -48,7 +48,7 @@ The security command never prints report bodies. `update` accepts `--status`, `-
 
 Secret rotation is restricted to `installation_secret` and `encryption_key`. Each command requires the configured operator token or root privileges, then requires typing `CONFIRM`; `--yes` does not bypass confirmation. Installation-secret rotation re-encrypts the PGP private key and accepts previous-secret HMACs for seven days. Encryption-key rotation re-encrypts stored owner tokens and AES-encrypted security-report fields, keeping the prior key for a 30-day grace period. The server resumes an interrupted rotation during startup, and the daily security cleanup retires expired key material.
 
-Server environment variables include `PORT`, `LISTEN`, `MODE`, `DOMAIN`, the `SMTP_*` settings, and the initialization-only directory variables `CONFIG_DIR`, `DATA_DIR`, `DATABASE_DIR`, `CACHE_DIR`, `LOG_DIR`, and `BACKUP_DIR`. `DEBUG` enables debug output and debug routes; `NO_COLOR` disables colored output. I2P also accepts `I2P_ENABLED`. See [Configuration](configuration.md) for precedence and details.
+Server environment variables include `PORT`, `LISTEN`, `MODE`, `DOMAIN`, the `SMTP_*` settings, the directory variables `CONFIG_DIR`, `DATA_DIR`, `DATABASE_DIR`, `CACHE_DIR`, `LOG_DIR`, and `BACKUP_DIR`, and `PID_FILE` for the PID path. `DEBUG` enables debug output and debug routes; `NO_COLOR` disables colored output. I2P also accepts `I2P_ENABLED`. See [Configuration](configuration.md) for precedence and details.
 
 Manage the project OpenPGP keypair with the operator token or as root. Private-key import, export, rotation, and deletion require the confirmation prompts described by the command:
 

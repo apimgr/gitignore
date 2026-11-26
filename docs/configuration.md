@@ -6,7 +6,8 @@ On first startup, the server creates `{config_dir}/server.yml` and `{config_dir}
 # {config_dir}/server.yml — node-specific settings
 server:
   address: "[::]"
-  port: "64080" # example value; the generated default is a random available port in 64000–64999
+  # Example value; the generated default is a random available port in 64000–64999.
+  port: "64080"
   baseurl: /
   api_version: v1
   mode: production
@@ -355,6 +356,20 @@ The owner cookie name is recorded in `IDEA.md`. When a deployment changes an old
 | `server.update.cli_min_version` | `yaml.d/maintenance.yml` | Empty | Optional minimum CLI version returned by autodiscovery. |
 | `server.tor.expose` | `yaml.d/tor.yml` | `false` | Explicitly advertise the runtime-derived onion address in API autodiscovery. |
 | `server.tor.contact_email` | `yaml.d/tor.yml` | Empty | Optional email shown only on Tor responses; never falls back to clearnet contact information. The onion address itself is runtime state read from Tor's hidden-service hostname file. |
+| `server.tor.binary` | `yaml.d/tor.yml` | Empty | Optional executable path; empty selects automatic detection. A configured path must identify an installed Tor executable. |
+| `server.tor.use_network` | `yaml.d/tor.yml` | `false` | Boolean; when true, app-owned outbound requests may use Tor. Inbound request data cannot choose outbound destinations. |
+| `server.tor.max_circuits` | `yaml.d/tor.yml` | `32` | Integer passed to Tor as `MaxClientCircuitsPending`; Tor validates the generated directive. |
+| `server.tor.startup_timeout` | `yaml.d/tor.yml` | `60` seconds | Integer seconds in the inclusive range `10–300`; other values reset to `60`. Bounds waiting for the runtime control-port file. |
+| `server.tor.circuit_timeout` | `yaml.d/tor.yml` | `60` seconds | Integer seconds passed to Tor as `CircuitBuildTimeout`; Tor validates the generated directive. |
+| `server.tor.bootstrap_timeout` | `yaml.d/tor.yml` | `180` seconds | Integer seconds; bounds network bootstrap and hidden-service startup. Timeout leaves the clearnet server running. |
+| `server.tor.safe_logging` | `yaml.d/tor.yml` | `true` | Boolean; when true, Tor scrubs sensitive information from its logs. |
+| `server.tor.max_streams_per_circuit` | `yaml.d/tor.yml` | `100` | Integer passed to Tor as `HiddenServiceMaxStreams`; Tor validates the generated directive. |
+| `server.tor.close_circuit_on_stream_limit` | `yaml.d/tor.yml` | `true` | Boolean; passed to Tor as `HiddenServiceMaxStreamsCloseCircuit` (`true`/`false` becomes `1`/`0`). |
+| `server.tor.bandwidth_rate` | `yaml.d/tor.yml` | `1 MB` | Tor bandwidth-size value, such as `1 MB` or `500 KB`, applied per second; Tor validates the generated directive. |
+| `server.tor.bandwidth_burst` | `yaml.d/tor.yml` | `2 MB` | Tor bandwidth-size value, such as `2 MB` or `1 MB`, applied per second; Tor validates the generated directive. |
+| `server.tor.max_monthly_bandwidth` | `yaml.d/tor.yml` | `100 GB` | Tor accounting size or `unlimited`; accounting warnings are emitted at 80%, 90%, and 95%. |
+| `server.tor.num_intro_points` | `yaml.d/tor.yml` | `3` | Integer in the inclusive range `3–10`; other values reset to `3`. |
+| `server.tor.virtual_port` | `yaml.d/tor.yml` | `80` | Integer virtual port exposed on the `.onion` address; Tor validates the generated directive. |
 | `server.i2p.enabled` | `yaml.d/i2p.yml` | `true` in containers, `false` elsewhere | Boolean; `--i2p` then `I2P_ENABLED` override the config value. |
 | `server.i2p.binary` | `yaml.d/i2p.yml` | Empty (auto-detect) | Optional `i2pd` executable path. |
 | `server.i2p.sam_address` | `yaml.d/i2p.yml` | `127.0.0.1:7656` | SAMv3 host:port. |
@@ -465,6 +480,7 @@ The server reads the following environment variables:
 | Variable | Purpose |
 |---|---|
 | `CONFIG_DIR`, `DATA_DIR`, `CACHE_DIR`, `LOG_DIR`, `BACKUP_DIR` | Runtime directory overrides; matching directory flags take precedence |
+| `PID_FILE` | Runtime PID file path; `--pid` takes precedence. PID files remain disabled in containers. |
 | `DATABASE_DIR` | Runtime override for the SQLite database directory |
 | `NO_COLOR`, `TERM` | Control terminal color and terminal mode |
 | `DOMAIN`, `HOSTNAME` | Set or contribute to FQDN resolution; `DOMAIN` has highest priority |
@@ -475,6 +491,8 @@ The server reads the following environment variables:
 | `CACHE_URL` | First-run cache connection string |
 | `I2P_ENABLED` | I2P override; explicit `--i2p` takes precedence |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_NAME`, `SMTP_FROM_EMAIL`, `SMTP_TLS` | Configure SMTP transport and sender defaults |
+
+In containers, the entrypoint defaults these directory variables to `CONFIG_DIR=/config/gitignore`, `DATA_DIR=/data/gitignore`, `CACHE_DIR=/data/gitignore/cache`, `LOG_DIR=/data/log/gitignore`, `DATABASE_DIR=/data/db/sqlite`, and `BACKUP_DIR=/data/backups/gitignore`. A supplied environment value takes precedence over the entrypoint default; the matching directory flag takes precedence over the environment for supported flags. Outside containers, the database defaults to `{data_dir}/db`; the other directories use the operating-system paths described by the server help and AI.md Part 4.
 
 `PORT` and `LISTEN` override listener settings. `DOMAIN` and `HOSTNAME` contribute to FQDN discovery. SMTP environment variables override matching SMTP configuration values. Configuration files are merged in this order:
 

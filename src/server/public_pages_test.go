@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/apimgr/gitignore/src/config"
+	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/template"
 )
 
@@ -20,6 +21,10 @@ func TestOperatorContentCannotIntroducePageH1(t *testing.T) {
 }
 
 func TestPrivacyPageRendersNoJSCCPAFormAndPersistsChoice(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	cfg := config.DefaultConfig()
 	cfg.Server.Privacy.Data.Sold = true
 	s := New(&Config{Version: "test", Cfg: cfg})
@@ -80,6 +85,10 @@ func TestPrivacyPageRendersNoJSCCPAFormAndPersistsChoice(t *testing.T) {
 }
 
 func TestAnnouncementPageAndNoJSDismissal(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	cfg := config.DefaultConfig()
 	cfg.Web.Announcements.Messages = []config.WebAnnouncementConfig{{
 		ID: "maintenance-window", Type: "warning", Title: "Maintenance",

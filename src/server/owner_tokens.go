@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -12,7 +13,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/apimgr/gitignore/src/common/audit"
@@ -23,19 +23,13 @@ import (
 
 const ownerTokenCookieName = "gitignore_owner_token_ksqmkkbi"
 
+const ownerTokenViewCookieName = "gitignore_token_view"
+
 const legacyOwnerTokenCookieName = "gitignore_owner_token_5qvQQyc5"
 
 var tokenAlphabet = []byte("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
 var errInvalidBearerToken = errors.New("invalid bearer token")
-
-type ownerTokenPageFlash struct {
-	Revealed map[int64]string
-	Message  string
-	Created  time.Time
-}
-
-var ownerTokenPageFlashes sync.Map
 
 type TokenIdentity struct {
 	Kind        string
@@ -237,7 +231,11 @@ func (s *Server) decryptOwnerToken(encoded string) (string, error) {
 	}
 	plaintext, err := DecryptSecurityReport(s.currentConfig().Server.Security.EncryptionKey, ciphertext)
 	if err != nil {
-		return "", err
+		plaintext, rotated, rotationErr := db.DecryptOwnerTokenDuringRotation(encoded, s.currentConfig().Server.Security.EncryptionKey)
+		if rotationErr != nil || !rotated {
+			return "", err
+		}
+		return string(plaintext), nil
 	}
 	return string(plaintext), nil
 }
@@ -370,6 +368,7 @@ func (s *Server) handleOwnerTokensPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil || identity.Kind != "primary" {
+		clearOwnerTokenViewCookie(s, w, r)
 		if len(ownerCookies(r)) > 0 {
 			s.clearOwnerCookie(w, r)
 		}
@@ -377,20 +376,38 @@ func (s *Server) handleOwnerTokensPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setOwnerCookie(w, r, cookie.Value)
-	data, err := s.loadTokenPage(identity.OwnerID, nil, "")
-	if err != nil {
-		s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"message": i18n.T(r, "errors.server_error")}})
-		return
-	}
-	if value, ok := takeOwnerTokenPageFlash(identity.OwnerID); ok {
-		data, err = s.loadTokenPage(identity.OwnerID, value.Revealed, value.Message)
+	card := readOwnerTokenViewCookie(s, w, r, identity.OwnerID)
+	var revealed map[int64]string
+	if card != "" {
+		items, err := db.ListOwnerTokens(identity.OwnerID)
 		if err != nil {
-			s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title")})
+			s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title"), PrivateCache: true})
 			return
 		}
+		for _, item := range items {
+			matches := card == "primary" && item.Kind == "primary"
+			if item.Kind == "linked" && strconv.FormatInt(item.ID, 10) == card {
+				matches = true
+			}
+			if !matches {
+				continue
+			}
+			raw, err := s.decryptOwnerToken(item.TokenEnc)
+			if err != nil {
+				s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title"), PrivateCache: true})
+				return
+			}
+			revealed = map[int64]string{item.ID: raw}
+			break
+		}
+	}
+	data, err := s.loadTokenPage(identity.OwnerID, revealed, "")
+	if err != nil {
+		s.renderPageStatus(w, r, "error", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: map[string]interface{}{"message": i18n.T(r, "errors.server_error")}, PrivateCache: true})
+		return
 	}
 	data["csrfToken"] = ensureCSRFTokenWithSecure(w, r, preferenceCookieSecure(s, r))
-	s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: data})
+	s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: data, PrivateCache: true})
 }
 
 func (s *Server) setOwnerCookie(w http.ResponseWriter, r *http.Request, raw string) {
@@ -402,26 +419,65 @@ func (s *Server) setOwnerCookie(w http.ResponseWriter, r *http.Request, raw stri
 	clearCookie(w, r, legacyOwnerTokenCookieName, s)
 }
 
-func storeOwnerTokenPageFlash(ownerID string, revealed map[int64]string, message string) {
-	ownerTokenPageFlashes.Range(func(key, value interface{}) bool {
-		if flash, ok := value.(ownerTokenPageFlash); ok && time.Since(flash.Created) > 5*time.Minute {
-			ownerTokenPageFlashes.Delete(key)
-		}
-		return true
+func setOwnerTokenViewCookie(s *Server, w http.ResponseWriter, r *http.Request, ownerID, card string) error {
+	if !validOwnerTokenViewCard(card) {
+		return errors.New("invalid token view card")
+	}
+	secret, err := db.ApplicationSecret("cookie_signing_key")
+	if err != nil {
+		return err
+	}
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte(ownerID + "|" + card))
+	value := card + "." + hex.EncodeToString(mac.Sum(nil))
+	http.SetCookie(w, &http.Cookie{
+		Name: ownerTokenViewCookieName, Value: value, Path: "/server/preferences/tokens", MaxAge: 60,
+		HttpOnly: true, Secure: preferenceCookieSecure(s, r), SameSite: http.SameSiteStrictMode,
 	})
-	ownerTokenPageFlashes.Store(ownerID, ownerTokenPageFlash{Revealed: revealed, Message: message, Created: time.Now()})
+	return nil
 }
 
-func takeOwnerTokenPageFlash(ownerID string) (ownerTokenPageFlash, bool) {
-	value, ok := ownerTokenPageFlashes.LoadAndDelete(ownerID)
-	if !ok {
-		return ownerTokenPageFlash{}, false
+func readOwnerTokenViewCookie(s *Server, w http.ResponseWriter, r *http.Request, ownerID string) string {
+	cookie, err := r.Cookie(ownerTokenViewCookieName)
+	if err != nil {
+		return ""
 	}
-	flash, ok := value.(ownerTokenPageFlash)
-	if !ok || time.Since(flash.Created) > 5*time.Minute {
-		return ownerTokenPageFlash{}, false
+	clearOwnerTokenViewCookie(s, w, r)
+	card, suppliedHex, ok := strings.Cut(cookie.Value, ".")
+	if !ok || !validOwnerTokenViewCard(card) {
+		return ""
 	}
-	return flash, true
+	supplied, err := hex.DecodeString(suppliedHex)
+	if err != nil || len(supplied) != sha256.Size {
+		return ""
+	}
+	secrets, err := db.ApplicationSecretCandidates("cookie_signing_key", time.Now().UTC())
+	if err != nil {
+		return ""
+	}
+	for _, secret := range secrets {
+		mac := hmac.New(sha256.New, secret)
+		_, _ = mac.Write([]byte(ownerID + "|" + card))
+		if hmac.Equal(supplied, mac.Sum(nil)) {
+			return card
+		}
+	}
+	return ""
+}
+
+func clearOwnerTokenViewCookie(s *Server, w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: ownerTokenViewCookieName, Value: "", Path: "/server/preferences/tokens", MaxAge: -1,
+		Expires: time.Unix(1, 0), HttpOnly: true, Secure: preferenceCookieSecure(s, r), SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func validOwnerTokenViewCard(card string) bool {
+	if card == "primary" {
+		return true
+	}
+	id, err := strconv.ParseInt(card, 10, 64)
+	return err == nil && id > 0 && strconv.FormatInt(id, 10) == card
 }
 
 func redirectOwnerTokenPage(w http.ResponseWriter, r *http.Request, fragment string) {
@@ -516,8 +572,11 @@ func (s *Server) handleIssueOwnerTokenWeb(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.setOwnerCookie(w, r, raw)
+	if err := setOwnerTokenViewCookie(s, w, r, item.OwnerID, "primary"); err != nil {
+		s.renderPageStatus(w, r, "preferences_tokens", http.StatusServiceUnavailable, PageData{Title: i18n.T(r, "owner_tokens_page.title")})
+		return
+	}
 	w.Header().Set("Cache-Control", "private, no-store")
-	storeOwnerTokenPageFlash(item.OwnerID, map[int64]string{item.ID: raw}, i18n.T(r, "owner_tokens_feedback.primary_created"))
 	redirectOwnerTokenPage(w, r, "primary")
 }
 
@@ -548,7 +607,7 @@ func (s *Server) handleRestoreOwnerToken(w http.ResponseWriter, r *http.Request)
 	}
 	s.setOwnerCookie(w, r, raw)
 	s.logTokenAudit("token.restored", identity.OwnerID, identity.TokenPrefix, "web", s.clientIP(r), "", true)
-	storeOwnerTokenPageFlash(identity.OwnerID, nil, i18n.T(r, "owner_tokens_feedback.restored"))
+	clearOwnerTokenViewCookie(s, w, r)
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.Redirect(w, r, "/server/preferences/tokens#primary", http.StatusSeeOther)
 }
@@ -677,7 +736,6 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 	}
 	now := time.Now().UTC()
 	var raw string
-	var message string
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/reveal"):
 		raw, _ = s.decryptOwnerToken(target.TokenEnc)
@@ -686,7 +744,6 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		s.logTokenAudit("token.revealed", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
-		message = i18n.T(r, "owner_tokens_feedback.revealed")
 	case strings.HasSuffix(r.URL.Path, "/rotate"):
 		raw, _ = newOwnerToken()
 		encoded, err := s.encryptOwnerToken(raw)
@@ -703,7 +760,6 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 			s.setOwnerCookie(w, r, raw)
 		}
 		s.logTokenAudit("token.rotated", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
-		message = i18n.T(r, "owner_tokens_feedback.rotated")
 	case strings.HasSuffix(r.URL.Path, "/update"):
 		name := strings.TrimSpace(r.FormValue("name"))
 		if len(name) < 1 || len(name) > 64 {
@@ -719,34 +775,26 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
-		message = i18n.T(r, "owner_tokens_feedback.linked_updated")
 	case strings.HasSuffix(r.URL.Path, "/revoke"):
 		if err := db.RevokeLinkedOwnerToken(identity.OwnerID, target.ID, now); err != nil {
 			sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 			return
 		}
 		s.logTokenAudit("token.revoked", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
-		message = i18n.T(r, "owner_tokens_feedback.linked_revoked")
 	default:
 		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 		return
 	}
-	if strings.HasSuffix(r.URL.Path, "/reveal") {
-		data, err := s.loadTokenPage(identity.OwnerID, map[int64]string{target.ID: raw}, message)
-		if err != nil {
+	if raw != "" {
+		card := strconv.FormatInt(target.ID, 10)
+		if target.Kind == "primary" {
+			card = "primary"
+		}
+		if err := setOwnerTokenViewCookie(s, w, r, identity.OwnerID, card); err != nil {
 			sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 			return
 		}
-		data["csrfToken"] = ensureCSRFTokenWithSecure(w, r, preferenceCookieSecure(s, r))
-		w.Header().Set("Cache-Control", "private, no-store")
-		s.renderPage(w, r, "preferences_tokens", PageData{Title: i18n.T(r, "owner_tokens_page.title"), Data: data})
-		return
 	}
-	revealed := map[int64]string(nil)
-	if raw != "" {
-		revealed = map[int64]string{target.ID: raw}
-	}
-	storeOwnerTokenPageFlash(identity.OwnerID, revealed, message)
 	fragment := "primary"
 	if target.Kind != "primary" {
 		fragment = "token-" + strconv.FormatInt(target.ID, 10)
@@ -794,12 +842,15 @@ func (s *Server) handleCreateLinkedOwnerTokenWeb(w http.ResponseWriter, r *http.
 		sendAPIResponseErrorLocalized(w, r, "VALIDATION_FAILED")
 		return
 	}
-	raw, item, err := s.issueLinkedToken(identity.OwnerID, name, expiresAt, time.Now(), "web", s.clientIP(r))
+	_, item, err := s.issueLinkedToken(identity.OwnerID, name, expiresAt, time.Now(), "web", s.clientIP(r))
 	if err != nil {
 		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
 		return
 	}
-	storeOwnerTokenPageFlash(identity.OwnerID, map[int64]string{item.ID: raw}, i18n.T(r, "owner_tokens_feedback.linked_created"))
+	if err := setOwnerTokenViewCookie(s, w, r, identity.OwnerID, strconv.FormatInt(item.ID, 10)); err != nil {
+		sendAPIResponseErrorLocalized(w, r, "SERVER_ERROR")
+		return
+	}
 	redirectOwnerTokenPage(w, r, "token-"+strconv.FormatInt(item.ID, 10))
 }
 

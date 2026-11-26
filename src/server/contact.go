@@ -447,14 +447,12 @@ func (s *Server) verifyFormToken(token string, now time.Time) bool {
 	if err != nil || now.Sub(time.Unix(issued, 0)) < 2*time.Second || now.Sub(time.Unix(issued, 0)) > 30*time.Minute {
 		return false
 	}
-	secret, err := contactTokenKey()
+	secrets, err := db.InstallationSecretCandidates(now)
 	if err != nil {
 		return false
 	}
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte("contact-form|" + parts[0] + "|" + parts[1]))
 	expected, err := hex.DecodeString(parts[2])
-	if err != nil || !hmac.Equal(expected, mac.Sum(nil)) {
+	if err != nil || !verifyContactTokenMAC(secrets, expected, []byte("contact-form|"+parts[0]+"|"+parts[1])) {
 		return false
 	}
 	return s.claimContactNonce(parts[1], false, now)
@@ -486,17 +484,26 @@ func (s *Server) consumeReviewToken(token string, form url.Values, now time.Time
 	if err != nil || now.Sub(time.Unix(issued, 0)) < 2*time.Second || now.Sub(time.Unix(issued, 0)) > 30*time.Minute || parts[2] != formHash(form) {
 		return false
 	}
-	secret, err := contactTokenKey()
+	secrets, err := db.InstallationSecretCandidates(now)
 	if err != nil {
 		return false
 	}
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte("contact-review|" + parts[0] + "|" + parts[1] + "|" + parts[2]))
 	expected, err := hex.DecodeString(parts[3])
-	if err != nil || !hmac.Equal(expected, mac.Sum(nil)) {
+	if err != nil || !verifyContactTokenMAC(secrets, expected, []byte("contact-review|"+parts[0]+"|"+parts[1]+"|"+parts[2])) {
 		return false
 	}
 	return s.claimContactNonce(parts[1], true, now)
+}
+
+func verifyContactTokenMAC(secrets [][]byte, supplied, payload []byte) bool {
+	for _, secret := range secrets {
+		mac := hmac.New(sha256.New, secret)
+		_, _ = mac.Write(payload)
+		if hmac.Equal(supplied, mac.Sum(nil)) {
+			return true
+		}
+	}
+	return false
 }
 
 func formHash(form url.Values) string {

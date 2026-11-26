@@ -221,6 +221,51 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 	return needsConfigSave && !invalidConfigFiles[configFileCacheKey(secretsPath)], nil
 }
 
+// RotateEncryptionKey atomically persists a replacement encryption key in
+// secrets.yml and advances its monotonic file-backed version.
+func RotateEncryptionKey(configPath, next string) (int, error) {
+	if err := validateEncryptionKey(next); err != nil {
+		return 0, err
+	}
+	path := filepath.Join(filepath.Dir(configPath), "secrets.yml")
+	if invalidConfigFiles[configFileCacheKey(path)] {
+		return 0, fmt.Errorf("secrets.yml is invalid; refusing to rotate encryption key")
+	}
+	values, err := readSecrets(path)
+	if err != nil {
+		return 0, err
+	}
+	server := nestedSecretMap(values, "server")
+	security := nestedSecretMap(server, "security")
+	current, _ := security["encryption_key"].(string)
+	if strings.TrimSpace(current) == "" {
+		return 0, fmt.Errorf("server.security.encryption_key is missing from secrets.yml")
+	}
+	if current == next {
+		return 0, fmt.Errorf("replacement encryption key matches the current key")
+	}
+	version := 1
+	switch value := security["encryption_key_version"].(type) {
+	case int:
+		version = value
+	case int64:
+		version = int(value)
+	case uint64:
+		version = int(value)
+	case float64:
+		version = int(value)
+	}
+	version++
+	security["encryption_key"] = next
+	security["encryption_key_version"] = version
+	server["security"] = security
+	values["server"] = server
+	if err := writeSecrets(path, values); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
 func generateOperatorToken() (string, error) {
 	return generatePrefixedToken("adm_")
 }

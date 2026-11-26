@@ -395,6 +395,10 @@ func doPage(h http.HandlerFunc, path, themeCookie string) *httptest.ResponseReco
 // TestStandardPagesRender verifies every mandated standard page returns 200,
 // HTML, and content that identifies the page (AI.md PART 16 "Standard pages").
 func TestStandardPagesRender(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	s := newTestPageServer()
 	cases := []struct {
 		path    string
@@ -480,6 +484,10 @@ func TestRequestPathUsesConfiguredAndTrustedProxyPrefixes(t *testing.T) {
 }
 
 func TestServerPageShellConformance(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	s := newTestPageServer()
 	pages := []string{
 		"server", "about", "privacy", "contact", "help", "mcp_help", "preferences",
@@ -853,8 +861,12 @@ func TestThemeClassInvalidCookieFallsBack(t *testing.T) {
 // TestThemeSetPersistsCookie verifies the no-JS theme endpoint sets the cookie
 // and redirects (AI.md PART 16 <noscript> fallback).
 func TestThemeSetPersistsCookie(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	s := newTestPageServer()
-	csrfToken := strings.Repeat("a", 64)
+	csrfToken := ensureCSRFToken(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	req := httptest.NewRequest(http.MethodPost, "/server/theme", strings.NewReader("theme=light&return=/&csrf_token="+csrfToken))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrfToken})
@@ -875,14 +887,18 @@ func TestThemeSetPersistsCookie(t *testing.T) {
 }
 
 func TestEnsureCSRFTokenReusesCookie(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	first := httptest.NewRecorder()
 	token := ensureCSRFToken(first, request)
-	if len(token) != 64 {
-		t.Fatalf("CSRF token length = %d, want 64", len(token))
+	if len(token) != 128 {
+		t.Fatalf("CSRF token length = %d, want 128", len(token))
 	}
 	issued := first.Result().Cookies()
-	if len(issued) != 1 || issued[0].Name != "csrf_token" || issued[0].Value != token || !issued[0].HttpOnly {
+	if len(issued) != 1 || issued[0].Name != "csrf_token" || issued[0].Value != token || issued[0].HttpOnly {
 		t.Fatalf("issued CSRF cookie = %#v", issued)
 	}
 	request.AddCookie(issued[0])
@@ -896,13 +912,24 @@ func TestEnsureCSRFTokenReusesCookie(t *testing.T) {
 }
 
 func TestValidCSRFRequest(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
-	request.AddCookie(&http.Cookie{Name: "csrf_token", Value: strings.Repeat("a", 64)})
-	request.Form = url.Values{"csrf_token": {strings.Repeat("a", 64)}}
+	token := ensureCSRFToken(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	request.AddCookie(&http.Cookie{Name: "csrf_token", Value: token})
+	request.Form = url.Values{"csrf_token": {token}}
 	if !validCSRFRequest(request) {
 		t.Fatal("matching CSRF token was rejected")
 	}
-	request.Form.Set("csrf_token", strings.Repeat("b", 64))
+	headerRequest := httptest.NewRequest(http.MethodPost, "/", nil)
+	headerRequest.AddCookie(&http.Cookie{Name: "csrf_token", Value: token})
+	headerRequest.Header.Set("X-CSRF-Token", token)
+	if !validCSRFRequest(headerRequest) {
+		t.Fatal("matching CSRF header token was rejected")
+	}
+	request.Form.Set("csrf_token", strings.Repeat("b", len(token)))
 	if validCSRFRequest(request) {
 		t.Fatal("mismatched CSRF token was accepted")
 	}
@@ -914,8 +941,12 @@ func TestValidCSRFRequest(t *testing.T) {
 
 // TestThemeSetRejectsOpenRedirect verifies an external return target is ignored.
 func TestThemeSetRejectsOpenRedirect(t *testing.T) {
+	if err := db.Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
 	s := newTestPageServer()
-	csrfToken := strings.Repeat("a", 64)
+	csrfToken := ensureCSRFToken(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	req := httptest.NewRequest(http.MethodPost, "/server/theme", strings.NewReader("theme=dark&return=//evil.example&csrf_token="+csrfToken))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrfToken})

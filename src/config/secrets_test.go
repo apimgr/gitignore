@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadRecordsGeneratedSecretAuditEvents(t *testing.T) {
@@ -311,6 +314,41 @@ func TestLoadSecretsConfigDoesNotWarnForSecretStoreMetadata(t *testing.T) {
 	}
 	if cfg.Server.Security.EncryptionKey != key {
 		t.Fatalf("encryption key = %q, want protected value", cfg.Server.Security.EncryptionKey)
+	}
+}
+
+func TestRotateEncryptionKeyUpdatesSecretsFileAndVersion(t *testing.T) {
+	directory := t.TempDir()
+	configPath := filepath.Join(directory, "server.yml")
+	secretsPath := filepath.Join(directory, "secrets.yml")
+	oldKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x16}, 32))
+	newKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x27}, 32))
+	contents := "server:\n  token: adm_kept_token\n  security:\n    encryption_key: " + oldKey + "\n    encryption_key_version: 3\n"
+	if err := os.WriteFile(secretsPath, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	version, err := RotateEncryptionKey(configPath, newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 4 {
+		t.Fatalf("encryption key version = %d, want 4", version)
+	}
+	var stored map[string]interface{}
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(data, &stored); err != nil {
+		t.Fatal(err)
+	}
+	server := stored["server"].(map[string]interface{})
+	security := server["security"].(map[string]interface{})
+	if security["encryption_key"] != newKey || security["encryption_key_version"] != 4 {
+		t.Fatalf("stored security secrets = %#v", security)
+	}
+	if server["token"] != "adm_kept_token" {
+		t.Fatalf("operator token changed: %#v", server["token"])
 	}
 }
 

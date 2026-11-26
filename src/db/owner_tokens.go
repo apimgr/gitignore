@@ -366,7 +366,7 @@ WHERE owner_id = ? AND id = ? AND revoked_at IS NULL`, tokenHash, tokenPrefix, t
 		if changed != 1 {
 			return ErrOwnerTokenNotFound
 		}
-		return nil
+		return rotateGeneratedAppSecret(ctx, tx, "csrf_token_secret", now.UTC(), 0)
 	})
 }
 

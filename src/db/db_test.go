@@ -59,22 +59,22 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 	defer func() { _ = rows.Close() }()
 
 	want := map[string]bool{
-		"rate_limits":            false,
-		"rate_limit_events":      false,
-		"audit_log":              false,
-		"scheduler_tasks":        false,
-		"scheduler_history":      false,
-		"backups":                false,
-		"app_secrets":            false,
-		"app_secret_revocations": false,
-		"owners":                 false,
-		"api_tokens":             false,
-		"security_thanks":        false,
+		"rate_limits":       false,
+		"rate_limit_events": false,
+		"audit_log":         false,
+		"scheduler_tasks":   false,
+		"scheduler_history": false,
+		"backups":           false,
+		"app_secrets":       false,
+		"owners":            false,
+		"api_tokens":        false,
+		"security_thanks":   false,
 	}
 	forbidden := map[string]bool{
 		"server_config": true, "server_admin_credentials": true,
 		"server_admin_sessions": true, "user_accounts": true,
 		"user_tokens": true, "user_sessions": true, "user_invites": true,
+		"app_secret_revocations": true,
 	}
 	for rows.Next() {
 		var name string
@@ -96,29 +96,74 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}
-	var secretVersionDefault string
-	versionRows, err := conn.Query(`PRAGMA table_info(app_secrets)`)
+	secretColumns := make(map[string]bool)
+	secretInfoRows, err := conn.Query(`PRAGMA table_info(app_secrets)`)
 	if err != nil {
 		t.Fatalf("inspect app_secrets columns: %v", err)
 	}
-	for versionRows.Next() {
+	for secretInfoRows.Next() {
 		var cid int
 		var name, columnType string
 		var notNull int
 		var defaultValue sql.NullString
 		var primaryKey int
-		if err := versionRows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+		if err := secretInfoRows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
 			t.Fatal(err)
 		}
-		if name == "version" && defaultValue.Valid {
-			secretVersionDefault = defaultValue.String
-		}
+		secretColumns[name] = true
 	}
-	if err := versionRows.Close(); err != nil {
+	if err := secretInfoRows.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if secretVersionDefault != "1" {
-		t.Fatalf("app_secrets.version default = %q, want 1", secretVersionDefault)
+	if len(secretColumns) != 3 || !secretColumns["name"] || !secretColumns["value"] || !secretColumns["updated_at"] {
+		t.Fatalf("app_secrets columns = %v, want name, value, updated_at", secretColumns)
+	}
+}
+
+func TestInitGeneratesAllProjectSecretsAndRotatesDueBrowserKeys(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = Close() }()
+	for _, name := range []string{"installation_secret", "cookie_signing_key", "csrf_token_secret"} {
+		secret, err := ApplicationSecret(name)
+		if err != nil || len(secret) != 32 {
+			t.Fatalf("ApplicationSecret(%q) = %d bytes, %v", name, len(secret), err)
+		}
+	}
+	beforeCookie, err := ApplicationSecret("cookie_signing_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCSRF, err := ApplicationSecret("csrf_token_secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if _, err := conn.Exec("UPDATE app_secrets SET updated_at = ? WHERE name IN (?, ?)", old, "cookie_signing_key", "csrf_token_secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RotateDueApplicationSecrets(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	afterCookie, err := ApplicationSecret("cookie_signing_key")
+	if err != nil || bytes.Equal(beforeCookie, afterCookie) {
+		t.Fatalf("cookie signing key did not rotate: %v", err)
+	}
+	afterCSRF, err := ApplicationSecret("csrf_token_secret")
+	if err != nil || bytes.Equal(beforeCSRF, afterCSRF) {
+		t.Fatalf("CSRF signing key did not rotate: %v", err)
+	}
+	var cookiePrevious, csrfPrevious int
+	if err := conn.QueryRow("SELECT COUNT(*) FROM app_secrets WHERE name = ?", "cookie_signing_key_previous").Scan(&cookiePrevious); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow("SELECT COUNT(*) FROM app_secrets WHERE name = ?", "csrf_token_secret_previous").Scan(&csrfPrevious); err != nil {
+		t.Fatal(err)
+	}
+	if cookiePrevious != 1 || csrfPrevious != 0 {
+		t.Fatalf("previous key rows: cookie=%d csrf=%d", cookiePrevious, csrfPrevious)
 	}
 }
 
@@ -139,7 +184,7 @@ func TestWriteRollsBackSQLiteMutations(t *testing.T) {
 	t.Cleanup(func() { _ = Close() })
 	writeErr := errors.New("force rollback")
 	err := Write(context.Background(), func(tx *sql.Tx) error {
-		if _, err := tx.Exec("INSERT INTO app_secrets(name, value) VALUES(?, ?)", "write_rollback_probe", "value"); err != nil {
+		if _, err := tx.Exec("INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?)", "write_rollback_probe", "value", time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}
 		return writeErr
@@ -361,6 +406,150 @@ func TestMigrateLegacyInstallationSecretKey(t *testing.T) {
 	loaded, err := InstallationSecret()
 	if err != nil || !bytes.Equal(loaded, secret) {
 		t.Fatalf("migrated installation secret = %x, %v", loaded, err)
+	}
+}
+
+func TestRotateInstallationSecretKeepsPreviousDuringGrace(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = Close() }()
+	old, err := InstallationSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := bytes.Repeat([]byte{0x5a}, 32)
+	rotatedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if err := RotateInstallationSecret(next, rotatedAt); err != nil {
+		t.Fatal(err)
+	}
+	current, err := InstallationSecret()
+	if err != nil || !bytes.Equal(current, next) {
+		t.Fatalf("current installation secret = %x, %v", current, err)
+	}
+	candidates, err := InstallationSecretCandidates(rotatedAt.Add(time.Hour))
+	if err != nil || len(candidates) != 2 || !bytes.Equal(candidates[0], next) || !bytes.Equal(candidates[1], old) {
+		t.Fatalf("grace candidates = %x, %v", candidates, err)
+	}
+	if err := RotateInstallationSecret(bytes.Repeat([]byte{0x33}, 32), rotatedAt.Add(time.Hour)); err == nil {
+		t.Fatal("second rotation succeeded during the grace period")
+	}
+	candidates, err = InstallationSecretCandidates(rotatedAt.Add(8 * 24 * time.Hour))
+	if err != nil || len(candidates) != 1 || !bytes.Equal(candidates[0], next) {
+		t.Fatalf("expired grace candidates = %x, %v", candidates, err)
+	}
+}
+
+func TestRetireExpiredSecretRotationsRemovesGraceRows(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = Close() }()
+	rotatedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if err := RotateInstallationSecret(bytes.Repeat([]byte{0x4b}, 32), rotatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := RetireExpiredSecretRotations(rotatedAt.Add(8 * 24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := conn.QueryRow("SELECT COUNT(*) FROM app_secrets WHERE name LIKE 'installation_secret_previous%'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expired installation secret grace rows remaining = %d", count)
+	}
+}
+
+func TestCompleteEncryptionKeyRotationReencryptsSensitiveRows(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = Close() }()
+	oldKey := bytes.Repeat([]byte{0x17}, 32)
+	nextKey := bytes.Repeat([]byte{0x29}, 32)
+	oldEncoded := base64.StdEncoding.EncodeToString(oldKey)
+	nextEncoded := base64.StdEncoding.EncodeToString(nextKey)
+	token, err := encryptAtRest(oldKey, []byte("owner-token-value"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := encryptAtRest(oldKey, []byte("encrypted report body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contact, err := encryptAtRest(oldKey, []byte("researcher@example.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec("INSERT INTO owners(id) VALUES(?)", "owner-rotation"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`INSERT INTO api_tokens(owner_id, kind, token_hash, token_prefix, token_enc)
+		VALUES(?, 'primary', ?, ?, ?)`, "owner-rotation", "hash-rotation", "own_rotation", base64.StdEncoding.EncodeToString(token)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`INSERT INTO security_reports(tracking_id, token_hash, body_enc, body_alg, contact_enc, severity, component)
+		VALUES(?, ?, ?, 'aes-256-gcm', ?, 'high', 'API')`, "sec_rotation000001", "hash-report", body, contact); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareEncryptionKeyRotation(oldEncoded, nextEncoded, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, needsPersistence, err := PendingEncryptionKeyRotation(oldEncoded)
+	if err != nil || !needsPersistence || recovered != nextEncoded {
+		t.Fatalf("pending rotation recovery = %q, %v, %v", recovered, needsPersistence, err)
+	}
+	recovered, needsPersistence, err = PendingEncryptionKeyRotation(nextEncoded)
+	if err != nil || needsPersistence || recovered != nextEncoded {
+		t.Fatalf("persisted rotation recovery = %q, %v, %v", recovered, needsPersistence, err)
+	}
+	if err := CompleteEncryptionKeyRotation(nextEncoded); err != nil {
+		t.Fatal(err)
+	}
+	var tokenEncoded string
+	if err := conn.QueryRow("SELECT token_enc FROM api_tokens WHERE owner_id = ?", "owner-rotation").Scan(&tokenEncoded); err != nil {
+		t.Fatal(err)
+	}
+	tokenCiphertext, err := base64.StdEncoding.DecodeString(tokenEncoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plaintext, err := decryptAtRest(nextKey, tokenCiphertext); err != nil || string(plaintext) != "owner-token-value" {
+		t.Fatalf("rotated owner token = %q, %v", plaintext, err)
+	}
+	var bodyCiphertext, contactCiphertext []byte
+	if err := conn.QueryRow("SELECT body_enc, contact_enc FROM security_reports WHERE tracking_id = ?", "sec_rotation000001").Scan(&bodyCiphertext, &contactCiphertext); err != nil {
+		t.Fatal(err)
+	}
+	if plaintext, err := decryptAtRest(nextKey, bodyCiphertext); err != nil || string(plaintext) != "encrypted report body" {
+		t.Fatalf("rotated report body = %q, %v", plaintext, err)
+	}
+	if plaintext, err := decryptAtRest(nextKey, contactCiphertext); err != nil || string(plaintext) != "researcher@example.test" {
+		t.Fatalf("rotated report contact = %q, %v", plaintext, err)
+	}
+	if err := CompleteEncryptionKeyRotation(nextEncoded); err != nil {
+		t.Fatalf("idempotent completion: %v", err)
+	}
+	if _, err := conn.Exec("UPDATE api_tokens SET token_enc = ? WHERE owner_id = ?", base64.StdEncoding.EncodeToString(token), "owner-rotation"); err != nil {
+		t.Fatal(err)
+	}
+	plaintext, rotated, err := DecryptOwnerTokenDuringRotation(base64.StdEncoding.EncodeToString(token), nextEncoded)
+	if err != nil || !rotated || string(plaintext) != "owner-token-value" {
+		t.Fatalf("previous-key owner token read = %q, %v, %v", plaintext, rotated, err)
+	}
+	if err := conn.QueryRow("SELECT token_enc FROM api_tokens WHERE owner_id = ?", "owner-rotation").Scan(&tokenEncoded); err != nil {
+		t.Fatal(err)
+	}
+	tokenCiphertext, err = base64.StdEncoding.DecodeString(tokenEncoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plaintext, err := decryptAtRest(nextKey, tokenCiphertext); err != nil || string(plaintext) != "owner-token-value" {
+		t.Fatalf("opportunistically re-encrypted token = %q, %v", plaintext, err)
 	}
 }
 

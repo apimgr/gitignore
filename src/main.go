@@ -464,6 +464,26 @@ func main() {
 		log.Printf("%s", cliText("cli.main.initialize_database_failed", "error", err))
 		os.Exit(exUnavailable)
 	}
+	pendingEncryptionKey, needsEncryptionKeyPersistence, err := db.PendingEncryptionKeyRotation(cfg.Server.Security.EncryptionKey)
+	if err != nil {
+		log.Printf("security: could not recover encryption key rotation: %v", err)
+		os.Exit(exUnavailable)
+	}
+	if needsEncryptionKeyPersistence {
+		if _, err := config.RotateEncryptionKey(configPath, pendingEncryptionKey); err != nil {
+			log.Printf("security: could not persist recovered encryption key rotation: %v", err)
+			os.Exit(exUnavailable)
+		}
+		cfg.Server.Security.EncryptionKey = pendingEncryptionKey
+	}
+	if err := db.CompleteEncryptionKeyRotation(cfg.Server.Security.EncryptionKey); err != nil {
+		log.Printf("security: could not finish encryption key rotation: %v", err)
+		os.Exit(exUnavailable)
+	}
+	if err := reconcilePGPPrivateKey(configDir); err != nil {
+		log.Printf("security: could not finish installation secret rotation: %v", err)
+		os.Exit(exUnavailable)
+	}
 	configureRateLimitCache(cfg.Server.Cache, configDir)
 	if err := audit.SetDatabaseSink(db.AppendAuditEntry); err != nil {
 		log.Printf("failed to persist buffered audit events: %v", err)
@@ -1153,6 +1173,12 @@ func handleMaintenanceCommand(cmd, configDir, dataDir, logsDir, configPath strin
 	case "security":
 		if err := handleSecurityMaintenance(configPath, dataDir, logsDir, args); err != nil {
 			fmt.Fprintln(os.Stderr, cliText("cli.main.security_maintenance_failed", "error", err))
+			os.Exit(exConfig)
+		}
+
+	case "secret":
+		if err := handleSecretMaintenance(configPath, configDir, dataDir, logsDir, args); err != nil {
+			fmt.Fprintln(os.Stderr, cliText("cli.main.maintenance_failed", "error", err))
 			os.Exit(exConfig)
 		}
 

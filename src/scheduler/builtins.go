@@ -207,6 +207,12 @@ func securityCleanupHandler(d Deps) HandlerFunc {
 		if err != nil {
 			return err
 		}
+		if err := db.RotateDueApplicationSecrets(time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := db.RetireExpiredSecretRotations(time.Now().UTC()); err != nil {
+			return err
+		}
 		if count > 0 {
 			log.Printf("scheduler: security_cleanup removed %d expired reports", count)
 		}

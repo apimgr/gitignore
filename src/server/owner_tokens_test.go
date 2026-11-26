@@ -31,6 +31,9 @@ func TestOwnerTokenCookieNamesMatchIDEA(t *testing.T) {
 	if !strings.Contains(contents, "\nowner_token_legacy: "+legacyOwnerTokenCookieName+"\n") {
 		t.Fatalf("IDEA.md does not record legacy owner cookie name %q", legacyOwnerTokenCookieName)
 	}
+	if ownerTokenViewCookieName != "gitignore_token_view" {
+		t.Fatalf("token view cookie name = %q, want project-scoped name", ownerTokenViewCookieName)
+	}
 }
 
 func TestOwnerTokenIssueAuthenticateAndEncrypt(t *testing.T) {
@@ -95,7 +98,7 @@ func TestOwnerTokenIssueAuthenticateAndEncrypt(t *testing.T) {
 	}
 }
 
-func TestOwnerCookieMiddlewareAndPageFlash(t *testing.T) {
+func TestOwnerCookieMiddlewareAndTokenViewCookie(t *testing.T) {
 	if err := db.Init(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -132,13 +135,38 @@ func TestOwnerCookieMiddlewareAndPageFlash(t *testing.T) {
 	if len(recorder.Result().Cookies()) == 0 || recorder.Result().Cookies()[0].MaxAge >= 0 {
 		t.Fatal("invalid owner cookie was not cleared")
 	}
-	storeOwnerTokenPageFlash(item.OwnerID, map[int64]string{item.ID: raw}, "created")
-	flash, ok := takeOwnerTokenPageFlash(item.OwnerID)
-	if !ok || flash.Message != "created" || flash.Revealed[item.ID] != raw {
-		t.Fatalf("owner token flash = %+v, ok=%v", flash, ok)
+	viewCookieResponse := httptest.NewRecorder()
+	if err := setOwnerTokenViewCookie(s, viewCookieResponse, httptest.NewRequest(http.MethodPost, "/", nil), item.OwnerID, "primary"); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := takeOwnerTokenPageFlash(item.OwnerID); ok {
-		t.Fatal("owner token flash was not consumed")
+	viewCookies := viewCookieResponse.Result().Cookies()
+	if len(viewCookies) != 1 || viewCookies[0].Name != ownerTokenViewCookieName || viewCookies[0].Path != "/server/preferences/tokens" || viewCookies[0].MaxAge != 60 || !viewCookies[0].HttpOnly {
+		t.Fatalf("token view cookie = %#v", viewCookies)
+	}
+	if strings.Contains(viewCookies[0].Value, raw) {
+		t.Fatal("token view cookie contains the raw token")
+	}
+	wrongOwnerRequest := httptest.NewRequest(http.MethodGet, "/server/preferences/tokens", nil)
+	wrongOwnerRequest.AddCookie(viewCookies[0])
+	if card := readOwnerTokenViewCookie(s, httptest.NewRecorder(), wrongOwnerRequest, "own_another_owner"); card != "" {
+		t.Fatalf("token view cookie accepted for another owner: %q", card)
+	}
+	viewRequest := httptest.NewRequest(http.MethodGet, "/server/preferences/tokens", nil)
+	viewRequest.AddCookie(&http.Cookie{Name: ownerTokenCookieName, Value: raw})
+	viewRequest.AddCookie(viewCookies[0])
+	viewResponse := httptest.NewRecorder()
+	s.handleOwnerTokensPage(viewResponse, viewRequest)
+	if viewResponse.Code != http.StatusOK || !strings.Contains(viewResponse.Body.String(), raw) || viewResponse.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("one-use token view status=%d cache=%q body=%s", viewResponse.Code, viewResponse.Header().Get("Cache-Control"), viewResponse.Body.String())
+	}
+	cleared := false
+	for _, cookie := range viewResponse.Result().Cookies() {
+		if cookie.Name == ownerTokenViewCookieName && cookie.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatal("token view cookie was not cleared after use")
 	}
 
 	pageRequest := httptest.NewRequest(http.MethodGet, "/server/preferences/tokens", nil)
@@ -148,7 +176,7 @@ func TestOwnerCookieMiddlewareAndPageFlash(t *testing.T) {
 	if pageResponse.Code != http.StatusOK || !strings.Contains(pageResponse.Body.String(), "Owner tokens") || !strings.Contains(pageResponse.Body.String(), `id="revoke-primary"`) || !strings.Contains(pageResponse.Body.String(), raw[len(raw)-4:]) || strings.Contains(pageResponse.Body.String(), raw) {
 		t.Fatalf("owner token page status=%d body=%s", pageResponse.Code, pageResponse.Body.String())
 	}
-	csrf := strings.Repeat("a", 64)
+	csrf := ensureCSRFToken(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	revokeRequest := httptest.NewRequest(http.MethodPost, "/server/preferences/token/revoke", strings.NewReader(fmt.Sprintf("csrf_token=%s&confirm=%s", csrf, raw[len(raw)-4:])))
 	revokeRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	revokeRequest.AddCookie(&http.Cookie{Name: ownerTokenCookieName, Value: raw})

@@ -322,7 +322,7 @@ func serverObjectName(name string, prefix bool) string {
 	case "rate_limits", "idx_rate_limits_window", "rate_limit_events", "idx_rate_limit_events_key_time",
 		"audit_log", "idx_audit_timestamp", "idx_audit_category", "idx_audit_actor_ip", "idx_audit_target",
 		"scheduler_tasks", "scheduler_history", "idx_scheduler_history_task", "idx_scheduler_history_started", "server_scheduler_state",
-		"backups", "idx_backups_created", "ip_blocks", "idx_ip_blocks_expiry", "app_secrets", "idx_app_secrets_name", "app_secret_revocations", "pgp_key_metadata",
+		"backups", "idx_backups_created", "ip_blocks", "idx_ip_blocks_expiry", "app_secrets", "idx_app_secrets_name", "pgp_key_metadata",
 		"security_reports", "idx_security_reports_status", "security_thanks", "idx_security_thanks_disclosed_on",
 		"idx_security_thanks_tracking_id", "owners", "api_tokens", "idx_api_tokens_primary", "idx_api_tokens_hash",
 		"idx_api_tokens_prefix", "idx_api_tokens_owner", "idx_api_tokens_active", "idx_api_tokens_owner_name":

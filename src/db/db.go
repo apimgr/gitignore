@@ -248,11 +248,11 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 			if err := ensureColumn(ctx, tx, "app_secrets", "name", "TEXT"); err != nil {
 				return fmt.Errorf("failed to migrate secret names: %w", err)
 			}
-			if err := ensureColumn(ctx, tx, "app_secrets", "version", "INTEGER NOT NULL DEFAULT 1"); err != nil {
-				return fmt.Errorf("failed to migrate secret versions: %w", err)
-			}
 			if err := migrateCanonicalState(ctx, tx); err != nil {
 				return fmt.Errorf("failed to migrate canonical server state: %w", err)
+			}
+			if err := initializeGeneratedAppSecrets(ctx, tx); err != nil {
+				return fmt.Errorf("failed to initialize generated application secrets: %w", err)
 			}
 			if err := ensureColumn(ctx, tx, "api_tokens", "token_last4", "TEXT NOT NULL DEFAULT ''"); err != nil {
 				return fmt.Errorf("failed to migrate owner token confirmation metadata: %w", err)
@@ -290,6 +290,16 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 		localCache = cache
 		readConn = cache.reader
 	}
+	if !remoteOnline && localCache != nil {
+		if err := writeWithDB(ctx, localCache.writer, true, "initialize cached application secrets", func(tx *sql.Tx) error {
+			return initializeGeneratedAppSecrets(ctx, tx)
+		}); err != nil {
+			conn, readConn, remoteReadConn = nil, nil, nil
+			_ = c.Close()
+			_ = r.Close()
+			return fmt.Errorf("failed to initialize generated application secrets: %w", err)
+		}
+	}
 	if err := loadRateLimitEvents(ctx, readConn); err != nil {
 		conn, readConn = nil, nil
 		sqliteConn = false
@@ -305,6 +315,45 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 		return fmt.Errorf("failed to load owner-token counters: %w", err)
 	}
 	startHotCounterFlusher()
+	return nil
+}
+
+// ApplicationSecret returns one of the generated 32-byte application secrets.
+func ApplicationSecret(name string) ([]byte, error) {
+	if name != "installation_secret" && name != "cookie_signing_key" && name != "csrf_token_secret" {
+		return nil, errors.New("unknown application secret")
+	}
+	mu.RLock()
+	reader := readConn
+	mu.RUnlock()
+	if reader == nil {
+		return nil, errors.New("database is not initialized")
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	var encoded string
+	if err := reader.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", name).Scan(&encoded); err != nil {
+		return nil, err
+	}
+	secret, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(secret) != 32 {
+		return nil, errors.New("stored application secret is invalid")
+	}
+	return secret, nil
+}
+
+func initializeGeneratedAppSecrets(ctx context.Context, tx *sql.Tx) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, name := range []string{"installation_secret", "cookie_signing_key", "csrf_token_secret"} {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO app_secrets(name, value, updated_at)
+			VALUES(?, ?, ?) ON CONFLICT(name) DO NOTHING`, name, base64.StdEncoding.EncodeToString(secret), now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -832,18 +881,9 @@ CREATE TABLE IF NOT EXISTS ip_blocks (
 CREATE INDEX IF NOT EXISTS idx_ip_blocks_expiry ON ip_blocks(expires_at);
 
 CREATE TABLE IF NOT EXISTS app_secrets (
-    name        TEXT PRIMARY KEY,
-    value       TEXT NOT NULL,
-    version     INTEGER NOT NULL DEFAULT 1,
-    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS app_secret_revocations (
-    name       TEXT NOT NULL,
-    version    INTEGER NOT NULL,
-    node_id    TEXT NOT NULL,
-    revoked_at TEXT NOT NULL,
-    PRIMARY KEY (name, version, node_id)
+    name       TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pgp_key_metadata (
@@ -960,7 +1000,7 @@ func InstallationSecret() ([]byte, error) {
 	writeContext, writeCancel := writeCtx()
 	defer writeCancel()
 	if err := Write(writeContext, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(writeContext, "INSERT INTO app_secrets(name, value) VALUES(?, ?) ON CONFLICT(name) DO NOTHING", "installation_secret", candidate)
+		_, err := tx.ExecContext(writeContext, "INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?) ON CONFLICT(name) DO NOTHING", "installation_secret", candidate, time.Now().UTC().Format(time.RFC3339))
 		return err
 	}); err != nil {
 		return nil, err
@@ -973,6 +1013,126 @@ func InstallationSecret() ([]byte, error) {
 		return nil, fmt.Errorf("stored installation secret is invalid")
 	}
 	return secret, nil
+}
+
+// InstallationSecretCandidates returns the current secret and, during its
+// grace period, the immediately previous secret for validating live HMACs.
+func InstallationSecretCandidates(now time.Time) ([][]byte, error) {
+	return ApplicationSecretCandidates("installation_secret", now)
+}
+
+// ApplicationSecretCandidates returns a generated secret and its previous
+// value while the recorded grace period remains active.
+func ApplicationSecretCandidates(name string, now time.Time) ([][]byte, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if name != "installation_secret" && name != "cookie_signing_key" && name != "csrf_token_secret" {
+		return nil, errors.New("unknown application secret")
+	}
+	mu.RLock()
+	reader := readConn
+	mu.RUnlock()
+	if reader == nil {
+		return nil, errors.New("database is not initialized")
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	var current, previous, previousUntil string
+	if err := reader.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", name).Scan(&current); err != nil {
+		return nil, err
+	}
+	candidates := make([][]byte, 0, 2)
+	decode := func(encoded string) error {
+		value, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(value) != 32 {
+			return errors.New("stored installation secret is invalid")
+		}
+		candidates = append(candidates, value)
+		return nil
+	}
+	if err := decode(current); err != nil {
+		return nil, err
+	}
+	err := reader.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", name+"_previous").Scan(&previous)
+	if err == sql.ErrNoRows {
+		return candidates, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := reader.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", name+"_previous_until").Scan(&previousUntil); err != nil {
+		return nil, err
+	}
+	expires, err := time.Parse(time.RFC3339, previousUntil)
+	if err != nil {
+		return nil, errors.New("stored installation secret grace period is invalid")
+	}
+	if now.Before(expires) {
+		if err := decode(previous); err != nil {
+			return nil, err
+		}
+	}
+	return candidates, nil
+}
+
+// RotateInstallationSecret atomically saves the old value and grace deadline,
+// then advances the current value.
+func RotateInstallationSecret(next []byte, now time.Time) error {
+	if len(next) != 32 {
+		return errors.New("installation secret must be 32 bytes")
+	}
+	if _, err := InstallationSecret(); err != nil {
+		return err
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	encodedNext := base64.StdEncoding.EncodeToString(next)
+	ctx, cancel := writeCtx()
+	defer cancel()
+	return Write(ctx, func(tx *sql.Tx) error {
+		var current string
+		if err := tx.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", "installation_secret").Scan(&current); err != nil {
+			return err
+		}
+		var until string
+		err := tx.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", "installation_secret_previous_until").Scan(&until)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			expires, parseErr := time.Parse(time.RFC3339, until)
+			if parseErr != nil {
+				return errors.New("stored installation secret grace period is invalid")
+			}
+			if now.Before(expires) {
+				return errors.New("installation secret rotation is already in progress")
+			}
+		}
+		nowText := now.UTC().Format(time.RFC3339)
+		expiresText := now.Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339)
+		for name, value := range map[string]string{
+			"installation_secret_previous":       current,
+			"installation_secret_previous_until": expiresText,
+		} {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?)
+				ON CONFLICT(name) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, name, value, nowText); err != nil {
+				return err
+			}
+		}
+		result, err := tx.ExecContext(ctx, "UPDATE app_secrets SET value = ?, updated_at = ? WHERE name = ? AND value = ?", encodedNext, nowText, "installation_secret", current)
+		if err != nil {
+			return err
+		}
+		if count, err := result.RowsAffected(); err != nil || count != 1 {
+			if err != nil {
+				return err
+			}
+			return errors.New("installation secret changed during rotation")
+		}
+		return nil
+	})
 }
 
 // SaveSecurityReport stores report metadata and ciphertext without plaintext.

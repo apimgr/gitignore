@@ -540,10 +540,17 @@ func (s *Server) handlePreferencesSave(w http.ResponseWriter, r *http.Request) {
 
 func validCSRFRequest(r *http.Request) bool {
 	cookie, err := r.Cookie("csrf_token")
-	if err != nil || len(cookie.Value) != 64 {
+	if err != nil || !validCSRFToken(cookie.Value) {
 		return false
 	}
 	formToken := r.FormValue("csrf_token")
+	headerToken := r.Header.Get("X-CSRF-Token")
+	if formToken != "" && headerToken != "" && subtle.ConstantTimeCompare([]byte(formToken), []byte(headerToken)) != 1 {
+		return false
+	}
+	if headerToken != "" {
+		formToken = headerToken
+	}
 	return len(formToken) == len(cookie.Value) && subtle.ConstantTimeCompare([]byte(formToken), []byte(cookie.Value)) == 1
 }
 

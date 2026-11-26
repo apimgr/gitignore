@@ -33,17 +33,19 @@ func securityID(now time.Time) (string, error) {
 // validSecurityID accepts the current and immediately previous 48-hour
 // windows so a security.txt fetched at a rotation boundary remains usable.
 func validSecurityID(supplied string, now time.Time) bool {
-	secret, err := db.InstallationSecret()
+	secrets, err := db.InstallationSecretCandidates(now)
 	if err != nil || len(supplied) != 16 {
 		return false
 	}
 	current := now.UTC().Unix() / int64(securityIDWindow.Seconds())
-	for _, window := range []int64{current, current - 1} {
-		mac := hmac.New(sha256.New, secret)
-		_, _ = mac.Write([]byte(strconv.FormatInt(window, 10)))
-		expected := hex.EncodeToString(mac.Sum(nil))[:16]
-		if hmac.Equal([]byte(expected), []byte(supplied)) {
-			return true
+	for _, secret := range secrets {
+		for _, window := range []int64{current, current - 1} {
+			mac := hmac.New(sha256.New, secret)
+			_, _ = mac.Write([]byte(strconv.FormatInt(window, 10)))
+			expected := hex.EncodeToString(mac.Sum(nil))[:16]
+			if hmac.Equal([]byte(expected), []byte(supplied)) {
+				return true
+			}
 		}
 	}
 	return false

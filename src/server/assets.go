@@ -2,7 +2,10 @@ package server
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"fmt"
@@ -14,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/apimgr/gitignore/src/common/i18n"
+	"github.com/apimgr/gitignore/src/db"
 )
 
 //go:embed assets/static
@@ -105,6 +109,7 @@ type PageData struct {
 	Consent                     ConsentView
 	Announcements               []AnnouncementView
 	SuppressAnnouncementDismiss bool
+	PrivateCache                bool
 }
 
 type AnnouncementView struct {
@@ -300,7 +305,11 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	setCacheHeaders(w, "html")
+	if data.PrivateCache {
+		setCacheHeaders(w, "authenticated")
+	} else {
+		setCacheHeaders(w, "html")
+	}
 	w.Header().Set("ETag", `"`+s.assetStamp()+`"`)
 	versionPurge(w, r, s.assetStamp(), status)
 	if status != http.StatusOK {
@@ -314,16 +323,37 @@ func ensureCSRFToken(w http.ResponseWriter, r *http.Request) string {
 }
 
 func ensureCSRFTokenWithSecure(w http.ResponseWriter, r *http.Request, secure bool) string {
-	if cookie, err := r.Cookie("csrf_token"); err == nil && len(cookie.Value) == 64 {
-		if _, err := hex.DecodeString(cookie.Value); err == nil {
-			return cookie.Value
-		}
+	if cookie, err := r.Cookie("csrf_token"); err == nil && validCSRFToken(cookie.Value) {
+		return cookie.Value
 	}
 	var token [32]byte
 	if _, err := rand.Read(token[:]); err != nil {
 		return ""
 	}
-	value := hex.EncodeToString(token[:])
-	http.SetCookie(w, &http.Cookie{Name: "csrf_token", Value: value, Path: "/", MaxAge: 3600, SameSite: http.SameSiteStrictMode, Secure: secure, HttpOnly: true})
+	secret, err := db.ApplicationSecret("csrf_token_secret")
+	if err != nil {
+		return ""
+	}
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write(token[:])
+	value := hex.EncodeToString(token[:]) + hex.EncodeToString(mac.Sum(nil))
+	http.SetCookie(w, &http.Cookie{Name: "csrf_token", Value: value, Path: "/", MaxAge: 3600, SameSite: http.SameSiteStrictMode, Secure: secure, HttpOnly: false})
 	return value
+}
+
+func validCSRFToken(value string) bool {
+	if len(value) != 128 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	if err != nil || len(decoded) != 64 {
+		return false
+	}
+	secret, err := db.ApplicationSecret("csrf_token_secret")
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write(decoded[:32])
+	return subtle.ConstantTimeCompare(decoded[32:], mac.Sum(nil)) == 1
 }

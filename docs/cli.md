@@ -29,7 +29,7 @@ gitignore [flags]
 | `--color auto\|yes\|no` | Select colored output |
 | `--force`, `-y` | Skip confirmation prompts where supported |
 
-Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. `--i2p` enables the I2P eepsite; `--i2p=false` disables it for that run. Security report metadata requires root privileges or an interactive `server.token` prompt:
+Commands use flags with values, for example `--status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. `--i2p` enables the I2P eepsite; `--i2p=false` disables it for that run. Security report metadata requires root privileges or an interactive `server.token` prompt:
 
 On the first server startup, the foreground process prints the application name, version, mode, web URL, and versioned Swagger URL. The banner uses plain text on narrow or dumb terminals.
 
@@ -88,4 +88,4 @@ Commands include:
 | `combine NAME...` | Combine templates |
 | `stats` | Show catalog statistics |
 
-The client supports `--server URL`, `--config NAME`, `--output text\|json\|table`, `--debug`, `--color auto\|yes\|no`, `--lang CODE`, `--version`, and shell integration flags. `GITIGNORE_SERVER_PRIMARY` sets the default server URL, and `NO_COLOR` disables colored output. The default server URL and profile settings come from the client configuration file. See [configuration](configuration.md).
+The client supports `--server URL`, `--config NAME`, `--output text\|json\|table`, `--debug`, `--color auto\|yes\|no`, `--lang CODE`, `--version`, `--update check|yes`, and shell integration flags. `--update check` checks for a compatible release; `--update yes` downloads, verifies, and installs the published CLI binary. The client checks for updates once per invocation and may prompt before installing. `GITIGNORE_SERVER_PRIMARY` sets the default server URL, and `NO_COLOR` disables colored output. The default server URL, credentials, and profile settings come from the client configuration file. See [configuration](configuration.md).

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -142,6 +143,7 @@ func applyBackupRetention(directory string, retention config.BackupRetentionConf
 		// The hard size limit overrides period and count retention, but a full
 		// archive remains while a retained incremental names it as its base.
 		sort.Slice(all, func(i, j int) bool { return all[i].date.Before(all[j].date) })
+		protectedBaseRetained := false
 		for total > int64(capBytes) {
 			removed := false
 			for _, item := range all {
@@ -153,6 +155,11 @@ func applyBackupRetention(directory string, retention config.BackupRetentionConf
 				}
 				isIncremental := strings.HasPrefix(item.name, projectName+"-daily.tar.gz") || strings.HasPrefix(item.name, projectName+"-hourly.tar.gz")
 				if !isIncremental && protectedBases[item.name] > 0 {
+					protectedBaseRetained = true
+					continue
+				}
+				if isIncremental && protectedBases[incrementalBases[item.path]] > 0 {
+					protectedBaseRetained = true
 					continue
 				}
 				if err := removeBackupArchive(item.path); err != nil {
@@ -172,6 +179,9 @@ func applyBackupRetention(directory string, retention config.BackupRetentionConf
 			if !removed {
 				break
 			}
+		}
+		if total > int64(capBytes) && protectedBaseRetained {
+			log.Printf("WARN backup.cap_exceeded_protected_base: cap_bytes=%d total_bytes=%d", capBytes, total)
 		}
 	}
 	return deleted, nil

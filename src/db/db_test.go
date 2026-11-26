@@ -59,16 +59,17 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 	defer func() { _ = rows.Close() }()
 
 	want := map[string]bool{
-		"rate_limits":       false,
-		"rate_limit_events": false,
-		"audit_log":         false,
-		"scheduler_tasks":   false,
-		"scheduler_history": false,
-		"backups":           false,
-		"app_secrets":       false,
-		"owners":            false,
-		"api_tokens":        false,
-		"security_thanks":   false,
+		"rate_limits":            false,
+		"rate_limit_events":      false,
+		"audit_log":              false,
+		"scheduler_tasks":        false,
+		"scheduler_history":      false,
+		"backups":                false,
+		"app_secrets":            false,
+		"app_secret_revocations": false,
+		"owners":                 false,
+		"api_tokens":             false,
+		"security_thanks":        false,
 	}
 	forbidden := map[string]bool{
 		"server_config": true, "server_admin_credentials": true,
@@ -91,6 +92,33 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 		if !found {
 			t.Errorf("expected table %q to exist", name)
 		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var secretVersionDefault string
+	versionRows, err := conn.Query(`PRAGMA table_info(app_secrets)`)
+	if err != nil {
+		t.Fatalf("inspect app_secrets columns: %v", err)
+	}
+	for versionRows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := versionRows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		if name == "version" && defaultValue.Valid {
+			secretVersionDefault = defaultValue.String
+		}
+	}
+	if err := versionRows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if secretVersionDefault != "1" {
+		t.Fatalf("app_secrets.version default = %q, want 1", secretVersionDefault)
 	}
 }
 

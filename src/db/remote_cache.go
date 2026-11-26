@@ -18,23 +18,24 @@ import (
 
 var cacheTables = []string{
 	"rate_limits", "rate_limit_events", "audit_log", "scheduler_tasks", "scheduler_history", "backups",
-	"app_secrets", "pgp_key_metadata", "security_reports", "security_thanks", "owners", "api_tokens", "ip_blocks",
+	"app_secrets", "app_secret_revocations", "pgp_key_metadata", "security_reports", "security_thanks", "owners", "api_tokens", "ip_blocks",
 }
 
 var cacheTableColumns = map[string][]string{
-	"rate_limits":       {"key", "count", "window_start", "updated_at"},
-	"rate_limit_events": {"id", "key", "occurred_at"},
-	"audit_log":         {"id", "timestamp", "level", "category", "action", "actor_ip", "target_type", "target_id", "details", "success"},
-	"scheduler_tasks":   {"id", "name", "enabled", "schedule", "last_run", "next_run", "last_status", "last_error", "run_count", "fail_count"},
-	"scheduler_history": {"id", "task_id", "started_at", "finished_at", "status", "error", "duration_ms"},
-	"backups":           {"id", "filename", "filepath", "size_bytes", "type", "created_at", "checksum", "notes"},
-	"app_secrets":       {"name", "value", "updated_at"},
-	"pgp_key_metadata":  {"id", "fingerprint", "created_at", "expires_at", "last_rotated_at", "keyservers_published", "revoked"},
-	"security_reports":  {"tracking_id", "security_id", "token_hash", "body_enc", "body_alg", "contact_enc", "severity", "component", "status", "researcher_comment", "disclosure_date", "credit_pref", "credit_name", "cve_requested", "created_at", "updated_at", "token_last_used", "closed_at"},
-	"security_thanks":   {"tracking_id", "credit", "severity", "disclosed_on"},
-	"owners":            {"id", "created_at", "last_seen_at"},
-	"api_tokens":        {"id", "owner_id", "kind", "name", "token_hash", "token_prefix", "token_last4", "token_enc", "created_at", "rotated_at", "expires_at", "last_used_at", "revoked_at", "revoked_reason"},
-	"ip_blocks":         {"ip", "cidr", "type", "reason", "blocked_at", "expires_at", "offense_count", "auto_blocked"},
+	"rate_limits":            {"key", "count", "window_start", "updated_at"},
+	"rate_limit_events":      {"id", "key", "occurred_at"},
+	"audit_log":              {"id", "timestamp", "level", "category", "action", "actor_ip", "target_type", "target_id", "details", "success"},
+	"scheduler_tasks":        {"id", "name", "enabled", "schedule", "last_run", "next_run", "last_status", "last_error", "run_count", "fail_count"},
+	"scheduler_history":      {"id", "task_id", "started_at", "finished_at", "status", "error", "duration_ms"},
+	"backups":                {"id", "filename", "filepath", "size_bytes", "type", "created_at", "checksum", "notes"},
+	"app_secrets":            {"name", "value", "version", "updated_at"},
+	"app_secret_revocations": {"name", "version", "node_id", "revoked_at"},
+	"pgp_key_metadata":       {"id", "fingerprint", "created_at", "expires_at", "last_rotated_at", "keyservers_published", "revoked"},
+	"security_reports":       {"tracking_id", "security_id", "token_hash", "body_enc", "body_alg", "contact_enc", "severity", "component", "status", "researcher_comment", "disclosure_date", "credit_pref", "credit_name", "cve_requested", "created_at", "updated_at", "token_last_used", "closed_at"},
+	"security_thanks":        {"tracking_id", "credit", "severity", "disclosed_on"},
+	"owners":                 {"id", "created_at", "last_seen_at"},
+	"api_tokens":             {"id", "owner_id", "kind", "name", "token_hash", "token_prefix", "token_last4", "token_enc", "created_at", "rotated_at", "expires_at", "last_used_at", "revoked_at", "revoked_reason"},
+	"ip_blocks":              {"ip", "cidr", "type", "reason", "blocked_at", "expires_at", "offense_count", "auto_blocked"},
 }
 
 type remoteSQLiteCache struct {

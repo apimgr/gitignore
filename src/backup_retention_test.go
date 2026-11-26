@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +126,33 @@ func TestApplyBackupRetentionProtectsOnlyReferencedIncrementalBase(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(directory, newestName)); err != nil {
 		t.Errorf("newest full was not retained: %v", err)
+	}
+}
+
+func TestBackupSizeCapLogsWhenProtectedPairExceedsCap(t *testing.T) {
+	directory := t.TempDir()
+	baseName := "gitignore_backup_2026-02-01.tar.gz"
+	baseChecksum := writeRetentionArchive(t, filepath.Join(directory, baseName), "full", "", "", false, "")
+	incrementalName := "gitignore-daily.tar.gz"
+	writeRetentionArchive(t, filepath.Join(directory, incrementalName), "incremental", baseName, baseChecksum, false, "")
+	var output bytes.Buffer
+	previousOutput := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	deleted, err := applyBackupRetention(directory, config.BackupRetentionConfig{MaxBackups: 1, MaxTotalSize: "1"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("deleted = %#v, want protected base and incremental retained", deleted)
+	}
+	if !strings.Contains(output.String(), "WARN backup.cap_exceeded_protected_base") {
+		t.Fatalf("retention warning = %q", output.String())
+	}
+	for _, name := range []string{baseName, incrementalName} {
+		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+			t.Errorf("protected archive %s missing: %v", name, err)
+		}
 	}
 }
 

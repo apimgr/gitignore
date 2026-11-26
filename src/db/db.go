@@ -248,6 +248,9 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 			if err := ensureColumn(ctx, tx, "app_secrets", "name", "TEXT"); err != nil {
 				return fmt.Errorf("failed to migrate secret names: %w", err)
 			}
+			if err := ensureColumn(ctx, tx, "app_secrets", "version", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+				return fmt.Errorf("failed to migrate secret versions: %w", err)
+			}
 			if err := migrateCanonicalState(ctx, tx); err != nil {
 				return fmt.Errorf("failed to migrate canonical server state: %w", err)
 			}
@@ -831,7 +834,16 @@ CREATE INDEX IF NOT EXISTS idx_ip_blocks_expiry ON ip_blocks(expires_at);
 CREATE TABLE IF NOT EXISTS app_secrets (
     name        TEXT PRIMARY KEY,
     value       TEXT NOT NULL,
+    version     INTEGER NOT NULL DEFAULT 1,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app_secret_revocations (
+    name       TEXT NOT NULL,
+    version    INTEGER NOT NULL,
+    node_id    TEXT NOT NULL,
+    revoked_at TEXT NOT NULL,
+    PRIMARY KEY (name, version, node_id)
 );
 
 CREATE TABLE IF NOT EXISTS pgp_key_metadata (

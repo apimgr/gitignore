@@ -198,7 +198,7 @@ web:
 
 ### Branding and SEO
 
-These keys all live in `yaml.d/branding.yml`. Empty image values use embedded defaults. The UI theme accepts `dark`, `light`, or `auto`; accent must be a valid high-contrast `#RRGGBB` color or is ignored.
+These keys all live in `yaml.d/branding.yml`. Empty image values use embedded defaults. The UI theme accepts `dark`, `light`, or `auto`; a valid accent `#RRGGBB` color is adjusted separately for dark and light themes to reach 4.5:1 contrast. Invalid values are ignored with one warning.
 
 | Key | Default | Validation or behavior |
 |---|---|---|
@@ -215,7 +215,7 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.seo.author` | Empty | Author or organization text. |
 | `server.seo.og_image` | Empty | Image URL/data URI/local asset name. |
 | `server.seo.twitter_handle` | Empty | `@handle`. |
-| `server.seo.title_separator` | `" - "` | Text between title and tagline. |
+| `server.seo.title_separator` | `" - "` | Text between title and tagline; values longer than 8 characters use the default. |
 | `server.seo.meta_tags` | `{}` | Map of name to content; at most 20 valid entries, invalid tag names/characters/length are rejected. |
 | `server.seo.canonical` | Empty | Absolute HTTPS URL; empty uses request origin. |
 | `server.seo.noindex` | `false` | Boolean; sets `noindex,nofollow` on all pages. |
@@ -228,7 +228,7 @@ These keys all live in `yaml.d/branding.yml`. Empty image values use embedded de
 | `server.seo.verification.google`, `.bing`, `.yandex`, `.baidu`, `.pinterest`, `.facebook` | Empty | Verification code; invalid formats are logged and ignored. |
 | `server.seo.verification.custom` | `[]` | Additional validated verification tags. |
 | `web.ui.theme` | `dark` | `dark`, `light`, or `auto`; user preference cookie takes precedence. |
-| `web.ui.accent` | Empty (built-in color) | High-contrast `#RRGGBB`; invalid or low-contrast colors are ignored. |
+| `web.ui.accent` | Empty (built-in color) | `#RRGGBB`; contrast is adjusted per theme and emitted as `/static/css/accent.css`. Invalid values are ignored with one warning. |
 
 ### Security, abuse controls, and owner tokens
 
@@ -408,6 +408,7 @@ The following `web.*` settings live in `yaml.d/web.yml`. They are distinct from 
 | `web.reports.rate_limit_per_minute` | `60` | Maximum public reports per minute per IP. |
 | `web.reports.rate_limit_per_ip_burst` | `10` | Short-burst allowance per IP. |
 | `web.headers.coop`, `.coep`, `.corp` | `unsafe-none`, `unsafe-none`, `cross-origin` | Cross-origin policy header values. Defaults preserve general embedding compatibility. |
+| `web.headers.referrer_policy` | `strict-origin-when-cross-origin` | Referrer policy for pages; set `no-referrer` for stricter privacy requirements. |
 | `web.headers.origin_agent_cluster` | `true` | Boolean; emits `Origin-Agent-Cluster: ?1`. |
 | `web.headers.cross_domain_policies` | `none` | Adobe cross-domain policy value. |
 | `web.headers.dns_prefetch_control` | Empty (omit header) | Empty omits the header; `off` disables DNS prefetch. |
@@ -422,8 +423,7 @@ The following `web.*` settings live in `yaml.d/web.yml`. They are distinct from 
 | `web.headers.nel.sample_rate` | `1.0` | Number from `0.0` through `1.0`. |
 | `web.csp.enabled` | `true` | Boolean. |
 | `web.csp.mode` | `enforce` | `enforce` or `report-only`. |
-| `web.csp.script_src_extra`, `.style_src_extra`, `.img_src_extra`, `.font_src_extra`, `.connect_src_extra`, `.frame_src_extra`, `.form_action_extra` | Empty | Space-separated source expressions appended to generated directives. |
-| `web.csp.script_src_override` | Empty | Optional replacement for the script-src directive. |
+| `web.csp.*_src_extra`, `*_src_override` | Empty | Per-directive append/replace settings for `default_src`, `script_src`, `style_src`, `img_src`, `font_src`, `connect_src`, `media_src`, `worker_src`, `manifest_src`, `frame_src`, `frame_ancestors`, `base_uri`, `form_action`, and `object_src`. Append values extend the safe default; override values replace only the named directive. |
 | `web.csp.reports_enabled` | `true` | Boolean; sends sampled violations to the server reports endpoint. |
 | `web.csp.reports_sample_rate` | `1.0` | Number from `0.0` through `1.0`. |
 | `web.robots.allow` | `[/, /api]` | Paths published as crawler `Allow` rules. |

@@ -10,6 +10,8 @@ Configured webhooks receive summary fields only; submitted contact details and r
 
 ## Security and health endpoints
 
+During critical database or runtime-directory failures, the server stays available in read-only maintenance mode. Health endpoints return HTTP `503` with safe maintenance and retry metadata; write requests return the canonical `MAINTENANCE` response with HTTP `503`. Read-only catalog requests, GraphQL queries, and MCP requests remain available. Recovery retries every `server.maintenance.self_healing.retry_interval` (default `30s`); `max_attempts: 0` means unlimited retries. After a positive limit is exhausted, the server stays read-only until restarted after the cause is fixed. See [Server Operations](SERVER.md#health-and-discovery).
+
 | Endpoint | Purpose |
 |---|---|
 | `/.well-known/llms.txt` and `/llms.txt` | Public AI-agent discovery document; GET and HEAD, always available without authentication |
@@ -25,6 +27,7 @@ Configured webhooks receive summary fields only; submitted contact details and r
 | `/api/{api_version}/server/contact` | Contact form description (GET) and confirmed submission (POST) |
 | `/api/{api_version}/server/reports/{default,csp,nel}` | Public browser report endpoints; return `204 No Content` and share a per-IP limit of 60 reports per minute with a burst capacity of 10 |
 | `/server/healthz` | Canonical HTML/API health endpoint, negotiated by request |
+| `/api/{api_version}/server/maintenance` | `server.token`-authenticated detailed maintenance status and recovery guidance |
 | `/api/{api_version}/server/healthz` | Versioned API health |
 | `/api/healthz` and `/api/healthz.txt` | Unversioned API health aliases |
 | `/server/metrics`, `/server/metrics/prometheus` | Prometheus exposition; requires the Prometheus bearer token |
@@ -58,6 +61,10 @@ The owner-token page lets an owner export or remove their identity by using the 
 Audit events are stored as JSON Lines in `audit.log` and copied into the relational `audit_log` table. Each line includes the SHA-256 hash of the prior exact line in `prev`; `audit.anchor` carries the last hash across daily rotation and is stored with mode `0600`. Startup verifies the active chain, reports broken entries without stopping the server, and daily rotation applies the audit retention and compression settings. Compliance reports count events in the active and retained rotated logs. Operators can inspect the integrity result with `--maintenance compliance report`.
 
 The request-flood detector counts requests by client and route class over a sliding window, including requests already rejected by a rate limiter. After the configured multiplier is exceeded, it records a temporary IP block in the database and emits `abuse.request_flood`; the block expires automatically. Addresses on the configured allowlist bypass rate limits and temporary blocks. Optional security alert email uses the existing contact delivery configuration. Permanent blocked IPs, blocklist matches, and country-based denials also produce security audit events.
+
+## Debug and profiling endpoints
+
+The `/debug/*` routes exist only when `--debug` or `DEBUG=true` is explicitly enabled. Every endpoint requires the `server.token` as an `Authorization: Bearer …` credential, including pprof and expvar. The pprof command-line endpoint and expvar `cmdline` value expose only the binary name, never process arguments. Debug mode alone does not expose these routes in development or production.
 
 ## Deployment protections
 

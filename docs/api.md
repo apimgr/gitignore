@@ -59,6 +59,7 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/security/thanks` | GET | Public researcher acknowledgments |
 | `/api/{api_version}/server/healthz` | GET | Health status; JSON by default, with supported text negotiation |
 | `/api/{api_version}/server/healthz.txt` | GET | Health status as text |
+| `/api/{api_version}/server/maintenance` | GET | Detailed maintenance status and recovery guidance; requires the `server.token` Bearer credential |
 | `/api/{api_version}/server/scheduler` | GET | Read-only scheduler status |
 | `/api/{api_version}/server/metrics` | GET | Prometheus exposition; requires the Prometheus metrics bearer token |
 | `/api/{api_version}/server/metrics/prometheus` | GET | Prometheus exposition; requires the Prometheus metrics bearer token |

@@ -426,7 +426,6 @@ The following `web.*` settings live in `yaml.d/web.yml`. They are distinct from 
 | Key | File | Default | Accepted values and validation |
 |---|---|---|---|
 | `server.compliance.gdpr`, `.ccpa`, `.hipaa`, `.soc2`, `.pci_dss`, `.iso27001`, `.fedramp`, `.lgpd`, `.pipeda`, `.appi`, `.pdpa` | `yaml.d/privacy.yml` | `false` for each | Boolean declarations; compliance mode may require encrypted backups and operator controls. |
-| `server.maintenance.cleanup.backup_keep_count` | `yaml.d/maintenance.yml` | `5` | Number of most recent backups kept during cleanup. |
 | `server.maintenance.cleanup.disk_threshold` | `yaml.d/maintenance.yml` | `90` | Percentage; cleanup starts above 90% disk use. |
 | `server.maintenance.cleanup.log_retention_days` | `yaml.d/maintenance.yml` | `7` | Delete logs older than this many days during cleanup. |
 | `server.maintenance.notify.on_enter`, `.on_exit` | `yaml.d/maintenance.yml` | `true`, `true` | Booleans for notifications when entering and exiting maintenance mode. |

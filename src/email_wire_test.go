@@ -53,6 +53,8 @@ func TestNotificationHelpersAreSafeWithoutConfiguredEmail(t *testing.T) {
 	emitDiskLow("/data", 90, 1024, 85)
 	emitUpdateAvailable("1.0.0", "1.1.0")
 	emitUpdateInstalled("1.0.0", "1.1.0")
+	emitUpdateFailed("1.1.0", "checksum mismatch")
+	emitUpdateStaged("1.1.0")
 	emitSchedulerError("cleanup", "Cleanup", "failed", "tomorrow")
 	emitSchedulerError("backup_daily", "Backup", "failed", "tomorrow")
 	if !suppressSchedulerError["backup_daily"] || suppressSchedulerError["cleanup"] {

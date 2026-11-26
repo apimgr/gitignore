@@ -58,7 +58,7 @@ func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *
 		BackupEnabled:         true,
 		BackupDaily:           backupTaskHandler(cfg, configDir, dataDir, "daily"),
 		BackupHourly:          backupTaskHandler(cfg, configDir, dataDir, "hourly"),
-		UpdateCheck:           updateCheckHandler(cfg, dataDir),
+		UpdateCheck:           updateCheckHandler(cfg, dataDir, logsDir, runtimeDeps),
 		TorInstalled:          torBinaryInstalled(cfg),
 		I2PEnabled:            cfg.Server.I2P.Enabled,
 	}

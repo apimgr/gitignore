@@ -677,6 +677,19 @@
         "updated": "{app_name} è stato aggiornato correttamente.",
         "previous_version_label": "Versione precedente",
         "new_version_label": "Nuova versione"
+      },
+      "update_failed": {
+        "subject": "Aggiornamento non riuscito - {app_name}",
+        "heading": "AGGIORNAMENTO NON RIUSCITO",
+        "failed": "Non è stato possibile installare l’aggiornamento preparato. La versione attuale è ancora in esecuzione.",
+        "version_label": "Versione",
+        "reason_label": "Motivo"
+      },
+      "update_staged": {
+        "subject": "Aggiornamento preparato - {app_name}",
+        "heading": "AGGIORNAMENTO PREPARATO",
+        "staged": "È stata preparata una versione che verrà applicata al riavvio del servizio.",
+        "version_label": "Versione"
       }
     }
   },

@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apimgr/gitignore/src/common/audit"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/scheduler"
+	"github.com/apimgr/gitignore/src/service"
 	"github.com/apimgr/gitignore/src/updater"
 )
 
@@ -99,10 +101,11 @@ func runUpdateInstall(cfg *config.Config) {
 // runs the equivalent of `--update check` against the configured channel,
 // filtered by defer_days. On finding a newer eligible release it fires the
 // update_available operator notification once per version. When auto_install is
-// enabled it additionally installs the release and re-execs the server so the
-// new binary takes over. The task never injects update notices into public
-// responses — this is an operator concern only.
-func updateCheckHandler(cfg *config.Config, dataDir string) scheduler.HandlerFunc {
+// enabled by a process that started elevated it stages the release and requests
+// a supervisor restart; the root startup path verifies and applies it. The task
+// never injects update notices into public responses — this is an operator
+// concern only.
+func updateCheckHandler(cfg *config.Config, dataDir, logsDir string, runtimeDeps []scheduler.Deps) scheduler.HandlerFunc {
 	return func(ctx context.Context) error {
 		u := newUpdater(cfg)
 		rel, err := u.CheckDeferred(ctx, cfg.Server.Update.DeferDays)
@@ -110,6 +113,12 @@ func updateCheckHandler(cfg *config.Config, dataDir string) scheduler.HandlerFun
 			return err
 		}
 		if rel == nil {
+			return nil
+		}
+		if stagedUpdateVersion(dataDir) == rel.TagName {
+			return nil
+		}
+		if lastFailedUpdateVersion(dataDir) == rel.TagName {
 			return nil
 		}
 
@@ -126,16 +135,112 @@ func updateCheckHandler(cfg *config.Config, dataDir string) scheduler.HandlerFun
 			return nil
 		}
 
-		log.Printf("update_check: auto-installing %s", rel.TagName)
-		if err := u.Install(ctx, rel); err != nil {
+		var runtime scheduler.Deps
+		if len(runtimeDeps) > 0 {
+			runtime = runtimeDeps[0]
+		}
+		if !runtime.StartedElevated {
+			log.Printf("update_check: install skipped for %s; process did not start elevated", rel.TagName)
+			recordUpdateAudit(logsDir, "update.install_skipped", rel.TagName, "not_elevated")
+			return nil
+		}
+
+		log.Printf("update_check: staging %s", rel.TagName)
+		if err := u.Stage(ctx, rel, filepath.Join(dataDir, "update")); err != nil {
+			_ = os.RemoveAll(filepath.Join(dataDir, "update"))
+			recordFailedUpdateVersion(dataDir, rel.TagName)
+			recordUpdateAudit(logsDir, "update.failed", rel.TagName, err.Error())
+			emitUpdateFailed(rel.TagName, err.Error())
 			return err
 		}
-		emitUpdateInstalled(Version, rel.TagName)
-		log.Printf("update_check: installed %s, re-executing", rel.TagName)
-		// Re-exec so the running server loads the new binary (AI.md PART 22
-		// "Restart service or re-exec"). Only returns on error.
-		return updater.RestartSelf()
+		_ = os.Remove(failedUpdateVersionPath(dataDir))
+		recordUpdateAudit(logsDir, "update.staged", rel.TagName, "success")
+		emitUpdateStaged(rel.TagName)
+		manager := service.DetectServiceManager()
+		if manager == service.ServiceOpenRC || manager == service.ServiceSysVinit {
+			log.Printf("update_check: %s staged; restart the service to apply it", rel.TagName)
+			return nil
+		}
+		if runtime.RestartForUpdate == nil {
+			return fmt.Errorf("update %s staged but server restart is unavailable", rel.TagName)
+		}
+		log.Printf("update_check: %s staged; requesting graceful service restart", rel.TagName)
+		return runtime.RestartForUpdate(ctx)
 	}
+}
+
+func applyStagedUpdate(cfg *config.Config, dataDir, logsDir string, startedElevated bool) error {
+	if !startedElevated {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	updateDir := filepath.Join(dataDir, "update")
+	versionData, _ := os.ReadFile(filepath.Join(updateDir, "version"))
+	version := strings.TrimSpace(string(versionData))
+	applied, err := newUpdater(cfg).ApplyStaged(ctx, updateDir)
+	if err != nil {
+		log.Printf("update startup: staged update rejected: %v", err)
+		recordFailedUpdateVersion(dataDir, version)
+		recordUpdateAudit(logsDir, "update.failed", version, err.Error())
+		emitUpdateFailed(version, err.Error())
+		return nil
+	}
+	if !applied {
+		return nil
+	}
+	_ = os.Remove(failedUpdateVersionPath(dataDir))
+	recordUpdateAudit(logsDir, "update.installed", version, "success")
+	emitUpdateInstalled(Version, version)
+	if err := updater.RestartSelf(); err != nil {
+		log.Printf("update startup: failed to re-execute installed release: %v", err)
+		recordFailedUpdateVersion(dataDir, version)
+		recordUpdateAudit(logsDir, "update.failed", version, "restart_failed")
+		emitUpdateFailed(version, "restart_failed")
+	}
+	return nil
+}
+
+func failedUpdateVersionPath(dataDir string) string {
+	return filepath.Join(dataDir, "update_failed_version")
+}
+
+func stagedUpdateVersion(dataDir string) string {
+	data, err := os.ReadFile(filepath.Join(dataDir, "update", "version"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func lastFailedUpdateVersion(dataDir string) string {
+	data, err := os.ReadFile(failedUpdateVersionPath(dataDir))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func recordFailedUpdateVersion(dataDir, version string) {
+	if version != "" {
+		_ = os.WriteFile(failedUpdateVersionPath(dataDir), []byte(version+"\n"), 0o600)
+	}
+}
+
+func recordUpdateAudit(logsDir, event, version, reason string) {
+	result := "success"
+	severity := "info"
+	if event == "update.failed" {
+		result = "failure"
+		severity = "error"
+	} else if event == "update.install_skipped" {
+		result = "skipped"
+	}
+	_ = audit.Append(logsDir, audit.Entry{
+		Event: event, Category: "system", Severity: severity,
+		Actor:   audit.Actor{Type: "system"},
+		Details: map[string]any{"version": version, "reason": reason}, Result: result,
+	})
 }
 
 // updateNotifyStatePath is the file recording the last version the update_check

@@ -74,9 +74,6 @@ func (m *Matcher) Reload(now time.Time) error {
 		}
 		stamp, err := os.ReadFile(filepath.Join(m.dir, source.ID+".last_updated"))
 		if err != nil {
-			stamp, err = os.ReadFile(filepath.Join(m.dir, ".last_updated"))
-		}
-		if err != nil {
 			failures = append(failures, fmt.Errorf("%s update timestamp: %w", source.ID, err))
 			continue
 		}

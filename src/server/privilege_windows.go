@@ -2,6 +2,10 @@
 
 package server
 
+// ProcessStartedElevated is false for the Windows service account; self-update
+// requires an explicitly elevated manual command on Windows.
+func ProcessStartedElevated() bool { return false }
+
 // dropPrivileges is a no-op on Windows — the service runs as a Virtual
 // Service Account (NT SERVICE\gitignore), which is already least-privilege
 // and has no analogous setuid/setgid drop (see AI.md PART 23).

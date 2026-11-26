@@ -647,6 +647,19 @@
         "updated": "{app_name} 已成功更新。",
         "previous_version_label": "先前版本",
         "new_version_label": "新版本"
+      },
+      "update_failed": {
+        "subject": "{app_name} 更新失败",
+        "heading": "更新失败",
+        "failed": "无法安装已暂存的更新。当前二进制文件仍在运行。",
+        "version_label": "版本",
+        "reason_label": "原因"
+      },
+      "update_staged": {
+        "subject": "{app_name} 更新已暂存",
+        "heading": "更新已暂存",
+        "staged": "新版本已暂存，将在服务重启时应用。",
+        "version_label": "版本"
       }
     }
   },

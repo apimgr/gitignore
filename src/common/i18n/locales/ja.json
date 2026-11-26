@@ -647,6 +647,19 @@
         "updated": "{app_name} は正常に更新されました。",
         "previous_version_label": "以前のバージョン",
         "new_version_label": "新しいバージョン"
+      },
+      "update_failed": {
+        "subject": "{app_name} の更新に失敗しました",
+        "heading": "更新に失敗しました",
+        "failed": "準備した更新をインストールできませんでした。現在のバイナリは引き続き実行されています。",
+        "version_label": "バージョン",
+        "reason_label": "理由"
+      },
+      "update_staged": {
+        "subject": "{app_name} の更新を準備しました",
+        "heading": "更新を準備しました",
+        "staged": "更新を準備しました。サービスの再起動時に適用されます。",
+        "version_label": "バージョン"
       }
     }
   },

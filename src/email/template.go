@@ -28,6 +28,8 @@ var TemplateNames = []string{
 	"scheduler_error",
 	"update_available",
 	"update_installed",
+	"update_failed",
+	"update_staged",
 	"test",
 }
 
@@ -61,6 +63,7 @@ var KnownVariables = map[string]bool{
 	"next_run":        true,
 	"current_version": true,
 	"new_version":     true,
+	"reason":          true,
 	// Pretranslated text passed into the plain-substitution email templates.
 	"email_subject":                true,
 	"email_heading":                true,
@@ -92,6 +95,10 @@ var KnownVariables = map[string]bool{
 	"email_install_prompt":         true,
 	"email_updated":                true,
 	"email_previous_version_label": true,
+	"email_failed":                 true,
+	"email_version_label":          true,
+	"email_reason_label":           true,
+	"email_staged":                 true,
 }
 
 // templateTranslationKeys maps placeholders for static email copy to locale keys.
@@ -193,6 +200,23 @@ var templateTranslationKeys = map[string]map[string]string{
 		"email_updated":                "email.templates.update_installed.updated",
 		"email_previous_version_label": "email.templates.update_installed.previous_version_label",
 		"email_new_version_label":      "email.templates.update_installed.new_version_label",
+	},
+	"update_failed": {
+		"email_subject":       "email.templates.update_failed.subject",
+		"email_heading":       "email.templates.update_failed.heading",
+		"email_from_label":    "email.common.from_label",
+		"email_time_label":    "email.common.time_label",
+		"email_failed":        "email.templates.update_failed.failed",
+		"email_version_label": "email.templates.update_failed.version_label",
+		"email_reason_label":  "email.templates.update_failed.reason_label",
+	},
+	"update_staged": {
+		"email_subject":       "email.templates.update_staged.subject",
+		"email_heading":       "email.templates.update_staged.heading",
+		"email_from_label":    "email.common.from_label",
+		"email_time_label":    "email.common.time_label",
+		"email_staged":        "email.templates.update_staged.staged",
+		"email_version_label": "email.templates.update_staged.version_label",
 	},
 }
 

@@ -38,6 +38,17 @@ func TestConfiguredAPIVersionIsUsedByRouterAndDiscovery(t *testing.T) {
 	}
 }
 
+func TestAllowlistEmptyDescriptionUsesPlaceholder(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Security.Allowlist = []config.AllowlistEntry{{CIDR: "192.0.2.1"}, {CIDR: "192.0.2.2", Description: "  "}}
+	s := New(&Config{Version: "test", Cfg: cfg})
+	for _, cidr := range []string{"192.0.2.1/32", "192.0.2.2/32"} {
+		if got := s.allowlistSnapshot[cidr]; got != "(no description)" {
+			t.Errorf("allowlist description for %s = %q, want placeholder", cidr, got)
+		}
+	}
+}
+
 func TestTorCircuitIDUsesLow32BitsWithoutPrefixValidation(t *testing.T) {
 	s := &Server{}
 	r := httptest.NewRequest(http.MethodGet, "http://example.onion/", nil)

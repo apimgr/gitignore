@@ -4,7 +4,6 @@ package updater
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"syscall"
@@ -63,31 +62,6 @@ func crossDeviceReplace(currentPath, newBinaryPath string, mode os.FileMode) err
 	}
 
 	_ = os.Remove(backupPath)
-	return nil
-}
-
-// copyFile copies src to dst, truncating dst, and applies mode.
-func copyFile(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		_ = os.Remove(dst)
-		return err
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(dst)
-		return err
-	}
 	return nil
 }
 

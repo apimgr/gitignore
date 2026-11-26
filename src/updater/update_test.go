@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -124,6 +125,77 @@ func TestCheckStableAlreadyCurrent(t *testing.T) {
 	}
 	if rel != nil {
 		t.Fatalf("expected no update, got %+v", rel)
+	}
+}
+
+func TestStageAndRejectTamperedUpdate(t *testing.T) {
+	fx := newFixture(t, "v1.2.0", []Release{{TagName: "v1.2.0"}})
+	u := fx.updater("v1.1.0", "stable")
+	release, err := u.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	updateDir := filepath.Join(t.TempDir(), "update")
+	if err := u.Stage(context.Background(), release, updateDir); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	staged, err := os.ReadFile(filepath.Join(updateDir, "gitignore.new"))
+	if err != nil {
+		t.Fatalf("read staged binary: %v", err)
+	}
+	if string(staged) != string(fx.binaryData) {
+		t.Fatal("staged binary differs from downloaded release")
+	}
+	if err := os.WriteFile(filepath.Join(updateDir, "gitignore.new"), []byte("tampered"), 0o755); err != nil {
+		t.Fatalf("tamper staged binary: %v", err)
+	}
+	if applied, err := u.ApplyStaged(context.Background(), updateDir); err == nil || applied {
+		t.Fatalf("ApplyStaged() = (%v, %v), want checksum failure", applied, err)
+	}
+	if _, err := os.Stat(updateDir); !os.IsNotExist(err) {
+		t.Fatalf("failed staged update directory remains: %v", err)
+	}
+}
+
+func TestNewerVersion(t *testing.T) {
+	for _, tc := range []struct {
+		candidate string
+		current   string
+		want      bool
+	}{
+		{"v1.2.0", "v1.1.9", true},
+		{"v1.2.0", "v1.2.0", false},
+		{"v1.2.0", "v1.2.0-rc.1", true},
+		{"v1.2.0-rc.2", "v1.2.0-rc.10", false},
+		{"v1.2.0-rc.11", "v1.2.0-rc.10", true},
+		{"devel", "v1.1.0", false},
+	} {
+		if got := newerVersion(tc.candidate, tc.current); got != tc.want {
+			t.Errorf("newerVersion(%q, %q) = %v, want %v", tc.candidate, tc.current, got, tc.want)
+		}
+	}
+}
+
+func TestValidReleaseTag(t *testing.T) {
+	for _, tag := range []string{"v1.2.3", "v1.2.3-rc.1", "devel_20261126"} {
+		if !validReleaseTag(tag) {
+			t.Errorf("validReleaseTag(%q) = false", tag)
+		}
+	}
+	for _, tag := range []string{"", "../v1.2.3", "v1.2.3\nforged", "?query=1", strings.Repeat("a", 129)} {
+		if validReleaseTag(tag) {
+			t.Errorf("validReleaseTag(%q) = true", tag)
+		}
+	}
+}
+
+func TestDevelReleaseOrderingUsesBuildEpoch(t *testing.T) {
+	u := New(Config{CurrentVersion: "devel", Branch: "devel", BuildEpoch: 100})
+	if !u.isNewerRelease(&Release{TagName: "devel", PublishedAt: time.Unix(101, 0)}) {
+		t.Fatal("release published after build epoch was not considered newer")
+	}
+	if u.isNewerRelease(&Release{TagName: "devel", PublishedAt: time.Unix(100, 0)}) {
+		t.Fatal("release at build epoch was considered newer")
 	}
 }
 

@@ -54,7 +54,7 @@ func TestDefaultNotificationsDefaults(t *testing.T) {
 		t.Errorf("smtp defaults wrong: %d/%q", n.Email.SMTP.Port, n.Email.SMTP.TLS)
 	}
 	ev := n.Email.Events
-	if !ev.BackupFailed || !ev.SSLExpiring || !ev.SSLRenewalFailed || !ev.SecurityAlert || !ev.SchedulerError || !ev.UpdateInstalled {
+	if !ev.BackupFailed || !ev.SSLExpiring || !ev.SSLRenewalFailed || !ev.SecurityAlert || !ev.SchedulerError || !ev.UpdateInstalled || !ev.UpdateFailed || !ev.UpdateStaged {
 		t.Error("expected critical events enabled by default")
 	}
 	if ev.Startup || ev.Shutdown || ev.BackupComplete || ev.SSLRenewed || ev.UpdateAvailable {

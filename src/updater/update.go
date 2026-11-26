@@ -11,12 +11,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -195,6 +197,261 @@ func (u *Updater) Install(ctx context.Context, release *Release) error {
 		return err
 	}
 	return nil
+}
+
+// Stage downloads and verifies a release into a service-user-owned update
+// directory. The checksum stored with the staged binary is informational; the
+// privileged startup path must fetch it again before replacing the executable.
+func (u *Updater) Stage(ctx context.Context, release *Release, updateDir string) error {
+	if release == nil || !validReleaseTag(release.TagName) {
+		return fmt.Errorf("release version is invalid")
+	}
+	tmpPath, err := u.downloadVerified(ctx, release)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(filepath.Dir(tmpPath)) }()
+	if err := os.MkdirAll(updateDir, 0o750); err != nil {
+		return fmt.Errorf("failed to create update directory: %w", err)
+	}
+	assetPath := filepath.Join(updateDir, u.cfg.BinaryName+".new")
+	if err := copyFile(tmpPath, assetPath, 0o755); err != nil {
+		return fmt.Errorf("failed to stage update binary: %w", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(assetPath, 0o755); err != nil {
+			_ = os.Remove(assetPath)
+			return fmt.Errorf("failed to set staged binary permissions: %w", err)
+		}
+	}
+	stagedHash, err := fileSHA256(assetPath)
+	if err != nil {
+		_ = os.Remove(assetPath)
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(updateDir, "sha256"), []byte(stagedHash+"\n"), 0o600); err != nil {
+		_ = os.Remove(assetPath)
+		return fmt.Errorf("failed to stage informational checksum: %w", err)
+	}
+	versionPath := filepath.Join(updateDir, "version")
+	if err := os.WriteFile(versionPath, []byte(release.TagName+"\n"), 0o600); err != nil {
+		_ = os.Remove(assetPath)
+		return fmt.Errorf("failed to stage update version: %w", err)
+	}
+	return nil
+}
+
+// ApplyStaged verifies a staged binary against a checksum fetched from the
+// release API during this privileged startup, then replaces the running binary.
+func (u *Updater) ApplyStaged(ctx context.Context, updateDir string) (bool, error) {
+	versionData, err := os.ReadFile(filepath.Join(updateDir, "version"))
+	if errors.Is(err, os.ErrNotExist) {
+		_ = os.RemoveAll(updateDir)
+		return false, nil
+	}
+	if err != nil {
+		_ = os.RemoveAll(updateDir)
+		return false, err
+	}
+	tag := strings.TrimSpace(string(versionData))
+	cleanup := func() { _ = os.RemoveAll(updateDir) }
+	if !validReleaseTag(tag) {
+		cleanup()
+		return false, fmt.Errorf("staged update version is invalid or not newer")
+	}
+	release, err := u.releaseByTag(ctx, tag)
+	if err != nil {
+		cleanup()
+		return false, err
+	}
+	if !u.isNewerRelease(release) {
+		cleanup()
+		return false, fmt.Errorf("staged update version is invalid or not newer")
+	}
+	assetPath := filepath.Join(updateDir, u.cfg.BinaryName+".new")
+	expectedHash, err := u.fetchExpectedChecksum(ctx, release, u.binaryAssetName())
+	if err != nil {
+		cleanup()
+		return false, fmt.Errorf("failed to fetch trusted release checksum: %w", err)
+	}
+	trustedDir, err := apppath.TempDir()
+	if err != nil {
+		cleanup()
+		return false, fmt.Errorf("failed to create trusted update staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(trustedDir) }()
+	trustedPath := filepath.Join(trustedDir, u.cfg.BinaryName+"-verified.new")
+	if err := copyFile(assetPath, trustedPath, 0o700); err != nil {
+		cleanup()
+		return false, fmt.Errorf("failed to copy staged binary for verification: %w", err)
+	}
+	if err := verifyChecksum(trustedPath, expectedHash); err != nil {
+		cleanup()
+		return false, err
+	}
+	currentPath, err := os.Executable()
+	if err != nil {
+		cleanup()
+		return false, err
+	}
+	currentPath, err = filepath.EvalSymlinks(currentPath)
+	if err != nil {
+		cleanup()
+		return false, err
+	}
+	if err := replaceBinary(currentPath, trustedPath); err != nil {
+		cleanup()
+		return false, err
+	}
+	cleanup()
+	return true, nil
+}
+
+func validReleaseTag(tag string) bool {
+	if len(tag) == 0 || len(tag) > 128 {
+		return false
+	}
+	for i, value := range tag {
+		if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') || (i > 0 && strings.ContainsRune("._+-", value)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (u *Updater) isNewerRelease(release *Release) bool {
+	if release == nil {
+		return false
+	}
+	if u.cfg.Branch == "devel" && release.TagName == "devel" && u.cfg.BuildEpoch > 0 {
+		return release.PublishedAt.Unix() > u.cfg.BuildEpoch
+	}
+	return newerVersion(release.TagName, u.cfg.CurrentVersion)
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// copyFile copies src to dst and applies mode on every supported platform.
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	return nil
+}
+
+func (u *Updater) releaseByTag(ctx context.Context, tag string) (*Release, error) {
+	url := fmt.Sprintf("%s/repos/%s/releases", u.cfg.APIBaseURL, u.cfg.Repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", u.cfg.UserAgent)
+	resp, err := u.cfg.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub release lookup failed: %d", resp.StatusCode)
+	}
+	var releases []Release
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, err
+	}
+	for i := range releases {
+		if releases[i].TagName == tag {
+			return &releases[i], nil
+		}
+	}
+	return nil, fmt.Errorf("staged release %q is no longer available", tag)
+}
+
+func newerVersion(candidate, current string) bool {
+	parse := func(value string) ([]uint64, string, bool) {
+		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+		parts := strings.SplitN(value, "-", 2)
+		numbers := strings.Split(parts[0], ".")
+		if len(numbers) < 2 || len(numbers) > 3 {
+			return nil, "", false
+		}
+		parsed := make([]uint64, 3)
+		for i, number := range numbers {
+			n, err := strconv.ParseUint(number, 10, 64)
+			if err != nil {
+				return nil, "", false
+			}
+			parsed[i] = n
+		}
+		prerelease := ""
+		if len(parts) == 2 {
+			prerelease = parts[1]
+		}
+		return parsed, prerelease, true
+	}
+	newParts, newPre, newOK := parse(candidate)
+	oldParts, oldPre, oldOK := parse(current)
+	if !newOK {
+		return false
+	}
+	if !oldOK {
+		return true
+	}
+	for i := range newParts {
+		if newParts[i] != oldParts[i] {
+			return newParts[i] > oldParts[i]
+		}
+	}
+	if oldPre != "" && newPre == "" {
+		return true
+	}
+	if newPre == "" || oldPre == "" {
+		return false
+	}
+	newIDs := strings.Split(newPre, ".")
+	oldIDs := strings.Split(oldPre, ".")
+	for i := 0; i < len(newIDs) && i < len(oldIDs); i++ {
+		newNumber, newErr := strconv.ParseUint(newIDs[i], 10, 64)
+		oldNumber, oldErr := strconv.ParseUint(oldIDs[i], 10, 64)
+		switch {
+		case newErr == nil && oldErr == nil && newNumber != oldNumber:
+			return newNumber > oldNumber
+		case newErr == nil && oldErr != nil:
+			return true
+		case newErr != nil && oldErr == nil:
+			return false
+		case newIDs[i] != oldIDs[i]:
+			return newIDs[i] > oldIDs[i]
+		}
+	}
+	return len(newIDs) > len(oldIDs)
 }
 
 // downloadVerified downloads the platform binary for release to a temp file and

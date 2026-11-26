@@ -662,6 +662,19 @@
         "updated": "{app_name} a été mis à jour avec succès.",
         "previous_version_label": "Version précédente",
         "new_version_label": "Nouvelle version"
+      },
+      "update_failed": {
+        "subject": "Échec de la mise à jour - {app_name}",
+        "heading": "ÉCHEC DE LA MISE À JOUR",
+        "failed": "La mise à jour préparée n’a pas pu être installée. La version actuelle continue de fonctionner.",
+        "version_label": "Version",
+        "reason_label": "Motif"
+      },
+      "update_staged": {
+        "subject": "Mise à jour préparée - {app_name}",
+        "heading": "MISE À JOUR PRÉPARÉE",
+        "staged": "Une version a été préparée et sera appliquée au redémarrage du service.",
+        "version_label": "Version"
       }
     }
   },

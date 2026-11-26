@@ -1,0 +1,15 @@
+Subject: {email_subject}
+---
+{email_heading}
+
+{email_from_label}: {app_name} ({fqdn})
+{email_time_label}: {timestamp}
+
+{email_failed}
+
+{email_version_label}: {new_version}
+{email_reason_label}: {reason}
+
+--
+{app_name}
+{app_url}

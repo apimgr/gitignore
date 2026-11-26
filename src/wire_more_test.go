@@ -135,6 +135,37 @@ func TestRecordNotifiedUpdate(t *testing.T) {
 	}
 }
 
+func TestFailedUpdateVersionRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	if got := lastFailedUpdateVersion(dir); got != "" {
+		t.Fatalf("missing failed version = %q, want empty", got)
+	}
+	recordFailedUpdateVersion(dir, "v2.0.0")
+	if got := lastFailedUpdateVersion(dir); got != "v2.0.0" {
+		t.Fatalf("failed version = %q, want v2.0.0", got)
+	}
+	if got, want := failedUpdateVersionPath(dir), filepath.Join(dir, "update_failed_version"); got != want {
+		t.Fatalf("failed version path = %q, want %q", got, want)
+	}
+}
+
+func TestStagedUpdateVersion(t *testing.T) {
+	dir := t.TempDir()
+	if got := stagedUpdateVersion(dir); got != "" {
+		t.Fatalf("missing staged version = %q, want empty", got)
+	}
+	updateDir := filepath.Join(dir, "update")
+	if err := os.MkdirAll(updateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(updateDir, "version"), []byte("v2.1.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := stagedUpdateVersion(dir); got != "v2.1.0" {
+		t.Fatalf("staged version = %q, want v2.1.0", got)
+	}
+}
+
 func TestNewUpdater(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Update.Branch = "beta"

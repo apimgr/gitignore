@@ -662,6 +662,19 @@
         "updated": "{app_name} was updated successfully.",
         "previous_version_label": "Previous version",
         "new_version_label": "New version"
+      },
+      "update_failed": {
+        "subject": "Update Failed - {app_name}",
+        "heading": "UPDATE FAILED",
+        "failed": "The staged update could not be installed. The current binary is still running.",
+        "version_label": "Version",
+        "reason_label": "Reason"
+      },
+      "update_staged": {
+        "subject": "Update Staged - {app_name}",
+        "heading": "UPDATE STAGED",
+        "staged": "A release is staged and will be applied when the service restarts.",
+        "version_label": "Version"
       }
     }
   },

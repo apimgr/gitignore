@@ -93,23 +93,24 @@ func overlyBroadSecurityPrefix(prefix netip.Prefix) bool {
 
 // Config holds server configuration
 type Config struct {
-	Address           string
-	Port              int
-	DevMode           bool
-	Templates         *template.Manager
-	Paths             *apppath.PathManager
-	Version           string
-	Commit            string
-	BuildDate         string
-	Cfg               *config.Config
-	ConfigManager     *config.ConfigManager
-	GeoIP             *geoip.Manager
-	SendContact       func(to, subject, body string) error
-	SendContactReply  func(to, replyTo, subject, body string) error
-	WebhookDispatcher *notify.Dispatcher
-	I2PStatus         func() I2PInfo
-	Blocklist         *blocklist.Matcher
-	SecurityDir       string
+	Address             string
+	Port                int
+	DevMode             bool
+	Templates           *template.Manager
+	Paths               *apppath.PathManager
+	Version             string
+	Commit              string
+	BuildDate           string
+	Cfg                 *config.Config
+	ConfigManager       *config.ConfigManager
+	GeoIP               *geoip.Manager
+	SendContact         func(to, subject, body string) error
+	SendContactReply    func(to, replyTo, subject, body string) error
+	WebhookDispatcher   *notify.Dispatcher
+	I2PStatus           func() I2PInfo
+	Blocklist           *blocklist.Matcher
+	SecurityDir         string
+	BeforePrivilegeDrop func() error
 }
 
 // Server represents the HTTP server
@@ -153,6 +154,7 @@ type Server struct {
 	blockedIPReasons     map[string]string
 	allowlistSnapshot    map[string]string
 	startTime            time.Time
+	updateRestart        atomic.Bool
 	stats                *statsCollector
 	contactMu            sync.Mutex
 	contactChallenges    map[string]contactChallenge
@@ -162,6 +164,8 @@ type Server struct {
 	learnedOriginsMu     sync.Mutex
 	learnedOrigins       map[string]time.Time
 }
+
+var ErrUpdateRestart = errors.New("staged update requires supervisor restart")
 
 // New creates a new server instance
 func New(config *Config) *Server {
@@ -426,7 +430,11 @@ func (s *Server) refreshSecurityPolicy(cfg *config.Config, reportChanges bool) {
 			continue
 		}
 		cidr := prefix.String()
-		nextAllowlist[cidr] = entry.Description
+		description := strings.TrimSpace(entry.Description)
+		if description == "" {
+			description = "(no description)"
+		}
+		nextAllowlist[cidr] = description
 		allowPrefixes = append(allowPrefixes, prefix)
 	}
 	nextBlocked := make([]netip.Prefix, 0, len(cfg.Server.Security.BlockedIPs))
@@ -785,6 +793,12 @@ func (s *Server) Start() error {
 	}
 	go s.refreshTrustedProxiesLoop()
 	defer s.stopTrustedProxyRefresh()
+	if s.config.BeforePrivilegeDrop != nil {
+		if err := s.config.BeforePrivilegeDrop(); err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("startup update check failed: %w", err)
+		}
+	}
 
 	// Once the privileged port is bound, drop from root to the fixed project
 	// service identity. No-op when not running as root.
@@ -830,7 +844,18 @@ func (s *Server) Start() error {
 
 	log.Println("Server stopped")
 	s.stopTrustedProxyRefresh()
+	if s.updateRestart.Load() {
+		return ErrUpdateRestart
+	}
 	return nil
+}
+
+// RestartForUpdate gracefully stops the listener after a new release has been
+// staged so the service manager can restart the process with its original
+// elevated startup privileges.
+func (s *Server) RestartForUpdate(ctx context.Context) error {
+	s.updateRestart.Store(true)
+	return s.Shutdown(ctx)
 }
 
 // configureTLS builds the server's TLS configuration from the SSL manager,

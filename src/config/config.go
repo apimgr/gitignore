@@ -331,7 +331,7 @@ type AbuseRequestFloodConfig struct {
 
 type AllowlistEntry struct {
 	CIDR        string `yaml:"cidr"`
-	Description string `yaml:"description"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 type BlockedIPEntry struct {
@@ -497,6 +497,8 @@ type EmailEventsConfig struct {
 	SchedulerError   bool `yaml:"scheduler_error"`
 	UpdateAvailable  bool `yaml:"update_available"`
 	UpdateInstalled  bool `yaml:"update_installed"`
+	UpdateFailed     bool `yaml:"update_failed"`
+	UpdateStaged     bool `yaml:"update_staged"`
 }
 
 // DefaultNotificationsConfig returns the AI.md PART 17 default notification
@@ -528,6 +530,8 @@ func DefaultNotificationsConfig() NotificationsConfig {
 				SchedulerError:   true,
 				UpdateAvailable:  false,
 				UpdateInstalled:  true,
+				UpdateFailed:     true,
+				UpdateStaged:     true,
 			},
 		},
 		DiskLow: DiskLowConfig{Enabled: true, ThresholdPercent: 85, CheckInterval: "5m", Repeat: "24h"},
@@ -3057,6 +3061,8 @@ func generateNotificationsYAML(cfg *Config) string {
         scheduler_error: %t
         update_available: %t
         update_installed: %t
+        update_failed: %t
+        update_staged: %t
     disk_low:
       enabled: %t
       threshold_percent: %.1f
@@ -3085,6 +3091,8 @@ func generateNotificationsYAML(cfg *Config) string {
 		e.Events.SchedulerError,
 		e.Events.UpdateAvailable,
 		e.Events.UpdateInstalled,
+		e.Events.UpdateFailed,
+		e.Events.UpdateStaged,
 		n.DiskLow.Enabled,
 		n.DiskLow.ThresholdPercent,
 		n.DiskLow.CheckInterval,

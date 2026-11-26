@@ -12,6 +12,11 @@ import (
 	"syscall"
 )
 
+// ProcessStartedElevated reports whether this process started as root. Callers
+// capture it before dropPrivileges so later update policy does not depend on
+// the process's current identity.
+func ProcessStartedElevated() bool { return os.Geteuid() == 0 }
+
 // dropPrivileges drops root privileges to the named service user/group,
 // once the listener is already bound to its (possibly privileged) port.
 // No-op if the process is not running as root (see AI.md PART 23).

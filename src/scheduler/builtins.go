@@ -53,7 +53,9 @@ type Deps struct {
 	GeoIPUpdate HandlerFunc
 	// UpdateCheck runs the self-update check (AI.md PART 22). When nil the
 	// update_check task skips.
-	UpdateCheck HandlerFunc
+	UpdateCheck      HandlerFunc
+	StartedElevated  bool
+	RestartForUpdate func(context.Context) error
 	// BlocklistUpdate refreshes configured and built-in security blocklists.
 	BlocklistUpdate HandlerFunc
 	// CVEUpdate refreshes NVD and, when enabled, the Trivy vulnerability DB.

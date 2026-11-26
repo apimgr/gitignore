@@ -67,6 +67,34 @@ func TestMatcherLoadsFreshIPAndDomainSources(t *testing.T) {
 	}
 }
 
+func TestMatcherRequiresPerSourceTimestamp(t *testing.T) {
+	securityDir := t.TempDir()
+	blocklistDir := filepath.Join(securityDir, "blocklists")
+	if err := os.MkdirAll(blocklistDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocklistDir, "domains.txt"), []byte("bad.example\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocklistDir, ".last_updated"), []byte(time.Now().UTC().Format(time.RFC3339)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	matcher := NewMatcher(securityDir, []Source{{ID: "domains", Type: "domain", URL: "https://lists.example/domains.txt", Enabled: &enabled}})
+	now := time.Now().UTC()
+	if err := matcher.Reload(now); err == nil {
+		t.Fatal("Reload() succeeded without the source-specific timestamp")
+	}
+	if source, matched := matcher.MatchDomain("bad.example", now); matched {
+		t.Fatalf("aggregate timestamp allowed source %q to match", source)
+	}
+	for _, status := range matcher.Status(now) {
+		if status.ID == "domains" && status.State != "error" {
+			t.Fatalf("domain source state = %q, want error", status.State)
+		}
+	}
+}
+
 func TestIPListExcludesConfiguredTrustedRanges(t *testing.T) {
 	trusted := []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}
 	entries, skipped, err := parseEntries([]byte("198.51.100.1\n203.0.113.0/24\n"), "ip", trusted)

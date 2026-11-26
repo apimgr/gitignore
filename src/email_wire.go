@@ -321,6 +321,25 @@ func emitUpdateInstalled(currentVersion, newVersion string) {
 	})
 }
 
+func emitUpdateFailed(version, reason string) {
+	if notifier == nil {
+		return
+	}
+	notifier.emit("update_failed", notifier.cfg.Server.Notifications.Email.Events.UpdateFailed, map[string]string{
+		"new_version": version,
+		"reason":      reason,
+	})
+}
+
+func emitUpdateStaged(version string) {
+	if notifier == nil {
+		return
+	}
+	notifier.emit("update_staged", notifier.cfg.Server.Notifications.Email.Events.UpdateStaged, map[string]string{
+		"new_version": version,
+	})
+}
+
 // suppressSchedulerError lists task IDs that emit their own dedicated failure
 // notification, so the generic scheduler_error is suppressed for them (AI.md
 // PART 17 suppression rules). Backup and SSL-renewal tasks are covered.

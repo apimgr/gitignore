@@ -719,6 +719,19 @@
         "updated": "تم تحديث {app_name} بنجاح.",
         "previous_version_label": "الإصدار السابق",
         "new_version_label": "الإصدار الجديد"
+      },
+      "update_failed": {
+        "subject": "فشل التحديث - {app_name}",
+        "heading": "فشل التحديث",
+        "failed": "تعذر تثبيت التحديث المجهز. لا تزال النسخة الحالية قيد التشغيل.",
+        "version_label": "الإصدار",
+        "reason_label": "السبب"
+      },
+      "update_staged": {
+        "subject": "تم تجهيز التحديث - {app_name}",
+        "heading": "تم تجهيز التحديث",
+        "staged": "تم تجهيز إصدار وسيتم تطبيقه عند إعادة تشغيل الخدمة.",
+        "version_label": "الإصدار"
       }
     }
   },

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -142,14 +143,21 @@ func databaseConnectionConfig(cfg *config.Config) db.ConnectionConfig {
 
 // sysexits(3) exit codes — never invent custom schemes.
 const (
-	exUsage       = 64 // command line usage error
-	exNoInput     = 66 // cannot open input
-	exUnavailable = 69 // a service is unavailable
-	exOSErr       = 71 // system error (e.g. can't fork, service control failed)
-	exOSFile      = 72 // a (data) file the app depends on is missing/unreadable
-	exCantCreat   = 73 // can't create (user) output file
-	exIOErr       = 74 // an error occurred while doing I/O on some file
-	exConfig      = 78 // configuration error
+	// exUsage is the sysexits command line usage error.
+	exUsage = 64
+	// exUnavailable means a service is unavailable.
+	exUnavailable = 69
+	// exOSErr means an operating system error occurred.
+	exOSErr = 71
+	// exOSFile means an application data file is missing or unreadable.
+	exOSFile = 72
+	// exCantCreat means an output file could not be created.
+	exCantCreat = 73
+	// exIOErr means an I/O error occurred.
+	exIOErr = 74
+	// exTempFail requests a supervisor restart after staging an update.
+	exTempFail = 75
+	exConfig   = 78 // configuration error
 )
 
 func init() {
@@ -613,20 +621,24 @@ func main() {
 			writeWebhookAudit(logsDir, event, fields)
 		},
 	})
+	startedElevated := server.ProcessStartedElevated()
 	srv = server.New(&server.Config{
-		Address:           serverAddress,
-		Port:              portNum,
-		DevMode:           devMode,
-		Templates:         templateMgr,
-		Paths:             pathMgr,
-		Version:           Version,
-		Commit:            CommitID,
-		BuildDate:         BuildDate,
-		Cfg:               cfg,
-		ConfigManager:     cfgManager,
-		GeoIP:             geoipMgr,
-		Blocklist:         blocklistMatcher,
-		SecurityDir:       securityDir,
+		Address:       serverAddress,
+		Port:          portNum,
+		DevMode:       devMode,
+		Templates:     templateMgr,
+		Paths:         pathMgr,
+		Version:       Version,
+		Commit:        CommitID,
+		BuildDate:     BuildDate,
+		Cfg:           cfg,
+		ConfigManager: cfgManager,
+		GeoIP:         geoipMgr,
+		Blocklist:     blocklistMatcher,
+		SecurityDir:   securityDir,
+		BeforePrivilegeDrop: func() error {
+			return applyStagedUpdate(cfg, dataDir, logsDir, startedElevated)
+		},
 		I2PStatus:         i2pRuntime.healthInfo,
 		WebhookDispatcher: webhookDispatcher,
 		SendContact: func(to, subject, body string) error {
@@ -663,13 +675,12 @@ func main() {
 		os.Exit(exUnavailable)
 	}
 
-	errChan := make(chan error, 1)
-	go func() { errChan <- srv.Start() }()
-
 	// ── Initialize operator email notifications (AI.md PART 17) ───────────────
 	// Detects or tests SMTP and sets the process-wide notifier. Best-effort: no
 	// working SMTP simply leaves email disabled.
 	initEmail(cfg, configDir, dataDir, i2pRuntime.healthInfo)
+	errChan := make(chan error, 1)
+	go func() { errChan <- srv.Start() }()
 	srv.SetAbuseAlertHandler(emitAbuseSecurityAlert)
 
 	// First-run GeoIP download (AI.md PART 19): best-effort, non-blocking.
@@ -730,8 +741,10 @@ func main() {
 	}
 	auditCompress := cfg.Server.Logging.Audit.Compress != nil && *cfg.Server.Logging.Audit.Compress
 	runtimeDeps := scheduler.Deps{
-		AuditRetention: auditRetention,
-		AuditCompress:  auditCompress,
+		StartedElevated:  startedElevated,
+		RestartForUpdate: srv.RestartForUpdate,
+		AuditRetention:   auditRetention,
+		AuditCompress:    auditCompress,
 		BlocklistUpdate: func(ctx context.Context) error {
 			_, updateErr := blocklist.Update(ctx, blocklistCfg)
 			var reloadErr error
@@ -792,6 +805,18 @@ func main() {
 	for {
 		select {
 		case err := <-errChan:
+			if errors.Is(err, server.ErrUpdateRestart) {
+				if sched != nil {
+					sched.Stop(context.Background())
+				}
+				if cfgManager != nil {
+					cfgManager.Stop()
+				}
+				i2pCancel()
+				torCancel()
+				removePIDFile(pidFile)
+				os.Exit(exTempFail)
+			}
 			log.Printf("%s", cliText("cli.main.server_error", "error", err))
 			if cfgManager != nil {
 				cfgManager.Stop()

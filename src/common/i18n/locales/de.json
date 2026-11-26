@@ -662,6 +662,19 @@
         "updated": "{app_name} wurde erfolgreich aktualisiert.",
         "previous_version_label": "Vorherige Version",
         "new_version_label": "Neue Version"
+      },
+      "update_failed": {
+        "subject": "Update fehlgeschlagen - {app_name}",
+        "heading": "UPDATE FEHLGESCHLAGEN",
+        "failed": "Das bereitgestellte Update konnte nicht installiert werden. Die aktuelle Binärdatei wird weiterhin ausgeführt.",
+        "version_label": "Version",
+        "reason_label": "Grund"
+      },
+      "update_staged": {
+        "subject": "Update bereitgestellt - {app_name}",
+        "heading": "UPDATE BEREITGESTELLT",
+        "staged": "Eine Version wurde bereitgestellt und wird beim Neustart des Dienstes angewendet.",
+        "version_label": "Version"
       }
     }
   },

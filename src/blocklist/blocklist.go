@@ -127,12 +127,6 @@ func Update(ctx context.Context, cfg Config) ([]Result, error) {
 		}
 		results = append(results, result)
 	}
-	if len(results) > 0 {
-		stamp := time.Now().UTC().Format(time.RFC3339)
-		if err := atomicWrite(filepath.Join(dir, ".last_updated"), []byte(stamp+"\n"), 0600); err != nil {
-			updateErrors = append(updateErrors, fmt.Errorf("write update timestamp: %w", err))
-		}
-	}
 	return results, errors.Join(updateErrors...)
 }
 

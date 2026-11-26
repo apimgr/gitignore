@@ -194,6 +194,17 @@ func TestWebRobotsAndSecurityUseCanonicalNestedConfigWithLegacyReadSupport(t *te
 	}
 }
 
+func TestAllowlistDescriptionIsOptional(t *testing.T) {
+	cfg := DefaultConfig()
+	data := []byte("server:\n  security:\n    allowlist:\n      - cidr: 192.0.2.1\n")
+	if err := applyYAMLConfigFile(filepath.Join(t.TempDir(), "security.yml"), data, cfg); err != nil {
+		t.Fatalf("applyYAMLConfigFile() error = %v", err)
+	}
+	if len(cfg.Server.Security.Allowlist) != 1 || cfg.Server.Security.Allowlist[0].Description != "" {
+		t.Fatalf("allowlist = %#v, want one entry with an omitted description", cfg.Server.Security.Allowlist)
+	}
+}
+
 func TestUnknownConfigurationKeyIsReportedWithLocation(t *testing.T) {
 	previousStderr := os.Stderr
 	reader, writer, err := os.Pipe()

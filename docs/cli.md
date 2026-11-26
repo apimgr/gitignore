@@ -35,6 +35,8 @@ Commands use flags with values, for example `--service status`, `--service --ins
 gitignore --maintenance security list [--status received]
 gitignore --maintenance security show sec_0123456789abcdef
 gitignore --maintenance security update sec_0123456789abcdef --status triaged --comment "Reproduced and under review"
+gitignore --maintenance secret rotate installation_secret
+gitignore --maintenance secret rotate encryption_key
 gitignore --maintenance token list
 gitignore --maintenance token revoke own_12345678 --yes
 gitignore --maintenance data export --owner own_12345678 --output owner-export.json
@@ -43,6 +45,8 @@ gitignore --maintenance compliance report
 ```
 
 The security command never prints report bodies. `update` accepts `--status`, `--comment`, `--disclosure-date YYYY-MM-DD`, and `--severity`; statuses may only move forward or to `wont_fix`. Token and data commands require the configured operator token or root. Token listings contain prefixes and metadata only. Revoking a linked token asks for its prefix; revoking a primary token deletes its owner and all tokens after owner ID confirmation. Data export writes a mode `0600` JSON file by default; `--output -` writes JSON to stdout. Data deletion removes the owner and tokens after owner ID confirmation. `--yes` skips those prompts for scripts. `compliance report` prints settings and counts. `--shell completions [SHELL]` and `--shell init [SHELL]` print shell integration text. Supported shells include Bash, Zsh, Fish, POSIX shells, and PowerShell.
+
+Secret rotation is restricted to `installation_secret` and `encryption_key`. Each command re-prompts for the configured operator token, then requires typing `CONFIRM`; `--yes` does not bypass either check. Installation-secret rotation re-encrypts the PGP private key and accepts previous-secret HMACs for seven days. Encryption-key rotation re-encrypts stored owner tokens and AES-encrypted security-report fields, keeping the prior key for a 30-day grace period. The server resumes an interrupted rotation during startup, and the daily security cleanup retires expired key material.
 
 Server environment variables include `PORT`, `LISTEN`, `MODE`, `DOMAIN`, the `SMTP_*` settings, and the initialization-only directory variables `CONFIG_DIR`, `DATA_DIR`, `DATABASE_DIR`, `CACHE_DIR`, `LOG_DIR`, and `BACKUP_DIR`. `DEBUG` enables debug output and debug routes; `NO_COLOR` disables colored output. I2P also accepts `I2P_ENABLED`. See [Configuration](configuration.md) for precedence and details.
 

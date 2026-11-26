@@ -70,11 +70,15 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/graphql` | GET | Read-only GraphQL query using `query`, optional JSON `variables`, and optional `operationName` parameters |
 | `/api/graphql` | POST, GET | Current-version alias for GraphQL queries; GET accepts the same query parameters |
 | `/api/{api_version}/server/mcp` | POST | Stateless MCP JSON-RPC endpoint; requires the same Bearer token as the REST API and exposes only operations authorized for that token |
+| `/api/autodiscover` | GET | Public discovery envelope, including published CLI versions and the configured minimum CLI version |
+| `/cli/binaries/{project_name}-cli-{os}-{arch}` | GET | Streams a published CLI binary; public by default, or Bearer protected when configured |
 | `/api/{api_version}/cli/sh` | GET | Generated POSIX shell helper |
 | `/api/{api_version}/cli/ps` | GET | Generated PowerShell helper |
 | `/api/{api_version}/cli/completion/{bash,zsh,fish}` | GET | Shell completions |
 
 Native API success responses use `{ "ok": true, "data": ... }`; paginated lists add a sibling `pagination` object. Errors use `{ "ok": false, "error": "ERROR_CODE", "message": "...", "details": ... }`, with the HTTP status carried by the response status code. Health endpoints and external compatibility routes use their documented native formats. The OpenAPI UI is `/server/docs/swagger`; the GraphiQL interface is `/server/docs/graphql`.
+
+The `/api/autodiscover` data contains `cli_versions`, keyed by `os-arch`, with each available release's version and verified SHA-256, plus `cli_min_version` when configured. The server publishes only operator-provisioned binaries from its CLI release directory. The companion client checks this metadata at startup and downloads a newer build over HTTPS from `/cli/binaries/`; an empty release directory returns an empty version map and binary requests return `404`.
 
 ## Public discovery files
 

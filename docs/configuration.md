@@ -47,7 +47,7 @@ The merged view starts with built-in defaults, then reads `server.yml`, drop-ins
 | `yaml.d/notifications.yml` | `server.notifications` |
 | `yaml.d/tor.yml` | `server.tor` and top-level `tor` settings |
 | `yaml.d/i2p.yml` | `server.i2p` |
-| `yaml.d/maintenance.yml` | Maintenance, scheduler, update, backup, and restore settings |
+| `yaml.d/maintenance.yml` | Maintenance, scheduler, update, backup, restore, and CLI distribution settings |
 | `yaml.d/app.yml` | Project-defined settings not assigned to another area |
 | `secrets.yml` | Credentials only |
 
@@ -91,6 +91,8 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.debug.runtime_endpoints` | `server.yml` | `true` in the debug configuration example | Boolean; effective only while the debug flag is enabled. |
 
 Debug settings take effect only while the independent debug flag is enabled. Body logging is opt-in and bounded by `max_body_log_size`; structured JSON and form bodies are redacted by sensitive field name, and unsupported body formats are omitted. SQL literal values and bound argument values are not written to logs.
+
+Log files use the six configured kinds (`access`, `server`, `error`, `audit`, `security`, and `debug`). Each kind accepts its documented format, filename, rotation, retention, and compression settings; filenames must be plain names inside the configured log directory. The access log rotates monthly by default, the audit log daily, and the other kinds inherit `defaults.rotate` (`weekly,50MB`). All kinds inherit `defaults.keep` (`none`), which deletes the rotated archive immediately. Format and policy values are validated when configuration loads; invalid per-kind values reset to that kind's default.
 | `server.api_version` | `server.yml` | `v1` | API version path segment. |
 | `server.baseurl` | `server.yml` | `/` | URL path prefix; reverse-proxy prefix headers take precedence. |
 | `server.pidfile` | `server.yml` | `true` | Boolean. PID files are skipped in containers. |
@@ -103,7 +105,11 @@ Debug settings take effect only while the independent debug flag is enabled. Bod
 | `server.ssl.letsencrypt.challenge` | `server.yml` | `http-01` | `http-01`, `tls-alpn-01`, or `dns-01`. |
 | `server.ssl.letsencrypt.staging` | `server.yml` | `false` | Boolean. |
 | `server.ssl.letsencrypt.dns_provider` | `server.yml` | Empty | Lowercase lego provider identifier. |
-| `server.ssl.letsencrypt.dns_credentials` | `secrets.yml` | `{}` | Flat map of provider environment-variable names to string values; encrypted at rest. lego validates provider requirements at startup and before issuance. |
+| `server.ssl.letsencrypt.dns_credentials` | `secrets.yml` | `{}` | Flat map of lego provider environment-variable names to string values. Plaintext is accepted on load then atomically rewritten as `enc:v1:` AES-256-GCM ciphertext using `server.security.encryption_key`; credentials are decrypted only in memory. All lego DNS providers are supported. |
+
+For `dns-01`, the server validates the configured lego provider without creating a DNS record, then uses it for the ACME request. Provider configuration and issuance failures stop TLS setup and do not silently fall back to a self-signed certificate. RFC 2136 accepts both `DNSUPDATE_*` and legacy `RFC2136_*` credential names; `*_TSIG_FILE` must be a filename inside `{config_dir}/ssl/`. Successful DNS issuance records `dns_validated_at` in `server.db`; changing the provider or any credential clears that marker. App-managed ACME certificates are stored under `{config_dir}/ssl/letsencrypt/{fqdn}/` and are renewed when 30 days or fewer remain.
+
+HTTP-01 is answered on the existing HTTP listener and TLS-ALPN-01 on the existing HTTPS listener; the app does not open a separate challenge port. The certificate authority must reach port 80 or 443 respectively, so configure those listener ports or forward them through the reverse proxy. The daily 03:00 `ssl_renewal` task renews only app-managed Let's Encrypt certificates; system certbot and user-managed local certificates are not renewed by the app.
 | `server.database.driver` | `server.yml` | `sqlite` | `sqlite` (aliases `sqlite2`, `sqlite3`) or `libsql` (alias `turso`). A connection URL's scheme selects the driver. |
 | `server.database.url` | `server.yml` or `secrets.yml` | `{data_dir}/db/server.db` | SQLite path/`file:`, or `libsql://`/`https://`. Credential-bearing URLs are stored in `secrets.yml`; rejected URL forms are reported and are not replaced with SQLite. |
 | `server.database.token` | `secrets.yml` | Empty | libsql credential supplied by the operator. |
@@ -360,6 +366,8 @@ The owner cookie name is recorded in `IDEA.md`. When a deployment changes an old
 | `server.update.auto_install` | `yaml.d/maintenance.yml` | `false` | Boolean; scheduled checks notify only unless enabled. |
 | `server.update.defer_days` | `yaml.d/maintenance.yml` | `0` | Integer `0–365`; ignored for `devel`. |
 | `server.update.cli_min_version` | `yaml.d/maintenance.yml` | Empty | Optional minimum CLI version returned by autodiscovery. |
+| `cli.binary_download.dir` | `yaml.d/maintenance.yml` | `{data_dir}/cli` | Operator-provisioned CLI release files (`version.txt`, `sha256.txt`, and platform binaries). Relative paths resolve under the data directory. |
+| `cli.binary_download.require_auth` | `yaml.d/maintenance.yml` | `false` | Require a valid Bearer token when downloading published CLI binaries. |
 | `server.tor.expose` | `yaml.d/tor.yml` | `false` | Explicitly advertise the runtime-derived onion address in API autodiscovery. |
 | `server.tor.contact_email` | `yaml.d/tor.yml` | Empty | Optional email shown only on Tor responses; never falls back to clearnet contact information. The onion address itself is runtime state read from Tor's hidden-service hostname file. |
 | `server.tor.binary` | `yaml.d/tor.yml` | Empty | Optional executable path; empty selects automatic detection. A configured path must identify an installed Tor executable. |
@@ -518,6 +526,7 @@ I2P is enabled by the computed default in containers and disabled by default on 
 server:
   i2p:
     enabled: false
+    expose: false
     binary: ""
     sam_address: "127.0.0.1:7656"
     virtual_port: 80
@@ -529,7 +538,7 @@ server:
     bootstrap_timeout: 300
 ```
 
-When enabled, the app prefers a managed dedicated `i2pd` process and falls back to an existing SAMv3 bridge. It creates a separate loopback backend and persists the destination key under `{data_dir}/i2p/site/`; the `.b32.i2p` address remains stable across restarts. No provider means the eepsite is skipped without preventing the main server from starting. `/server/healthz` reports its enabled state, provider, status, and public address.
+When enabled, the app prefers a managed dedicated `i2pd` process and falls back to an existing SAMv3 bridge. It creates a separate loopback backend and persists the destination key under `{data_dir}/i2p/site/`; the `.b32.i2p` address remains stable across restarts. No provider means the eepsite is skipped without preventing the main server from starting. `/server/healthz` reports its enabled state, provider, status, and public address. The address is included in `/api/autodiscover` only when `server.i2p.expose: true`.
 
 ## API version and base URL
 

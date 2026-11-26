@@ -22,14 +22,16 @@ gitignore [flags]
 | `--backup DIR` | Set the backup directory |
 | `--pid FILE` | Set the PID file path |
 | `--baseurl PATH` | Set the URL path prefix |
-| `--mode production\|development` | Select the application mode |
-| `--debug` | Enable debug endpoints and debug output |
+| `--mode production\|development\|debug` | Select the runtime application mode; `prod`, `dev`, and `devel` are aliases |
+| `--debug[=true\|false]` | Enable or explicitly disable debug endpoints and diagnostics for this run |
 | `--daemon` | Detach on supported Unix platforms |
 | `--lang CODE` | Set the process locale |
 | `--color auto\|yes\|no` | Select colored output |
 | `--force`, `-y` | Skip confirmation prompts where supported |
 
 Commands use flags with values, for example `--service status`, `--service --install`, `--maintenance backup`, `--maintenance restore FILE`, `--update check`, and `--update branch stable`. `--i2p` enables the I2P eepsite; `--i2p=false` disables it for that run. Security report metadata requires root privileges or an interactive `server.token` prompt:
+
+On the first server startup, the foreground process prints the application name, version, mode, web URL, and versioned Swagger URL. The banner uses plain text on narrow or dumb terminals.
 
 ```sh
 gitignore --maintenance security list [--status received]

@@ -64,7 +64,9 @@ The request-flood detector counts requests by client and route class over a slid
 
 ## Debug and profiling endpoints
 
-The `/debug/*` routes exist only when `--debug` or `DEBUG=true` is explicitly enabled. Every endpoint requires the `server.token` as an `Authorization: Bearer …` credential, including pprof and expvar. The pprof command-line endpoint and expvar `cmdline` value expose only the binary name, never process arguments. Debug mode alone does not expose these routes in development or production.
+The `/debug/*` routes exist only when the independent debug flag is enabled; every endpoint requires `server.token` as an `Authorization: Bearer …` credential, including pprof and expvar. `--mode debug` and `MODE=debug` default the flag on, while explicit `--debug=false` or `DEBUG=false` disables the routes. The pprof command-line endpoint and expvar `cmdline` value expose only the binary name, never process arguments. `server.debug.pprof` and `server.debug.runtime_endpoints` can independently disable their endpoint groups.
+
+Debug request logs redact sensitive query/header names and structured JSON/form body fields. Unsupported body content types are omitted. SQL literals are redacted and bound argument values are never logged; cache logs use bounded operation labels rather than client keys.
 
 ## Deployment protections
 

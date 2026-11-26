@@ -26,7 +26,7 @@ Operators may configure scheduled service notices under `web.announcements` in `
 | `/server/privacy` | Privacy and data-handling information |
 | `/server/contact` | Public contact form for abuse, DMCA, privacy, and security reports |
 | `/server/terms` | Terms of service |
-| `/server/healthz` | Content-negotiated health page and endpoint, including Tor/I2P status when active |
+| `/server/healthz` | Content-negotiated health page and endpoint, including Tor/I2P lifecycle state and normalized status |
 | `/server/security` | Security contact methods and reporting instructions |
 | `/server/security/policy` | Coordinated-disclosure policy |
 | `/server/security/thanks` | Public researcher acknowledgments |
@@ -41,7 +41,7 @@ Operators may configure scheduled service notices under `web.announcements` in `
 
 The root `/healthz` alias is disabled by default and can be enabled with `server.healthz.root.enabled`. API health aliases `/api/healthz` and `/api/healthz.txt` are available independently. `GET /api/autodiscover` reports the configured versioned API base and discovery endpoints.
 
-If database initialization or required runtime-directory setup fails, the process stays available in read-only maintenance mode. Health endpoints return HTTP `503` with `status: maintenance`, a safe reason and message, and self-healing attempt metadata. The response includes `Retry-After`, `X-Maintenance-Mode`, and `X-Maintenance-Reason`. State-changing HTTP requests receive the canonical `MAINTENANCE` error with HTTP `503`; GET, HEAD, OPTIONS, and the read-only GraphQL/MCP POST endpoints remain available. The service retries at `server.maintenance.self_healing.retry_interval` (default `30s`) until recovery or `max_attempts` (default `0`, unlimited); after a positive limit is reached, writes remain blocked until the service is restarted after the cause is fixed. On recovery, health is refreshed and scheduled tasks resume.
+If database initialization or required runtime-directory setup fails, the process stays available in read-only maintenance mode. Health endpoints return HTTP `503` with `status: maintenance`, a safe reason and message, and self-healing attempt metadata. The response includes `Retry-After`, `X-Maintenance-Mode`, and `X-Maintenance-Reason`. State-changing HTTP requests receive the canonical `MAINTENANCE` error with HTTP `503`; GET, HEAD, OPTIONS, and the read-only GraphQL/MCP POST endpoints remain available. The service retries at `server.maintenance.self_healing.retry_interval` (default `30s`) until recovery or `max_attempts` (default `0`, unlimited); after a positive limit is reached, writes remain blocked until the service is restarted after the cause is fixed. On recovery, health is refreshed and scheduled tasks resume. Tor and I2P health objects expose both the full lifecycle `state` and the normalized client-facing `status`; `state` can be `disabled`, `no_provider`, `starting`, `building`, `running`, or `error`, while `status` is `disabled`, `starting`, `healthy`, or `unavailable`.
 
 Other public resources include `/security.txt`, `/.well-known/security.txt`, `/.well-known/llms.txt` and `/llms.txt` for AI discovery, `/.well-known/pgp-key.asc` when a keypair exists and `web.security.publish_pgp_key` is enabled, `/robots.txt`, `/manifest.json`, `/sw.js`, and `/locales/{lang}.json`. Internal metrics are available under `/server/metrics`; root `/metrics` aliases are enabled by default. Restrict metrics endpoints to trusted monitoring systems and use their per-service bearer tokens.
 

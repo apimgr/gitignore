@@ -77,7 +77,7 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 
 | Key | File | Default | Accepted values and validation |
 |---|---|---|---|
-| `server.port` | `server.yml` | Random available port in `64000–64999` (container default: `80`) | `1–65535`; invalid values are replaced by a new random port. A change requires restart. |
+| `server.port` | `server.yml` | Random available port in `64000–64999` (container default: `80`) | One port or an HTTP,HTTPS pair, each `1–65535`; invalid values are replaced by a default. On Unix, a configured port below `1024` prompts before available privilege escalation; if declined or no interactive method is available, startup selects and saves an unprivileged `64000–64999` port. A failed escalation exits with an error. A change requires restart. |
 | `server.address` | `server.yml` | `"[::]"` | Listener address; invalid values reset to the default. |
 | `server.fqdn` | `server.yml` | Detected host name | Host name; `DOMAIN` has highest hostname-resolution priority. |
 | `server.mode` | `server.yml` | `production` | `production`, `development`, or `debug` (aliases are documented under Environment variables). |
@@ -85,10 +85,12 @@ All paths below are dotted YAML keys. Defaults are the built-in values; settings
 | `server.debug.log_queries` | `server.yml` | `true` in the debug configuration example | Boolean; logs SQL queries while debug is enabled. |
 | `server.debug.log_cache` | `server.yml` | `true` in the debug configuration example | Boolean; logs cache operations while debug is enabled. |
 | `server.debug.log_bodies` | `server.yml` | `false` in the debug configuration example | Boolean; logs request/response bodies while debug is enabled. |
-| `server.debug.max_body_log_size` | `server.yml` | `10KB` in the debug configuration example | Maximum body size written to debug logs. |
+| `server.debug.max_body_log_size` | `server.yml` | `10KB` in the debug configuration example | Positive byte size with B, KB/MB/GB/TB, or KiB/MiB/GiB/TiB units that fits the platform's integer range; invalid values reset to `10KB`. |
 | `server.debug.block_profile_rate` | `server.yml` | `1` in the debug configuration example | Non-negative profiling rate; `0` disables block profiling. |
 | `server.debug.mutex_profile_fraction` | `server.yml` | `1` in the debug configuration example | Non-negative profiling fraction; `0` disables mutex profiling. |
 | `server.debug.runtime_endpoints` | `server.yml` | `true` in the debug configuration example | Boolean; effective only while the debug flag is enabled. |
+
+Debug settings take effect only while the independent debug flag is enabled. Body logging is opt-in and bounded by `max_body_log_size`; structured JSON and form bodies are redacted by sensitive field name, and unsupported body formats are omitted. SQL literal values and bound argument values are not written to logs.
 | `server.api_version` | `server.yml` | `v1` | API version path segment. |
 | `server.baseurl` | `server.yml` | `/` | URL path prefix; reverse-proxy prefix headers take precedence. |
 | `server.pidfile` | `server.yml` | `true` | Boolean. PID files are skipped in containers. |
@@ -324,7 +326,7 @@ The owner cookie name is recorded in `IDEA.md`. When a deployment changes an old
 | `server.notifications.email.from.name` | `yaml.d/notifications.yml` | App title | Sender display name. |
 | `server.notifications.email.from.email` | `yaml.d/notifications.yml` | `no-reply@{fqdn}` | Sender address. |
 | `server.notifications.email.reply_to` | `yaml.d/notifications.yml` | Empty | Optional Reply-To address. |
-| `server.notifications.email.events.{startup,shutdown,backup_complete,backup_failed,ssl_expiring,ssl_renewed,ssl_renewal_failed,security_alert,scheduler_error,update_available,update_installed,update_failed,update_staged}` | `yaml.d/notifications.yml` | Per-event boolean switches; defaults: startup/shutdown/backup_complete/ssl_renewed/update_available false; backup_failed/ssl_expiring/ssl_renewal_failed/security_alert/scheduler_error/update_installed/update_failed/update_staged true | Boolean; email delivery still requires working SMTP. |
+| `server.notifications.email.events.{startup,shutdown,backup_complete,backup_failed,ssl_expiring,ssl_renewed,ssl_renewal_failed,security_alert,scheduler_error,update_available,update_installed,update_failed,update_staged,database_error}` | `yaml.d/notifications.yml` | Per-event boolean switches; defaults: startup/shutdown/backup_complete/ssl_renewed/update_available false; backup_failed/ssl_expiring/ssl_renewal_failed/security_alert/scheduler_error/update_installed/update_failed/update_staged/database_error true | Boolean; email delivery still requires working SMTP. |
 | `server.notifications.webui.position` | `yaml.d/notifications.yml` | `top-right` | `top-right`, `top-left`, `bottom-right`, or `bottom-left`. |
 | `server.notifications.webui.duration` | `yaml.d/notifications.yml` | `3` seconds | Non-negative integer; applies to success/info toasts and `0` means manual dismissal. |
 | `server.notifications.webui.warning_duration` | `yaml.d/notifications.yml` | `5` seconds | Non-negative integer; applies to warnings and `0` means manual dismissal. Errors always require manual dismissal. |
@@ -332,6 +334,10 @@ The owner cookie name is recorded in `IDEA.md`. When a deployment changes an old
 | `server.notifications.disk_low.threshold_percent` | `yaml.d/notifications.yml` | `85` | Disk-use percentage. |
 | `server.notifications.disk_low.check_interval` | `yaml.d/notifications.yml` | `5m` | Duration. |
 | `server.notifications.disk_low.repeat` | `yaml.d/notifications.yml` | `24h` | Duration between repeat alerts. |
+| `server.notifications.database_error.enabled` | `yaml.d/notifications.yml` | `true` | Boolean; enables the consecutive database-probe alert. |
+| `server.notifications.database_error.failures` | `yaml.d/notifications.yml` | `3` | Positive count of consecutive failed probes before alerting; invalid values reset to `3`. |
+| `server.notifications.database_error.check_interval` | `yaml.d/notifications.yml` | `1m` | Positive duration; invalid values reset to `1m`. |
+| `server.notifications.database_error.repeat` | `yaml.d/notifications.yml` | `24h` | Positive repeat duration while probes continue failing; invalid values reset to `24h`. |
 | `server.scheduler.timezone` | `yaml.d/maintenance.yml` | `America/New_York` | IANA timezone name; invalid zone warns and uses the default. |
 | `server.scheduler.catch_up_window` | `yaml.d/maintenance.yml` | `1h` | Duration for missed-task catch-up. |
 | `server.scheduler.tasks.{task}.enabled` | `yaml.d/maintenance.yml` | Built-in tasks enabled except `backup_hourly` | Boolean; scheduler itself is always on. |

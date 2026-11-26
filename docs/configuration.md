@@ -514,7 +514,7 @@ When enabled, the app prefers a managed dedicated `i2pd` process and falls back 
 
 ## Update channel and optional endpoints
 
-`server.update.branch` accepts `stable`, `beta`, or `devel`; `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `auto_install` controls whether scheduled update checks install a found version, while `defer_days` controls release age for scheduled checks.
+`server.update.branch` accepts `stable`, `beta`, or `devel`; `daily`, `rolling`, `dev`, and `development` normalize to `devel`. `defer_days` controls release age for scheduled checks; devel releases ignore the delay. With `auto_install: true`, a process that started as root stages the release as the service user, then applies it during the next root startup after fetching the official checksum again. Supported supervisors restart after staging; OpenRC and SysV leave the update staged until the service is restarted. A process that did not start elevated only reports the available release and records that installation was skipped. Manual `--update yes` remains available to an operator with permission to replace the binary.
 
 `/server/healthz` is always available. The root `/healthz` alias is disabled unless `server.healthz.root.enabled` is true. Metrics use `/server/metrics` and its service-specific Prometheus, Grafana, and Loki routes. Root `/metrics` aliases are enabled by default and can be disabled with `server.metrics.root.enabled: false`; each service has a separate bearer token in `server.metrics.auth.tokens.{prometheus,grafana,loki}`. Restrict these internal endpoints to trusted monitoring systems. Language detection follows the request's supported locale and the `lang` preference; the explicit language control is on `/server/preferences`.
 

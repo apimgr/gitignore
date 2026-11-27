@@ -55,7 +55,9 @@ The public Contact page also handles abuse, DMCA, and privacy requests. It uses 
 
 ## Owner data and audit log
 
-The owner-token page lets an owner export or remove their identity by using the CLI. Operators can list token prefixes and metadata, revoke linked tokens, or revoke a primary token to delete its owner and all linked tokens. These maintenance commands require root or the configured `server.token`; confirmations require typing the token prefix or owner ID unless `--yes` is supplied. Exports contain token metadata only, never token values, hashes, or encrypted token material, and are created with mode `0600`.
+Owners can revoke their primary token from `/server/preferences/tokens` or the API. This permanently deletes the owner, all primary and linked tokens, and all resources owned by that identity. The web form requires the owner to type the primary token's last four characters; the API requires the same value in `{"confirm":"<last4>"}`. A linked token cannot revoke the primary.
+
+Operators can list token prefixes and metadata, revoke a linked token, revoke a primary token and its owner, or export and delete owner data with the CLI. These maintenance commands require root or the configured `server.token`; confirmations require typing the token prefix or owner ID unless `--yes` is supplied. A data export includes the owner's ID and timestamps, token metadata, and all resources owned by that identity. It never includes token values or hashes and is created with mode `0600`.
 
 Audit events are stored as JSON Lines in `audit.log` and copied into the relational `audit_log` table. Each line includes the SHA-256 hash of the prior exact line in `prev`; `audit.anchor` carries the last hash across daily rotation and is stored with mode `0600`. Startup verifies the active chain, reports broken entries without stopping the server, and daily rotation applies the audit retention and compression settings. Compliance reports count events in the active and retained rotated logs. Operators can inspect the integrity result with `--maintenance compliance report`.
 

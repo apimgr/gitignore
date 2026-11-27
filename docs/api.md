@@ -43,13 +43,13 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 | `/api/{api_version}/server/help/mcp` | GET | MCP help and endpoint metadata |
 | `/api/{api_version}/server/dpo` | GET | Data protection officer contact |
 | `/api/{api_version}/server/preferences` | GET / POST | Read and update public browser preferences |
-| `/api/{api_version}/server/preferences/tokens` | GET / POST | List and create linked owner tokens; requires the owner's Bearer token |
+| `/api/{api_version}/server/preferences/tokens` | GET / POST | List and create linked owner tokens; requires the owner's primary Bearer token |
 | `/api/{api_version}/server/preferences/tokens/primary` | POST | Issue a primary owner token on request; does not create a resource |
 | `/api/{api_version}/server/preferences/tokens/primary/reveal` | POST | Reveal the primary token; requires the primary Bearer token |
 | `/api/{api_version}/server/preferences/tokens/primary/rotate` | POST | Rotate the primary token |
 | `/api/{api_version}/server/preferences/tokens/primary` | DELETE | Revoke the primary token and delete the owner after confirming the last four token characters |
-| `/api/{api_version}/server/preferences/tokens/{id}/reveal` | POST | Reveal a linked token; requires the owner's Bearer token |
-| `/api/{api_version}/server/preferences/tokens/{id}/rotate` | POST | Rotate a linked token; requires the owner's Bearer token |
+| `/api/{api_version}/server/preferences/tokens/{id}/reveal` | POST | Reveal a linked token; requires the owner's primary Bearer token |
+| `/api/{api_version}/server/preferences/tokens/{id}/rotate` | POST | Rotate a linked token; requires the owner's primary Bearer token |
 | `/api/{api_version}/server/preferences/tokens/{id}` | PATCH / DELETE | Update or revoke one linked token |
 | `/api/{api_version}/server/preferences/sync` | GET | Export preferences for cross-device sync |
 | `/api/{api_version}/server/preferences/sync/import` | GET | Import synchronized preferences |
@@ -77,6 +77,14 @@ Text endpoints also have `.txt` representations where listed by the server. Send
 
 Native API success responses use `{ "ok": true, "data": ... }`; paginated lists add a sibling `pagination` object. Errors use `{ "ok": false, "error": "ERROR_CODE", "message": "...", "details": ... }`, with the HTTP status carried by the response status code. Health endpoints and external compatibility routes use their documented native formats. The OpenAPI UI is `/server/docs/swagger`; the GraphiQL interface is `/server/docs/graphql`.
 
+### Owner token management
+
+The token-management API accepts the owner's **primary** Bearer token. A linked token cannot manage tokens and receives `403`; API routes do not authenticate from cookies. Token IDs are UUIDs. Token objects contain `id`, `name`, `kind`, `scope`, `token_masked`, `created_at`, `last_used_at`, `expires_at`, and `status`; timestamps are RFC 3339 UTC strings or `null`. List responses return `data` as `{ "primary": <token>, "linked": [<token>], "max_linked": 25 }`, with masked values only. The primary has `kind: "primary"` and `scope: "global"`; linked tokens have `kind: "linked"` and `scope: "read"` or `"read-write"`.
+
+Creating a linked token accepts `name`, optional `scope` (default `read-write`), and either `expires` (`never`, `7d`, `30d`, `90d`, or `1y`; default `never`) or `expires_on` (`YYYY-MM-DD`, UTC). Supplying both expiry fields or using `global` scope is invalid. The `201` response contains the token object and its one-time raw value in `linked_token`. Reveal and rotate responses also include `linked_token`; update returns only the masked token object. The raw value is never included in list responses.
+
+`DELETE /api/{api_version}/server/preferences/tokens/primary` deletes the owner and all its tokens and resources. It requires the primary Bearer token and a JSON body of `{ "confirm": "<last four characters of the primary token>" }`; a missing or incorrect confirmation returns `400` without deleting anything. Linked-token revoke returns `{ "id": "<uuid>", "status": "revoked" }`.
+
 The `/api/autodiscover` data contains `cli_versions`, keyed by `os-arch`, with each available release's version and verified SHA-256, plus `cli_min_version` when configured. The server publishes only operator-provisioned binaries from its CLI release directory. The companion client checks this metadata at startup and downloads a newer build over HTTPS from `/cli/binaries/`; an empty release directory returns an empty version map and binary requests return `404`.
 
 ## Public discovery files
@@ -89,7 +97,7 @@ The Atom and RSS feeds are valid empty feeds for this project because the embedd
 
 The HTML contact form is `/server/contact`. The JSON form description is obtained with `GET /api/{api_version}/server/contact`; the response includes field descriptors and a new captcha challenge, but no recipient address. A submission is reviewed first and delivered only after the confirmation request repeats the fields with its review token. A captcha proof and form token are required. Invalid or expired proofs must be replaced by fetching the form description again.
 
-Security reporting for a deployed instance starts from `/.well-known/security.txt` or `/server/security`. The security form is `/server/contact?security_id={id}` and accepts only a currently valid rotating ID. A successful report receives a tracking ID. Its status link is `/server/security/report/{tracking_id}` and requires the emailed token, which permits one access per day and expires 30 days after the report closes. Repository-source vulnerabilities should use the private reporting instructions in `.github/SECURITY.md`.
+Security reporting for a deployed instance starts from `/.well-known/security.txt` or `/server/security`. The security form is `/server/contact?security_id={id}` and accepts an ID from the current or previous 48-hour window. A successful report receives a tracking ID. Its status link is `/server/security/report/{tracking_id}` and requires the emailed token, which permits one access per UTC day and expires 30 days after the report closes. Repository-source vulnerabilities should use the private reporting instructions in `.github/SECURITY.md`.
 
 ## Health and discovery aliases
 

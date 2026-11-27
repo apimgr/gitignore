@@ -20,7 +20,7 @@ Operators may configure scheduled service notices under `web.announcements` in `
 | `/server/help/mcp` | MCP endpoint setup, tools, and project-specific guidance |
 | `/server/preferences` | Public theme, language, and privacy preference controls |
 | `POST /server/theme` | No-JavaScript theme switch used by the shared theme control |
-| `/server/preferences/tokens` | Anonymous owner-token management; create one linked token per MCP client |
+| `/server/preferences/tokens` | Anonymous owner-token management; create, reveal, rotate, and revoke primary or linked tokens |
 | `/server/preferences/sync` | Cross-device browser-preference export and import |
 | `GET /server/preferences/sync/import` | Shared preference import action route that applies cookie values and redirects safely; it is not a page |
 | `/server/privacy` | Privacy and data-handling information |
@@ -30,7 +30,7 @@ Operators may configure scheduled service notices under `web.announcements` in `
 | `/server/security` | Security contact methods and reporting instructions |
 | `/server/security/policy` | Coordinated-disclosure policy |
 | `/server/security/thanks` | Public researcher acknowledgments |
-| `/server/security/report/{tracking_id}` | Researcher status page requiring the emailed token, usable once per day and expiring 30 days after closure |
+| `/server/security/report/{tracking_id}` | Researcher status page requiring the emailed token, usable once per UTC day and expiring 30 days after closure |
 | `/server/dpo` | Data protection officer contact when configured |
 | `/server/docs/swagger` | Interactive OpenAPI UI |
 | `/server/docs/graphql` | GraphiQL playground |

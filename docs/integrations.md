@@ -6,7 +6,7 @@
 |----------|---------|
 | `/api/autodiscover` | Server and API metadata for clients |
 | `/.well-known/llms.txt` and `/llms.txt` | Public AI-agent discovery document; GET and HEAD, no authentication |
-| `/.well-known/security.txt` and `/security.txt` | RFC 9116 security contact document |
+| `/.well-known/security.txt` | RFC 9116 security contact document; GET and HEAD, no authentication |
 | `/server/docs/swagger` | Interactive OpenAPI UI |
 | `/api/swagger` and `/api/v1/server/swagger` | OpenAPI JSON |
 | `/server/docs/graphql` | GraphiQL browser playground |
@@ -33,7 +33,7 @@ The server embeds English, Arabic, German, Spanish, French, Italian, Japanese, a
 
 ## Security and crawler metadata
 
-`/security.txt` and `/.well-known/security.txt` serve the security contact document. `/.well-known/llms.txt` and `/llms.txt` serve the same generated AI-discovery document; these routes are always enabled. `/.well-known/pgp-key.asc` publishes the project public key when a keypair exists and `web.security.publish_pgp_key` is enabled. `/robots.txt` is generated from the configured allow and deny paths. Health aliases and internal metrics endpoints are documented in [Security](security.md) and [Configuration](configuration.md).
+`/.well-known/security.txt` serves the security contact document. `/.well-known/llms.txt` and `/llms.txt` serve the same generated AI-discovery document; these routes are always enabled. `/.well-known/pgp-key.asc` publishes the project public key when its keypair exists and publication is enabled. `/robots.txt` is generated from the configured allow and deny paths. Health aliases and internal metrics endpoints are documented in [Security](security.md) and [Configuration](configuration.md).
 
 The llms.txt document is built per request from the current host and API version, project metadata, rate-limit settings, API/security contact fields, and the registered API routes. Endpoint listing defaults to enabled and excludes internal metrics, debug, and maintenance routes. Set `web.llms.include_endpoints: false` to omit that section; `web.llms.include_schemas: true` adds the OpenAPI schema. `web.llms.custom_sections` appends operator-provided Markdown sections, and `web.api_contact` supplies the API contact shown in the document. MCP is always listed with its Bearer-token requirement; the public catalog REST API remains unauthenticated.
 

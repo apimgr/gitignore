@@ -17,7 +17,6 @@ During critical database or runtime-directory failures, the server stays availab
 | `/.well-known/llms.txt` and `/llms.txt` | Public AI-agent discovery document; GET and HEAD, always available without authentication |
 | `/.well-known/security.txt` | Machine-readable security contacts and expiry |
 | `/.well-known/pgp-key.asc` | Public encryption key when a keypair exists and `web.security.publish_pgp_key` is enabled; otherwise `404` |
-| `/security.txt` | Security contact alias |
 | `/server/security` | Human-readable reporting channels and security information |
 | `/server/security/policy` | Coordinated disclosure policy |
 | `/server/security/thanks` | Public acknowledgments for credited researchers |

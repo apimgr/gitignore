@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -11,8 +12,15 @@ import (
 )
 
 func TestSanitizeDatabaseErrorRemovesCredentials(t *testing.T) {
-	got := sanitizeDatabaseError(errors.New("connect https://alice:secret@db.example/app?token=abc123 failed password=hunter2"))
-	for _, secret := range []string{"secret", "abc123", "hunter2"} {
+	dsn := (&url.URL{
+		Scheme:   "https",
+		User:     url.UserPassword("test-user", "test-password"),
+		Host:     "db.example",
+		Path:     "/app",
+		RawQuery: "token=test-token",
+	}).String()
+	got := sanitizeDatabaseError(errors.New("connect " + dsn + " failed password=hunter2"))
+	for _, secret := range []string{"test-user", "test-password", "test-token", "hunter2"} {
 		if strings.Contains(got, secret) {
 			t.Fatalf("sanitized error %q contains credential %q", got, secret)
 		}

@@ -155,14 +155,14 @@ make build
 
 | Target | Purpose |
 |---|---|
-| `make dev` | Build server and client into a project-scoped temporary directory. |
-| `make local` | Build both binaries for the local platform. |
-| `make build` | Build both binaries for all eight supported platforms. |
-| `make test` | Run vet, vulnerability scanning, unit tests, and coverage enforcement. |
-| `make test TEST_E2E=1` | Run the browser end-to-end suite on demand, separate from the commit gate. |
-| `make release` | Publish the stable `release.txt` version as a GitHub release. |
-| `make beta` | Push a timestamped beta tag from a clean `main` branch for CI publishing. |
-| `make docker` | Build and push the multi-architecture container image. |
+| `make build` | Build debug server and client binaries for the local platform and all eight supported targets. |
+| `make test` | Run Go vet, staticcheck, govulncheck, shell checks, unit tests with coverage, then the basic binary checks. |
+| `make release` | Build production binaries, source archive, and checksums locally; it does not tag, push, or publish. |
+| `make docker` | Build the host-platform container image into the local image store; it does not push. |
+| `make clean` | Remove `binaries/` and `releases/`. |
+| `make help` | List the available targets. |
+
+Run optional browser tests separately with `./tests/e2e.sh`; full OS/service checks use `./tests/incus.sh`.
 
 See [Development](docs/development.md) for repository layout and contribution guidance. AI.md defines the project implementation and verification requirements.
 

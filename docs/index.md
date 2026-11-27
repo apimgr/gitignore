@@ -44,13 +44,13 @@ The template catalog is read-only and public. The application has no user regist
 
 ## Browser pages
 
-The main interface includes `/`, `/search`, `/template/{name}`, `/combine`, `/categories`, `/list`, `/stats`, `/docs`, and `/cli`. Public server pages include `/server/about`, `/server/help`, `/server/help/mcp`, `/server/preferences`, `/server/preferences/tokens`, `/server/preferences/sync`, `/server/preferences/sync/import`, `/server/privacy`, `/server/contact`, `/server/terms`, `/server/dpo`, `/server/security`, `/server/security/policy`, `/server/security/thanks`, `/server/security/report/{tracking_id}`, and `/server/healthz`. Interactive API tools are at `/server/docs/swagger` and `/server/docs/graphql`.
+The main interface includes `/`, `/search`, `/template/{name}`, `/combine`, `/categories`, `/list`, `/stats`, `/docs`, and `/cli`. Public server pages include `/server/about`, `/server/help`, `/server/help/mcp`, `/server/preferences`, `/server/preferences/tokens`, `/server/preferences/sync`, `/server/privacy`, `/server/contact`, `/server/terms`, `/server/dpo`, `/server/security`, `/server/security/policy`, `/server/security/thanks`, `/server/security/report/{tracking_id}`, and `/server/healthz`. Interactive API tools are at `/server/docs/swagger` and `/server/docs/graphql`. The shared preference import URL at `/server/preferences/sync/import` applies a shared link and redirects; it is an action route, not a page.
 
 ## Links
 
 - [Source repository](https://github.com/apimgr/gitignore)
-- [Swagger UI](/server/docs/swagger)
-- [GraphQL playground](/server/docs/graphql)
+- Swagger UI: `/server/docs/swagger`
+- GraphQL playground: `/server/docs/graphql`
 
 ## License
 

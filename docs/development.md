@@ -22,20 +22,16 @@ The Makefile runs Go builds, tests, and static checks in Docker. Do not run Go b
 
 | Target | Behavior |
 |---|---|
-| `make dev` | Build server and client into a project-scoped temporary directory without release metadata. |
-| `make local` | Build versioned server and client binaries for the local platform. |
-| `make build` | Build local binaries and the eight supported server and client platform artifacts. |
-| `make test` | Run vet, vulnerability scanning, unit tests, and the coverage gate in Docker. |
-| `make test TEST_E2E=1` | Run the browser end-to-end suite on demand; this is separate from the commit gate. |
-| `make release` | Build and publish the stable `release.txt` version as a GitHub release. It replaces an existing release and tag with the same version. |
-| `make beta` | Create and push a timestamped beta tag from a clean `main` branch; CI publishes the beta. |
-| `make docker` | Build and push the multi-architecture container image. |
+| `make build` | Build debug server and client binaries for the local platform and all eight supported targets. |
+| `make test` | Run Go vet, staticcheck, govulncheck, shell checks, unit tests with coverage, then the basic binary checks in Docker. |
+| `make release` | Build production binaries, source archive, and checksums locally; it does not tag, push, or publish. |
+| `make docker` | Build the host-platform container image into the local image store; it does not push. |
 | `make clean` | Remove `binaries/` and `releases/`. |
+| `make help` | List the available targets. |
 
 ```sh
-make dev    # Build server and client into a project-scoped temporary directory
-make local  # Build binaries for the host OS/architecture into binaries/
-make build  # Build server and client for the configured platform matrix
+make build
+make test
 ```
 
 The Go toolchain runs in the Makefile's Docker image. The binaries are static (`CGO_ENABLED=0`) and contain their web assets, template data, and locale files.
@@ -46,7 +42,7 @@ The Go toolchain runs in the Makefile's Docker image. The binaries are static (`
 make test
 ```
 
-This target runs `go vet`, `govulncheck`, the Go test suite, and the coverage threshold inside the Go container. Translation-key consistency is covered by the test suite. Optional container/integration scripts are in `tests/`; consult their help or source before running them because some require Incus or a configured browser environment.
+This target runs `go vet`, `staticcheck`, `govulncheck`, ShellCheck and shfmt for test scripts, the Go test suite with coverage enforcement, and then the basic binary checks through `tests/run_tests.sh`. Translation-key consistency is covered by the test suite. Optional integration and browser scripts are in `tests/`; consult their help or source before running them because some require Incus or a configured browser environment.
 
 `./tests/run_tests.sh` runs the basic Docker binary-validation suite. Run `./tests/incus.sh` separately for the full systemd and OpenRC service matrix; it also checks restart persistence, overlay-provider behavior, and uninstall cleanup. If a temporary Incus guest cannot resolve its package mirror through the bridge, set `INCUS_DNS_SERVER` to an accessible IPv4 resolver; the override is scoped to that disposable guest. The browser suite is on-demand after major frontend changes and covers server-rendered, no-JavaScript, and full-JavaScript behavior:
 
@@ -61,13 +57,21 @@ make build
 make release
 ```
 
-`make release` requires a stable semantic version in `release.txt`. It builds the platform matrix, prepares version, source archive, and checksum assets, then creates the matching `v{version}` GitHub release as latest. If that release or tag already exists, the target deletes it before recreating it. Beta and devel releases are published by CI from their tags and commits. `make docker` builds and pushes the configured multi-architecture image.
+`make release` builds the production platform matrix and prepares version, source archive, and checksum assets under `releases/`; it never tags, pushes, or publishes. CI handles stable, beta, and devel releases. `make docker` builds only the host platform and loads the image into the local image store; CI handles multi-platform publishing.
 
 ## Documentation
 
 Update the relevant pages in `docs/` when browser routes, API behavior, configuration, CLI behavior, security, or integrations change. Update the translation guide and locale documentation when language support changes. Build commands are described in the root Makefile; there are no `make run`, `make run-dev`, or `make build-all` targets.
 
-Validate the documentation with `python -m mkdocs build --strict`. When running locally, pass `--site-dir` to a project-scoped temporary directory so generated site files do not enter the repository.
+Validate the documentation with MkDocs and keep generated files in a project-scoped temporary directory:
+
+```sh
+temp_parent="${TMPDIR:-/tmp}/apimgr"
+mkdir -p "$temp_parent"
+temp_dir=$(mktemp -d "$temp_parent/gitignore-docs-XXXXXX")
+trap 'rm -rf -- "$temp_dir"' EXIT
+python -m mkdocs build --strict --site-dir "$temp_dir/site"
+```
 
 ## Contributing
 

@@ -22,7 +22,7 @@ Operators may configure scheduled service notices under `web.announcements` in `
 | `POST /server/theme` | No-JavaScript theme switch used by the shared theme control |
 | `/server/preferences/tokens` | Anonymous owner-token management; create one linked token per MCP client |
 | `/server/preferences/sync` | Cross-device browser-preference export and import |
-| `/server/preferences/sync/import` | Shared preference link that applies cookie values and redirects safely |
+| `GET /server/preferences/sync/import` | Shared preference import action route that applies cookie values and redirects safely; it is not a page |
 | `/server/privacy` | Privacy and data-handling information |
 | `/server/contact` | Public contact form for abuse, DMCA, privacy, and security reports |
 | `/server/terms` | Terms of service |

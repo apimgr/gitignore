@@ -228,11 +228,11 @@ func newTestHealthServer(t *testing.T) *Server {
 	pm.SetDataDir(dataDir)
 
 	return &Server{
-		config: &Config{
+		config: &ServerOptions{
 			Version: "test",
 			Paths:   pm,
-			Cfg: &config.Config{
-				Server: config.ServerConfig{
+			Cfg: &config.ServerConfig{
+				Server: config.ServerSettings{
 					Branding: config.BrandingConfig{Title: "gitignore"},
 					Mode:     "production",
 				},
@@ -349,9 +349,9 @@ func TestHealthzReportsPendingRestartConfiguration(t *testing.T) {
 	}
 	manager, err := config.NewConfigManager(config.ConfigManagerOptions{
 		ConfigPath: path,
-		Initial:    &config.Config{Server: config.ServerConfig{Port: "64580"}},
-		Load: func() (*config.Config, error) {
-			return &config.Config{Server: config.ServerConfig{Port: "64581"}}, nil
+		Initial:    &config.ServerConfig{Server: config.ServerSettings{Port: "64580"}},
+		Load: func() (*config.ServerConfig, error) {
+			return &config.ServerConfig{Server: config.ServerSettings{Port: "64581"}}, nil
 		},
 	})
 	if err != nil {

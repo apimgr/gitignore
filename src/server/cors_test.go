@@ -15,7 +15,7 @@ func TestCORSMiddlewareHonorsConfiguredOriginAndCredentials(t *testing.T) {
 	t.Setenv("DOMAIN", "")
 	cfg := config.DefaultConfig()
 	cfg.Server.CORS.AllowedOrigins = []string{"https://client.example"}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/list", nil)
 	request.Header.Set("Origin", "https://client.example")
 	recorder := httptest.NewRecorder()
@@ -32,7 +32,7 @@ func TestCORSMiddlewareWildcardOmitsCredentials(t *testing.T) {
 	t.Setenv("DOMAIN", "")
 	cfg := config.DefaultConfig()
 	cfg.Server.CORS.AllowedOrigins = []string{"*"}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/list", nil)
 	request.Header.Set("Origin", "https://client.example")
 	recorder := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestCORSMiddlewareExplicitEmptyOriginDisablesCORSHeaders(t *testing.T) {
 	t.Setenv("DOMAIN", "enabled.example")
 	cfg := config.DefaultConfig()
 	cfg.Server.CORS.AllowedOrigins = []string{""}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	request := httptest.NewRequest(http.MethodOptions, "/api/v1/list", nil)
 	request.Header.Set("Origin", "https://client.example")
 	recorder := httptest.NewRecorder()
@@ -68,7 +68,7 @@ func TestCORSMiddlewareLearnsOriginFromTrustedProxy(t *testing.T) {
 	t.Setenv("DOMAIN", "")
 	cfg := config.DefaultConfig()
 	cfg.Server.CORS.AllowedOrigins = []string{}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	s.trustedProxies = buildTrustedProxies("127.0.0.1", nil)
 	learn := httptest.NewRequest(http.MethodGet, "/", nil)
 	learn.RemoteAddr = "127.0.0.1:54321"
@@ -85,7 +85,7 @@ func TestCORSMiddlewareLearnsOriginFromTrustedProxy(t *testing.T) {
 
 func TestCORSLearnedOriginsAreBounded(t *testing.T) {
 	cfg := config.DefaultConfig()
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	s.trustedProxies = buildTrustedProxies("127.0.0.1", nil)
 	for index := 0; index < corsLearnedOriginLimit+20; index++ {
 		request := httptest.NewRequest(http.MethodGet, "/", nil)

@@ -44,7 +44,7 @@ func TestOwnerTokenIssueAuthenticateAndEncrypt(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Token = "adm_test_operator_token"
 	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	primaryRaw, primary, err := s.issueOwnerToken(time.Now().UTC(), "api", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestOwnerCookieMiddlewareAndTokenViewCookie(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := config.DefaultConfig()
 	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	raw, item, err := s.issueOwnerToken(time.Now().UTC(), "api", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestOwnerCookieMiddlewareMigratesLegacyCookie(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := config.DefaultConfig()
 	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	raw, _, err := s.issueOwnerToken(time.Now().UTC(), "api", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestOwnerTokenAPIIssueListLinkedActionsAndRotate(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := config.DefaultConfig()
 	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	s.strictTokenLimiter = newRateLimiter(100, 60)
 
 	response := httptest.NewRecorder()

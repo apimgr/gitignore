@@ -12,11 +12,21 @@ import (
 	"github.com/apimgr/gitignore/src/template"
 )
 
-func TestOperatorContentCannotIntroducePageH1(t *testing.T) {
-	if got := string(renderPublicContent("# Operator title\n\n<h1>Injected title</h1>", "md")); strings.Contains(got, "<h1>") {
-		t.Fatalf("operator content introduced h1: %s", got)
-	} else if !strings.Contains(got, "<h2>Operator title</h2>") {
-		t.Fatalf("Markdown level-one heading was not rendered as h2: %s", got)
+func TestOperatorContentHeadingsShiftTwoLevels(t *testing.T) {
+	markdown := string(renderPublicContent("# Operator title\n\n## Operator section", "md"))
+	for _, want := range []string{"<h3>Operator title</h3>", "<h4>Operator section</h4>"} {
+		if !strings.Contains(markdown, want) {
+			t.Errorf("Markdown content missing %q: %s", want, markdown)
+		}
+	}
+	htmlContent := string(renderPublicContent("<h1>Injected title</h1><h2>Injected section</h2>", "html"))
+	for _, want := range []string{"<h3>Injected title</h3>", "<h4>Injected section</h4>"} {
+		if !strings.Contains(htmlContent, want) {
+			t.Errorf("HTML content missing %q: %s", want, htmlContent)
+		}
+	}
+	if strings.Contains(htmlContent, "<h1>") || strings.Contains(htmlContent, "<h2>") {
+		t.Fatalf("operator content heading was not shifted: %s", htmlContent)
 	}
 }
 
@@ -27,7 +37,7 @@ func TestPrivacyPageRendersNoJSCCPAFormAndPersistsChoice(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	cfg := config.DefaultConfig()
 	cfg.Server.Privacy.Data.Sold = true
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 
 	page := httptest.NewRecorder()
 	s.router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/server/privacy", nil))
@@ -94,7 +104,7 @@ func TestAnnouncementPageAndNoJSDismissal(t *testing.T) {
 		ID: "maintenance-window", Type: "warning", Title: "Maintenance",
 		Message: "Service will pause briefly.", Dismissible: true,
 	}}
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	manager, err := template.New()
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +258,7 @@ func TestTermsPageUsesConfiguredOverrideAndSanitizesIt(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Branding.Content.Terms.Format = "html"
 	cfg.Server.Branding.Content.Terms.Body = `<p>Custom terms</p><script>alert(1)</script><a href="/server/contact">contact</a>`
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	recorder := httptest.NewRecorder()
 	s.router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/server/terms", nil))
 	if recorder.Code != http.StatusOK {
@@ -262,7 +272,7 @@ func TestTermsPageUsesConfiguredOverrideAndSanitizesIt(t *testing.T) {
 
 func TestBuiltInPrivacyAndTermsContentUsesRequestLanguage(t *testing.T) {
 	cfg := config.DefaultConfig()
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 
 	privacy := httptest.NewRecorder()
 	s.router.ServeHTTP(privacy, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))
@@ -305,7 +315,7 @@ func TestCookieConsentPreservesOperatorCustomText(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Privacy.Consent.Message = "Operator consent copy."
 	cfg.Server.Privacy.Cookies.Essential.Description = "Operator essential-cookie copy."
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 
 	page := httptest.NewRecorder()
 	s.router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))
@@ -330,7 +340,7 @@ func TestCookieConsentPreservesOperatorCustomText(t *testing.T) {
 func TestSoldPrivacyDefaultsUseLocalizedConsentAndUsage(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Privacy.Data.Sold = true
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 
 	page := httptest.NewRecorder()
 	s.router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/server/privacy?lang=es", nil))

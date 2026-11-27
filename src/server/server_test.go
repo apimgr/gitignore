@@ -18,7 +18,7 @@ func TestConfiguredAPIVersionIsUsedByRouterAndDiscovery(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Token = "adm_testtoken0123456789012345678901234567"
 	cfg.Server.APIVersion = "v9"
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v9/", nil)
 	rec := httptest.NewRecorder()
@@ -41,7 +41,7 @@ func TestConfiguredAPIVersionIsUsedByRouterAndDiscovery(t *testing.T) {
 func TestAllowlistEmptyDescriptionUsesPlaceholder(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Security.Allowlist = []config.AllowlistEntry{{CIDR: "192.0.2.1"}, {CIDR: "192.0.2.2", Description: "  "}}
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	for _, cidr := range []string{"192.0.2.1/32", "192.0.2.2/32"} {
 		if got := s.allowlistSnapshot[cidr]; got != "(no description)" {
 			t.Errorf("allowlist description for %s = %q, want placeholder", cidr, got)
@@ -70,7 +70,7 @@ func TestMCPPublicReadToolFlowAndAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&Config{Version: "test", Cfg: cfg, Templates: manager})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg, Templates: manager})
 	request := func(path, body, method, name string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -107,7 +107,7 @@ func TestMCPPublicReadToolFlowAndAliases(t *testing.T) {
 func TestMCPRequiresBearerAndRejectsLegacyProtocol(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.Token = "adm_testtoken0123456789012345678901234567"
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
@@ -133,7 +133,7 @@ func TestMCPRequiresBearerAndRejectsLegacyProtocol(t *testing.T) {
 }
 
 func TestMCPRejectsInvalidOriginAndMethod(t *testing.T) {
-	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	s := New(&ServerOptions{Version: "test", Cfg: config.DefaultConfig()})
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
 	request.Host = "gitignore.example"
 	request.Header.Set("Origin", "https://attacker.example")
@@ -156,7 +156,7 @@ func TestMCPRejectsInvalidOriginAndMethod(t *testing.T) {
 func TestMCPOriginRequiresExplicitOrOwnOrigin(t *testing.T) {
 	t.Setenv("DOMAIN", "")
 	cfg := config.DefaultConfig()
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	request := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	request.Host = "gitignore.example"
 
@@ -249,7 +249,7 @@ func TestParseCookieMaxAge(t *testing.T) {
 
 // TestHandleLocaleJSON verifies the default locale catalog is served as JSON.
 func TestHandleLocaleJSON(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	req := httptest.NewRequest(http.MethodGet, "/locales/en.json", nil)
 	req = withChiParam(req, "lang", "en")
 	rec := httptest.NewRecorder()
@@ -269,7 +269,7 @@ func TestHandleLocaleJSON(t *testing.T) {
 // TestHandleLocaleJSONUnsupportedFallsBack verifies an unsupported language
 // falls back to the default locale rather than 404ing.
 func TestHandleLocaleJSONUnsupportedFallsBack(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	req := httptest.NewRequest(http.MethodGet, "/locales/xx-not-real.json", nil)
 	req = withChiParam(req, "lang", "xx-not-real")
 	rec := httptest.NewRecorder()
@@ -290,7 +290,7 @@ func TestHandleLocaleJSONUnsupportedFallsBack(t *testing.T) {
 // TestDetectServerURLFromConfiguredFQDN verifies the configured FQDN wins when
 // no trusted-proxy headers are present.
 func TestDetectServerURLFromConfiguredFQDN(t *testing.T) {
-	s := &Server{config: &Config{Cfg: &config.Config{Server: config.ServerConfig{FQDN: "example.com"}}}}
+	s := &Server{config: &ServerOptions{Cfg: &config.ServerConfig{Server: config.ServerSettings{FQDN: "example.com"}}}}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.5:1234"
 
@@ -302,7 +302,7 @@ func TestDetectServerURLFromConfiguredFQDN(t *testing.T) {
 // TestDetectServerURLDefaultsToRequestHost verifies the fallback to the
 // request's Host header and scheme when nothing else is configured.
 func TestDetectServerURLDefaultsToRequestHost(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.5:1234"
 	req.Host = "gitignore.example"
@@ -316,7 +316,7 @@ func TestDetectServerURLDefaultsToRequestHost(t *testing.T) {
 // X-Forwarded-* headers are honored only from a trusted proxy peer
 // (AI.md PART 12 "X-Forwarded-* trust gate").
 func TestDetectServerURLTrustsForwardedHeadersFromTrustedPeer(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	s.trustedProxies = buildTrustedProxies("127.0.0.1", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -332,7 +332,7 @@ func TestDetectServerURLTrustsForwardedHeadersFromTrustedPeer(t *testing.T) {
 // TestDetectServerURLIgnoresForwardedHeadersFromUntrustedPeer verifies a
 // non-trusted peer cannot forge the proto/host used for URL construction.
 func TestDetectServerURLIgnoresForwardedHeadersFromUntrustedPeer(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.9:5555"
 	req.Host = "direct.example"
@@ -354,7 +354,7 @@ func TestNewBuildsRoutableServer(t *testing.T) {
 	pm := apppath.New()
 	pm.SetDataDir(t.TempDir())
 
-	s := New(&Config{
+	s := New(&ServerOptions{
 		Address:   "127.0.0.1",
 		Port:      0,
 		Templates: mgr,
@@ -412,9 +412,9 @@ func TestNewMountsBaseURLPrefix(t *testing.T) {
 	pm := apppath.New()
 	pm.SetDataDir(t.TempDir())
 
-	cfg := &config.Config{}
+	cfg := &config.ServerConfig{}
 	cfg.Server.BaseURL = "/app"
-	s := New(&Config{
+	s := New(&ServerOptions{
 		Address:   "127.0.0.1",
 		Port:      0,
 		Templates: mgr,
@@ -444,7 +444,7 @@ func TestShutdownOnUnstartedServer(t *testing.T) {
 }
 
 func TestOpenAPIAndMCPTextUseRequestLanguage(t *testing.T) {
-	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	s := New(&ServerOptions{Version: "test", Cfg: config.DefaultConfig()})
 	var spec map[string]interface{}
 	openAPIHandler := i18n.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		spec = s.openAPISpec(r)
@@ -485,7 +485,7 @@ func TestOpenAPIAndMCPTextUseRequestLanguage(t *testing.T) {
 }
 
 func TestMCPErrorUsesRequestLanguage(t *testing.T) {
-	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	s := New(&ServerOptions{Version: "test", Cfg: config.DefaultConfig()})
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
 	request.Header.Set("Accept-Language", "es")
 	request.Header.Set("Content-Type", "application/json")

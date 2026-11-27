@@ -22,10 +22,10 @@ func newTestCompatServer(t *testing.T) *Server {
 		t.Fatalf("template.New: %v", err)
 	}
 	return &Server{
-		config: &Config{
+		config: &ServerOptions{
 			Version:   "test",
 			Templates: mgr,
-			Cfg:       &config.Config{},
+			Cfg:       &config.ServerConfig{},
 		},
 	}
 }

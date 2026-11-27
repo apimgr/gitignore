@@ -45,18 +45,36 @@ func configText(key string, values ...interface{}) string {
 	return i18n.TranslateFormat(language, key, values...)
 }
 
-// Config represents the complete server configuration
-type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Web    WebConfig    `yaml:"web"`
-	Data   DataConfig   `yaml:"data"`
-	CLI    CLIConfig    `yaml:"cli"`
+// ServerConfig represents the complete server configuration.
+type ServerConfig struct {
+	Server  ServerSettings `yaml:"server"`
+	Web     WebConfig      `yaml:"web"`
+	Data    DataConfig     `yaml:"data"`
+	CLI     CLIConfig      `yaml:"cli"`
+	Runtime RuntimeOptions `yaml:"-"`
+	Build   BuildMetadata  `yaml:"-"`
 	// LegacySecrets stages imported database values without serializing them.
 	LegacySecrets map[string]string `yaml:"-"`
 }
 
-// ServerConfig contains server-related settings
-type ServerConfig struct {
+// RuntimeOptions contains command-line settings that do not belong in YAML.
+type RuntimeOptions struct {
+	Port, Address, ConfigDir, DataDir, CacheDir, LogDir, BackupDir                 string
+	PIDFile, BaseURL, Mode, Service, Maintenance, Update, Color, Language, Shell   string
+	Args                                                                           []string
+	Help, Version, Status, Debug, DebugSpecified, Force, I2P, I2PSpecified, Daemon bool
+	ConfigPath                                                                     string
+	FirstRun                                                                       bool
+	Startup                                                                        StartupSettings
+}
+
+// BuildMetadata is copied from the executable into the configuration before app startup.
+type BuildMetadata struct {
+	Version, CommitID, BuildEpoch, OfficialSite string
+}
+
+// ServerSettings contains server-related settings.
+type ServerSettings struct {
 	Port           string               `yaml:"port"`
 	Token          string               `yaml:"-"`
 	FQDN           string               `yaml:"fqdn"`
@@ -113,13 +131,13 @@ type DebugConfig struct {
 
 // UnmarshalYAML accepts the canonical paths and reads the two retired names so
 // existing installations do not lose their configured scheduler or log level.
-func (s *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
-	type canonicalServerConfig ServerConfig
-	canonical := canonicalServerConfig(*s)
+func (s *ServerSettings) UnmarshalYAML(node *yaml.Node) error {
+	type canonicalServerSettings ServerSettings
+	canonical := canonicalServerSettings(*s)
 	if err := node.Decode(&canonical); err != nil {
 		return err
 	}
-	*s = ServerConfig(canonical)
+	*s = ServerSettings(canonical)
 
 	if mappingValue(node, "scheduler") == nil {
 		if legacy := mappingValue(node, "schedule"); legacy != nil {
@@ -587,7 +605,7 @@ func DefaultNotificationsConfig() NotificationsConfig {
 // ApplySMTPEnv overrides email settings from SMTP_* environment variables.
 // Env vars take precedence over config-file values (AI.md PART 17), which makes
 // containerized deployments configurable without editing server.yml.
-func ApplySMTPEnv(cfg *Config) {
+func ApplySMTPEnv(cfg *ServerConfig) {
 	e := &cfg.Server.Notifications.Email
 	if v := os.Getenv("SMTP_HOST"); v != "" {
 		e.SMTP.Host = v
@@ -1193,7 +1211,7 @@ type CORSConfig struct {
 }
 
 var (
-	current              *Config
+	current              *ServerConfig
 	mu                   sync.RWMutex
 	configPath           string
 	legacyBackupPending  = map[string]bool{}
@@ -1208,9 +1226,9 @@ type configValueLocation struct {
 }
 
 // DefaultConfig returns the default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		Server: ServerConfig{
+func DefaultConfig() *ServerConfig {
+	return &ServerConfig{
+		Server: ServerSettings{
 			Port:       "",
 			FQDN:       "",
 			Address:    "[::]",
@@ -1414,8 +1432,17 @@ func migrateYamlToYml(path string) {
 	}
 }
 
-// Load loads configuration from a YAML file
-func Load(path string) (*Config, error) {
+// Load parses server command-line arguments and builds the runtime configuration.
+func Load(args []string) (*ServerConfig, error) {
+	return loadCommandLine(args)
+}
+
+// LoadFile loads the persisted YAML configuration at path.
+func LoadFile(path string) (*ServerConfig, error) {
+	return loadConfigFile(path)
+}
+
+func loadConfigFile(path string) (*ServerConfig, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -1773,7 +1800,7 @@ func PeekStartupSettings(path string) StartupSettings {
 	return settings
 }
 
-func resetStartupSetting(settings *StartupSettings, defaults ServerConfig, key string) {
+func resetStartupSetting(settings *StartupSettings, defaults ServerSettings, key string) {
 	switch key {
 	case "port":
 		settings.Port = defaults.Port
@@ -2650,7 +2677,7 @@ func writeConfigAtomically(path string, data []byte) error {
 // loadYAMLDropins applies yaml.d files in lexical order over the main file.
 // The I2P drop-in remains handled separately because its save path is managed
 // by the I2P settings workflow.
-func loadYAMLDropins(configPath string, cfg *Config) error {
+func loadYAMLDropins(configPath string, cfg *ServerConfig) error {
 	dir := filepath.Join(filepath.Dir(configPath), "yaml.d")
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -2741,7 +2768,7 @@ func pathWithinDirectory(directory, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
-func applyYAMLConfigFile(path string, data []byte, current *Config) error {
+func applyYAMLConfigFile(path string, data []byte, current *ServerConfig) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		return err
@@ -2846,7 +2873,7 @@ func applyConfigMapping(path string, node *yaml.Node, target, defaults reflect.V
 		if prefix != "" {
 			fieldPath = prefix + "." + key
 		}
-		if target.Type() == reflect.TypeOf(ServerConfig{}) && key == "schedule" {
+		if target.Type() == reflect.TypeOf(ServerSettings{}) && key == "schedule" {
 			fieldPath = strings.TrimSuffix(fieldPath, "schedule") + "scheduler"
 		}
 		configValueLocations[fieldPath] = configValueLocation{file: filepath.Base(path), line: valueNode.Line}
@@ -2913,7 +2940,7 @@ func configFieldIndex(configType reflect.Type, key string) int {
 		if tag == "" {
 			tag = strings.ToLower(field.Name)
 		}
-		if tag == key || (configType == reflect.TypeOf(ServerConfig{}) && key == "schedule" && tag == "scheduler") {
+		if tag == key || (configType == reflect.TypeOf(ServerSettings{}) && key == "schedule" && tag == "scheduler") {
 			return index
 		}
 	}
@@ -2949,7 +2976,7 @@ func IsConfigValueSet(key string) bool {
 	return ok
 }
 
-func expandConfigEnvironment(cfg *Config) {
+func expandConfigEnvironment(cfg *ServerConfig) {
 	if cfg == nil {
 		return
 	}
@@ -3020,7 +3047,7 @@ func configFileCacheKey(path string) string {
 	return resolved
 }
 
-func validateSecurityDataConfig(cfg *Config) error {
+func validateSecurityDataConfig(cfg *ServerConfig) error {
 	seen := map[string]bool{"firehol_level1": true}
 	validSources := true
 	for _, source := range cfg.Server.Security.Blocklists.ExtraSources {
@@ -3085,7 +3112,7 @@ func validateSecurityDataConfig(cfg *Config) error {
 }
 
 // Get returns the current configuration (thread-safe)
-func Get() *Config {
+func Get() *ServerConfig {
 	mu.RLock()
 	defer mu.RUnlock()
 	if current == nil {
@@ -3108,7 +3135,7 @@ func Save() error {
 }
 
 // Update applies fn to the current config then saves
-func Update(fn func(*Config)) error {
+func Update(fn func(*ServerConfig)) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if current == nil {
@@ -3130,7 +3157,7 @@ func Update(fn func(*Config)) error {
 	return persistChangedConfigAreas(previous, current, configPath)
 }
 
-func cloneConfig(cfg *Config) *Config {
+func cloneConfig(cfg *ServerConfig) *ServerConfig {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return DefaultConfig()
@@ -3143,7 +3170,7 @@ func cloneConfig(cfg *Config) *Config {
 	return clone
 }
 
-func persistChangedConfigAreas(previous, current *Config, path string) error {
+func persistChangedConfigAreas(previous, current *ServerConfig, path string) error {
 	areas := make([]string, 0, 13)
 	if !reflect.DeepEqual(previous.Server.Branding, current.Server.Branding) || !reflect.DeepEqual(previous.Server.SEO, current.Server.SEO) || !reflect.DeepEqual(previous.Web.UI, current.Web.UI) {
 		areas = append(areas, "branding")
@@ -3189,7 +3216,7 @@ func persistChangedConfigAreas(previous, current *Config, path string) error {
 	return nil
 }
 
-func writeConfigArea(configPath, area string, cfg *Config) error {
+func writeConfigArea(configPath, area string, cfg *ServerConfig) error {
 	var value interface{}
 	switch area {
 	case "branding":
@@ -3289,7 +3316,7 @@ func NormalizeUpdateBranch(branch string) (string, bool) {
 	}
 }
 
-func saveConfig(cfg *Config, path string) error {
+func saveConfig(cfg *ServerConfig, path string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("%s: %w", configText("cli.config.directory_create_failed"), err)
@@ -3313,7 +3340,14 @@ func saveConfig(cfg *Config, path string) error {
 		}
 		if cfg.Server.Backup.EncryptionPassword != "" {
 			backup := nestedSecretMap(server, "backup")
-			backup["encryption_password"] = cfg.Server.Backup.EncryptionPassword
+			password := cfg.Server.Backup.EncryptionPassword
+			if !strings.HasPrefix(password, "enc:v1:") {
+				password, err = encryptDNSCredential(cfg.Server.Security.EncryptionKey, password)
+				if err != nil {
+					return fmt.Errorf("cannot protect backup encryption password: %w", err)
+				}
+			}
+			backup["encryption_password"] = password
 			server["backup"] = backup
 		}
 		if cfg.Server.Database.Token != "" || urlContainsCredentials(cfg.Server.Database.URL) {
@@ -3368,11 +3402,11 @@ func saveConfig(cfg *Config, path string) error {
 	return nil
 }
 
-func validateBackupConfig(cfg *Config) {
+func validateBackupConfig(cfg *ServerConfig) {
 	cfg.Server.Backup.Encryption.Enabled = cfg.Server.Backup.EncryptionPassword != ""
 }
 
-func validateRestoreConfig(cfg *Config) {
+func validateRestoreConfig(cfg *ServerConfig) {
 	defaults := DefaultConfig().Server.Restore
 	checkSize := func(value *string, fallback, key string) {
 		if validByteSize(*value) {
@@ -3394,7 +3428,7 @@ func validateRestoreConfig(cfg *Config) {
 	}
 }
 
-func validateDebugConfig(cfg *Config) {
+func validateDebugConfig(cfg *ServerConfig) {
 	defaults := DefaultConfig().Server.Debug
 	debug := &cfg.Server.Debug
 	if !validDebugBodyLogSize(debug.MaxBodyLogSize) {
@@ -3411,7 +3445,7 @@ func validateDebugConfig(cfg *Config) {
 	}
 }
 
-func validateLoggingConfig(cfg *Config) {
+func validateLoggingConfig(cfg *ServerConfig) {
 	level := strings.ToLower(strings.TrimSpace(cfg.Server.Logging.Level))
 	if level != "" && level != "debug" && level != "info" && level != "warn" && level != "error" {
 		level = ""
@@ -3566,7 +3600,7 @@ func validLogRetention(value string) bool {
 	return true
 }
 
-func validateNotificationsConfig(cfg *Config) {
+func validateNotificationsConfig(cfg *ServerConfig) {
 	webuiDefaults := DefaultNotificationsConfig().WebUI
 	webui := &cfg.Server.Notifications.WebUI
 	if webui.Duration < 0 {
@@ -3619,7 +3653,7 @@ func validDebugBodyLogSize(value string) bool {
 	return err == nil && n > 0 && n <= uint64(^uint(0)>>1)/multiplier
 }
 
-func validateAbuseDetectionConfig(cfg *Config) {
+func validateAbuseDetectionConfig(cfg *ServerConfig) {
 	defaults := DefaultConfig().Server.Security.AbuseDetection
 	flood := &cfg.Server.Security.AbuseDetection.RequestFlood
 	if flood.Multiplier < 1 {
@@ -3636,7 +3670,7 @@ func validateAbuseDetectionConfig(cfg *Config) {
 	}
 }
 
-func validateTorConfig(cfg *Config) {
+func validateTorConfig(cfg *ServerConfig) {
 	defaults := DefaultConfig().Server.Tor
 	tor := &cfg.Server.Tor
 	if tor.StartupTimeout < 10 || tor.StartupTimeout > 300 {
@@ -3658,7 +3692,7 @@ func validByteSize(value string) bool {
 	return err == nil && n > 0
 }
 
-func applyI2PEnvironment(cfg *Config) error {
+func applyI2PEnvironment(cfg *ServerConfig) error {
 	value, ok := os.LookupEnv("I2P_ENABLED")
 	if !ok {
 		return nil
@@ -3674,7 +3708,7 @@ func applyI2PEnvironment(cfg *Config) error {
 	return nil
 }
 
-func seedFirstRunConnections(cfg *Config) {
+func seedFirstRunConnections(cfg *ServerConfig) {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if cfg.Server.Database.URL == "" && databaseURL != "" {
 		cfg.Server.Database.URL = databaseURL
@@ -3689,7 +3723,7 @@ func seedFirstRunConnections(cfg *Config) {
 	}
 }
 
-func warnIgnoredConnectionEnvironment(cfg *Config) {
+func warnIgnoredConnectionEnvironment(cfg *ServerConfig) {
 	for _, entry := range []struct {
 		name  string
 		saved string
@@ -3719,7 +3753,7 @@ func normalizeDatabaseDriver(driver string) string {
 	}
 }
 
-func applyConnectionURLTypes(cfg *Config) {
+func applyConnectionURLTypes(cfg *ServerConfig) {
 	if cfg.Server.Database.URL != "" {
 		parsed, err := url.Parse(strings.TrimSpace(cfg.Server.Database.URL))
 		if err == nil {
@@ -3751,7 +3785,7 @@ func applyConnectionURLTypes(cfg *Config) {
 	}
 }
 
-func generateConfigYAML(cfg *Config) string {
+func generateConfigYAML(cfg *ServerConfig) string {
 	node := struct {
 		Server struct {
 			Port           string               `yaml:"port"`
@@ -3793,7 +3827,7 @@ func generateConfigYAML(cfg *Config) string {
 	return "# This node only: listen, identity, database, cache, ssl. The rest is in yaml.d/ and credentials are in secrets.yml.\n" + string(encoded)
 }
 
-func ensureEncryptionKey(cfg *Config) error {
+func ensureEncryptionKey(cfg *ServerConfig) error {
 	if strings.TrimSpace(cfg.Server.Security.EncryptionKey) != "" {
 		key, err := base64.StdEncoding.DecodeString(cfg.Server.Security.EncryptionKey)
 		if err != nil || len(key) != 32 {
@@ -3809,7 +3843,7 @@ func ensureEncryptionKey(cfg *Config) error {
 	return nil
 }
 
-func validateContactCaptcha(cfg *Config) error {
+func validateContactCaptcha(cfg *ServerConfig) error {
 	contact := cfg.Server.Pages.Contact
 	provider := strings.ToLower(strings.TrimSpace(contact.Captcha))
 	switch provider {
@@ -3828,7 +3862,7 @@ func validateContactCaptcha(cfg *Config) error {
 	}
 }
 
-func validateClientIPHeader(cfg *Config) error {
+func validateClientIPHeader(cfg *ServerConfig) error {
 	value := cfg.Server.TrustedProxies.ClientIPHeader
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
@@ -3841,7 +3875,7 @@ func validateClientIPHeader(cfg *Config) error {
 	}
 }
 
-func generateNotificationsYAML(cfg *Config) string {
+func generateNotificationsYAML(cfg *ServerConfig) string {
 	n := cfg.Server.Notifications
 	e := n.Email
 	return fmt.Sprintf(`  # Notifications (AI.md PART 17)

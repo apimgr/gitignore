@@ -16,7 +16,7 @@ func TestFlashMessageSurvivesPostRedirectWithoutJavaScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	s := New(&Config{Version: "test", Cfg: config.DefaultConfig()})
+	s := New(&ServerOptions{Version: "test", Cfg: config.DefaultConfig()})
 	s.currentConfig().Server.Privacy.Data.Sold = true
 	handler := flashRedirectMiddleware(s, s.router)
 

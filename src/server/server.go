@@ -90,18 +90,19 @@ func overlyBroadSecurityPrefix(prefix netip.Prefix) bool {
 	return prefix.Bits() <= 15
 }
 
-// Config holds server configuration
-type Config struct {
+// ServerOptions holds server configuration
+type ServerOptions struct {
 	Address             string
 	Port                int
 	HTTPSPort           int
+	Listener            net.Listener
 	DevMode             bool
 	Templates           *template.Manager
 	Paths               *apppath.PathManager
 	Version             string
 	Commit              string
 	BuildDate           string
-	Cfg                 *config.Config
+	Cfg                 *config.ServerConfig
 	ConfigManager       *config.ConfigManager
 	GeoIP               *geoip.Manager
 	SendContact         func(to, subject, body string) error
@@ -119,8 +120,8 @@ type Config struct {
 
 // Server represents the HTTP server
 type Server struct {
-	config               *Config
-	runtimeConfig        atomic.Pointer[config.Config]
+	config               *ServerOptions
+	runtimeConfig        atomic.Pointer[config.ServerConfig]
 	router               *chi.Mux
 	server               *http.Server
 	sslManager           *ssl.Manager
@@ -173,6 +174,16 @@ type Server struct {
 	learnedOrigins       map[string]time.Time
 }
 
+type headResponseWriter struct{ http.ResponseWriter }
+
+func (w headResponseWriter) Write(data []byte) (int, error) { return len(data), nil }
+
+func headOnly(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handler(headResponseWriter{ResponseWriter: w}, r)
+	}
+}
+
 type baseHandlerSnapshot struct {
 	handler http.Handler
 }
@@ -180,7 +191,7 @@ type baseHandlerSnapshot struct {
 var ErrUpdateRestart = errors.New("staged update requires supervisor restart")
 
 // New creates a new server instance
-func New(config *Config) *Server {
+func New(config *ServerOptions) *Server {
 	s := &Server{
 		config:             config,
 		graphQL:            make(map[string]*graphapi.Schema),
@@ -397,7 +408,7 @@ func (s *Server) CleanupExpiredIPBlocks(expired []db.IPBlock) {
 	}
 }
 
-func (s *Server) currentConfig() *config.Config {
+func (s *Server) currentConfig() *config.ServerConfig {
 	if s == nil {
 		return nil
 	}
@@ -411,7 +422,7 @@ func (s *Server) currentConfig() *config.Config {
 }
 
 // ReplaceConfig atomically publishes a file-reloaded configuration snapshot.
-func (s *Server) ReplaceConfig(cfg *config.Config) {
+func (s *Server) ReplaceConfig(cfg *config.ServerConfig) {
 	if cfg != nil {
 		s.refreshSecurityPolicy(cfg, true)
 		s.refreshRateLimiters(cfg)
@@ -422,7 +433,7 @@ func (s *Server) ReplaceConfig(cfg *config.Config) {
 	}
 }
 
-func (s *Server) buildBaseHandler(cfg *config.Config) http.Handler {
+func (s *Server) buildBaseHandler(cfg *config.ServerConfig) http.Handler {
 	var handler http.Handler = s.router
 	if cfg != nil {
 		if prefix := cfg.Server.BaseURL; prefix != "" && prefix != "/" {
@@ -437,7 +448,7 @@ func (s *Server) buildBaseHandler(cfg *config.Config) http.Handler {
 	return handler
 }
 
-func (s *Server) refreshRateLimiters(cfg *config.Config) {
+func (s *Server) refreshRateLimiters(cfg *config.ServerConfig) {
 	if s == nil || cfg == nil {
 		return
 	}
@@ -471,7 +482,7 @@ func (s *Server) refreshRateLimiters(cfg *config.Config) {
 	}
 }
 
-func (s *Server) refreshSecurityPolicy(cfg *config.Config, reportChanges bool) {
+func (s *Server) refreshSecurityPolicy(cfg *config.ServerConfig, reportChanges bool) {
 	if s == nil || cfg == nil {
 		return
 	}
@@ -655,13 +666,14 @@ func (s *Server) setupRoutes() {
 	s.router.Head("/feed.xml", s.handleAtomFeed)
 	s.router.Get("/rss.xml", s.handleRSSFeed)
 	s.router.Head("/rss.xml", s.handleRSSFeed)
-	s.router.Get("/security.txt", s.handleSecurityTxt)
 	s.router.Get("/.well-known/security.txt", s.handleSecurityTxt)
+	s.router.Head("/.well-known/security.txt", headOnly(s.handleSecurityTxt))
 	s.router.Get("/.well-known/llms.txt", s.handleLLMSTxt)
-	s.router.Head("/.well-known/llms.txt", s.handleLLMSTxt)
+	s.router.Head("/.well-known/llms.txt", headOnly(s.handleLLMSTxt))
 	s.router.Get("/llms.txt", s.handleLLMSTxt)
 	s.router.Head("/llms.txt", s.handleLLMSTxt)
 	s.router.Get("/.well-known/pgp-key.asc", s.handlePGPKey)
+	s.router.Head("/.well-known/pgp-key.asc", headOnly(s.handlePGPKey))
 	s.router.Get("/manifest.json", s.handleManifest)
 	s.router.Get("/sw.js", s.handleServiceWorker)
 
@@ -776,8 +788,6 @@ func (s *Server) setupRoutes() {
 		r.Post("/server/graphql", s.handleGraphQL)
 		r.Handle("/server/mcp", http.HandlerFunc(s.handleMCP))
 
-		// Read-only scheduler status (AI.md PART 18 "Scheduler Status")
-		r.Get("/server/scheduler", s.handleAPISchedulerStatus)
 		r.Get("/server/preferences", s.handleAPIPreferences)
 		r.Post("/server/preferences", s.handleAPIPreferencesSave)
 		r.Get("/server/preferences/tokens", s.handleAPIOwnerTokens)
@@ -851,9 +861,18 @@ func (s *Server) setupRoutes() {
 // Start binds the listener, drops root privileges to the configured
 // service user/group (Unix only — see AI.md PART 23), then serves.
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", s.server.Addr)
-	if err != nil {
-		return fmt.Errorf("failed to bind %s: %w", s.server.Addr, err)
+	return s.StartWithListener(s.config.Listener)
+}
+
+// StartWithListener serves on an injected listener when provided, which keeps
+// application lifecycle tests independent of fixed ports.
+func (s *Server) StartWithListener(listener net.Listener) error {
+	var err error
+	if listener == nil {
+		listener, err = net.Listen("tcp", s.server.Addr)
+		if err != nil {
+			return fmt.Errorf("failed to bind %s: %w", s.server.Addr, err)
+		}
 	}
 	var httpsListener net.Listener
 	if s.config.HTTPSPort > 0 {
@@ -878,12 +897,14 @@ func (s *Server) Start() error {
 
 	// Once the privileged port is bound, drop from root to the fixed project
 	// service identity. No-op when not running as root.
-	if err := dropPrivileges("gitignore", "gitignore"); err != nil {
-		if httpsListener != nil {
-			_ = httpsListener.Close()
+	if s.config.Listener == nil {
+		if err := dropPrivileges("gitignore", "gitignore"); err != nil {
+			if httpsListener != nil {
+				_ = httpsListener.Close()
+			}
+			_ = listener.Close()
+			return fmt.Errorf("failed to drop privileges: %w", err)
 		}
-		_ = listener.Close()
-		return fmt.Errorf("failed to drop privileges: %w", err)
 	}
 
 	// Wire TLS when SSL is enabled (AI.md PART 15). Certificates come from an

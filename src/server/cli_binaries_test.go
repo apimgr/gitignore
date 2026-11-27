@@ -85,7 +85,7 @@ func TestCLIBinaryRouteStreamsOnlyVerifiedArtifacts(t *testing.T) {
 	paths := apppath.New()
 	paths.SetDataDir(t.TempDir())
 	paths.SetLogsDir(t.TempDir())
-	s := New(&Config{Version: "test", Cfg: cfg, Paths: paths})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg, Paths: paths})
 	request := httptest.NewRequest(http.MethodGet, "/cli/binaries/"+name, nil)
 	response := httptest.NewRecorder()
 	s.router.ServeHTTP(response, request)

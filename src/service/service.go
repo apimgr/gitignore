@@ -638,8 +638,8 @@ func ensureLinuxServiceUser(homeDir string) error {
 		uid, uidErr := strconv.Atoi(serviceUser.Uid)
 		gid, gidErr := strconv.Atoi(serviceGroup.Gid)
 		userGID, userGIDErr := strconv.Atoi(serviceUser.Gid)
-		if uidErr != nil || gidErr != nil || userGIDErr != nil || uid != gid || uid != userGID {
-			return fmt.Errorf("service account %s does not use a matching UID and GID", appName)
+		if uidErr != nil || gidErr != nil || userGIDErr != nil || uid < 1 || uid > 999 || userGID < 1 || userGID > 999 || gid < 1 || gid > 999 || !isNonLoginShell(appName) {
+			return fmt.Errorf("existing service account %s conflicts with the required system account identity", appName)
 		}
 		return nil
 	}
@@ -648,23 +648,24 @@ func ensureLinuxServiceUser(homeDir string) error {
 	if userErr == nil {
 		uid, uidErr := strconv.Atoi(serviceUser.Uid)
 		userGID, gidErr := strconv.Atoi(serviceUser.Gid)
-		if uidErr != nil || gidErr != nil || uid != userGID || uid <= 0 {
-			return fmt.Errorf("service account %s does not use a matching UID and GID", appName)
+		if uidErr != nil || gidErr != nil || uid < 1 || uid > 999 || userGID < 1 || userGID > 999 || !isNonLoginShell(appName) {
+			return fmt.Errorf("existing service account %s conflicts with the required system account identity", appName)
 		}
-		id = uid
+		id = userGID
 	}
 	if groupErr == nil {
 		gid, gidErr := strconv.Atoi(serviceGroup.Gid)
 		if gidErr != nil {
 			return fmt.Errorf("invalid service group ID for %s: %w", appName, gidErr)
 		}
+		if gid < 1 || gid > 999 {
+			return fmt.Errorf("existing service group %s conflicts with the required system account identity", appName)
+		}
 		if userErr != nil {
 			if _, lookupErr := user.LookupId(strconv.Itoa(gid)); lookupErr == nil {
 				return fmt.Errorf("service group %s has a GID that is already assigned to another user", appName)
 			}
 			id = gid
-		} else if id != gid {
-			return fmt.Errorf("service account %s does not use a matching UID and GID", appName)
 		}
 	}
 	if id == 0 {
@@ -698,6 +699,24 @@ func ensureLinuxServiceUser(homeDir string) error {
 	}
 	fmt.Println(serviceText("cli.service.account_created", "mark", okMark(), "account", appName, "uid", id, "gid", id))
 	return nil
+}
+
+func isNonLoginShell(username string) bool {
+	file, err := os.Open("/etc/passwd")
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	for scanner := bufio.NewScanner(file); scanner.Scan(); {
+		fields := strings.Split(scanner.Text(), ":")
+		if len(fields) != 7 || fields[0] != username {
+			continue
+		}
+		shell := strings.ToLower(strings.TrimSpace(fields[6]))
+		base := filepath.Base(shell)
+		return base == "nologin" || base == "false"
+	}
+	return false
 }
 
 // ensureMacOSServiceUser creates the dedicated macOS service account via

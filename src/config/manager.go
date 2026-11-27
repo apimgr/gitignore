@@ -35,13 +35,13 @@ type ConfigManager struct {
 	configPath string
 	assetsDir  string
 	interval   time.Duration
-	load       func() (*Config, error)
-	apply      func(*Config, ConfigChanges) error
+	load       func() (*ServerConfig, error)
+	apply      func(*ServerConfig, ConfigChanges) error
 	onError    func(error)
 
 	checkMu sync.Mutex
 	mu      sync.RWMutex
-	current *Config
+	current *ServerConfig
 	state   string
 	pending []string
 
@@ -60,9 +60,9 @@ type ConfigManagerOptions struct {
 	ConfigPath string
 	AssetsDir  string
 	Interval   time.Duration
-	Initial    *Config
-	Load       func() (*Config, error)
-	Apply      func(*Config, ConfigChanges) error
+	Initial    *ServerConfig
+	Load       func() (*ServerConfig, error)
+	Apply      func(*ServerConfig, ConfigChanges) error
 	OnError    func(error)
 }
 
@@ -206,7 +206,7 @@ func (m *ConfigManager) CheckNow() error {
 	return nil
 }
 
-func retainRestartRequiredSettings(previous, next *Config, paths []string) *Config {
+func retainRestartRequiredSettings(previous, next *ServerConfig, paths []string) *ServerConfig {
 	if len(paths) == 0 {
 		return next
 	}
@@ -236,7 +236,7 @@ func retainRestartRequiredSettings(previous, next *Config, paths []string) *Conf
 
 // Current returns the active configuration pointer. Callers must treat it as
 // immutable; subsequent reloads publish a different pointer.
-func (m *ConfigManager) Current() *Config {
+func (m *ConfigManager) Current() *ServerConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.current
@@ -434,7 +434,7 @@ func isYAMLDropin(name string) bool {
 	return strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml")
 }
 
-func compareConfigChanges(previous, next *Config) (ConfigChanges, error) {
+func compareConfigChanges(previous, next *ServerConfig) (ConfigChanges, error) {
 	oldMap, err := configMap(previous)
 	if err != nil {
 		return ConfigChanges{}, err
@@ -463,7 +463,7 @@ func compareConfigChanges(previous, next *Config) (ConfigChanges, error) {
 	return changes, nil
 }
 
-func configMap(cfg *Config) (map[string]interface{}, error) {
+func configMap(cfg *ServerConfig) (map[string]interface{}, error) {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, err

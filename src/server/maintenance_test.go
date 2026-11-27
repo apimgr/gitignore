@@ -10,7 +10,7 @@ import (
 func TestMaintenanceMiddlewarePreservesReadOnlyPOSTProtocols(t *testing.T) {
 	state := &MaintenanceState{}
 	state.Enter("database_connection", "Database connection failed", time.Now().UTC())
-	s := &Server{config: &Config{MaintenanceState: state}}
+	s := &Server{config: &ServerOptions{MaintenanceState: state}}
 	handler := s.maintenanceMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

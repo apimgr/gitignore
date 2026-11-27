@@ -80,15 +80,15 @@ func TestLoadKeepsLastGoodConfigurationAfterParseFailure(t *testing.T) {
 	if err := os.WriteFile(path, []byte("server:\n  mode: development\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err != nil {
-		t.Fatalf("initial Load() failed: %v", err)
+	if _, err := LoadFile(path); err != nil {
+		t.Fatalf("initial LoadFile() failed: %v", err)
 	}
 	if err := os.WriteFile(path, []byte("server: [invalid\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
-		t.Fatalf("Load() rejected malformed config instead of using the last good copy: %v", err)
+		t.Fatalf("LoadFile() rejected malformed config instead of using the last good copy: %v", err)
 	}
 	if cfg.Server.Mode != "development" {
 		t.Fatalf("mode = %q, want last-good value development", cfg.Server.Mode)
@@ -109,8 +109,8 @@ func TestLoadRemovesDeprecatedServiceIdentitySettings(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err != nil {
-		t.Fatalf("Load() failed: %v", err)
+	if _, err := LoadFile(path); err != nil {
+		t.Fatalf("LoadFile() failed: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -134,9 +134,9 @@ func TestLoadIgnoresMalformedDropinWithoutDiscardingOtherFiles(t *testing.T) {
 	if err := os.WriteFile(dropin, []byte("server: [invalid\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
-		t.Fatalf("Load() rejected malformed drop-in: %v", err)
+		t.Fatalf("LoadFile() rejected malformed drop-in: %v", err)
 	}
 	if cfg.Server.Mode != "development" {
 		t.Fatalf("mode = %q, want value from server.yml", cfg.Server.Mode)
@@ -149,9 +149,9 @@ func TestLoadInvalidUpdateBranchUsesDefaultAndTracksSourceLine(t *testing.T) {
 	if err := os.WriteFile(path, []byte("server:\n  update:\n    branch: nightly\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
-		t.Fatalf("Load() rejected invalid update branch: %v", err)
+		t.Fatalf("LoadFile() rejected invalid update branch: %v", err)
 	}
 	if cfg.Server.Update.Branch != DefaultConfig().Server.Update.Branch {
 		t.Fatalf("update branch = %q, want default %q", cfg.Server.Update.Branch, DefaultConfig().Server.Update.Branch)
@@ -175,7 +175,7 @@ func TestMaintenanceAreaLoadsCLIDistributionSettings(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(areaDir, "maintenance.yml"), []byte(area), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +627,7 @@ func TestLoadCreatesDefaultConfigWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yml")
 
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -653,11 +653,11 @@ func TestLoadParsesExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yml")
 
-	if _, err := Load(path); err != nil {
+	if _, err := LoadFile(path); err != nil {
 		t.Fatalf("first Load (create): %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("second Load (parse existing): %v", err)
 	}
@@ -684,7 +684,7 @@ func TestLoadMergesYAMLDropinsInLexicalOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestLoadSeedsDatabaseAndCacheConnectionsOnce(t *testing.T) {
 	t.Setenv("DATABASE_DRIVER", "sqlite")
 	t.Setenv("CACHE_URL", "valkey://cache.example.test:6379/0")
 
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("first Load: %v", err)
 	}
@@ -729,7 +729,7 @@ func TestLoadSeedsDatabaseAndCacheConnectionsOnce(t *testing.T) {
 	t.Setenv("DATABASE_URL", "libsql://changed.example.test?authToken=second-token")
 	t.Setenv("DATABASE_DRIVER", "sqlite")
 	t.Setenv("CACHE_URL", "redis://changed.example.test:6379/1")
-	cfg, err = Load(path)
+	cfg, err = LoadFile(path)
 	if err != nil {
 		t.Fatalf("second Load: %v", err)
 	}
@@ -786,7 +786,7 @@ func TestLoadUsesCanonicalSchedulerAndLogPaths(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -805,7 +805,7 @@ func TestLoadPreservesLegacySchedulerAndLogSettings(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -982,7 +982,7 @@ func TestUpdateWithoutLoadedConfigReturnsError(t *testing.T) {
 	current = nil
 	mu.Unlock()
 
-	if err := Update(func(c *Config) {}); err == nil {
+	if err := Update(func(c *ServerConfig) {}); err == nil {
 		t.Error("expected Update() to error when no config is loaded")
 	}
 }
@@ -991,7 +991,7 @@ func TestUpdateAppliesAndSaves(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yml")
 
-	if _, err := Load(path); err != nil {
+	if _, err := LoadFile(path); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	t.Cleanup(func() {
@@ -1001,7 +1001,7 @@ func TestUpdateAppliesAndSaves(t *testing.T) {
 		mu.Unlock()
 	})
 
-	if err := Update(func(c *Config) {
+	if err := Update(func(c *ServerConfig) {
 		c.Server.Branding.Title = "Updated Title"
 	}); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -1011,7 +1011,7 @@ func TestUpdateAppliesAndSaves(t *testing.T) {
 		t.Errorf("Get().Server.Branding.Title = %q, want Updated Title", got)
 	}
 
-	reloaded, err := Load(path)
+	reloaded, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -1145,7 +1145,7 @@ func TestIsConfigValueSetDistinguishesExplicitValuesFromDefaults(t *testing.T) {
 	if err := os.WriteFile(path, []byte("server:\n  mode: development\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err != nil {
+	if _, err := LoadFile(path); err != nil {
 		t.Fatal(err)
 	}
 	if !IsConfigValueSet("server.mode") {

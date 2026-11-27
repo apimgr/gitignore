@@ -43,7 +43,7 @@ func TestCanonicalEmbeddedTemplateAndStaticPaths(t *testing.T) {
 // newTestPageServer builds a minimal Server sufficient for rendering static
 // standard pages and error pages (no Templates manager needed).
 func newTestPageServer() *Server {
-	return &Server{config: &Config{Version: "test", Cfg: config.DefaultConfig()}, router: chi.NewRouter()}
+	return &Server{config: &ServerOptions{Version: "test", Cfg: config.DefaultConfig()}, router: chi.NewRouter()}
 }
 
 func TestServerPagesUseConfiguredBrandingAndSEO(t *testing.T) {

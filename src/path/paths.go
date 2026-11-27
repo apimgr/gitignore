@@ -260,14 +260,11 @@ func GetBackupDir() string {
 	return backupDir
 }
 
-// GetDatabaseDir returns the database directory, honoring DATABASE_DIR before
-// applying the container or native default.
+// GetDatabaseDir returns DATABASE_DIR when configured, otherwise the database
+// directory under the selected data directory.
 func GetDatabaseDir(dataDir string) string {
 	if v := strings.TrimSpace(os.Getenv("DATABASE_DIR")); v != "" {
 		return v
-	}
-	if IsRunningInContainer() {
-		return filepath.Join("/data", "db", "sqlite")
 	}
 	return filepath.Join(dataDir, "db")
 }

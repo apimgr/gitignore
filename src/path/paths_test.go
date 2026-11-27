@@ -205,6 +205,13 @@ func TestIsRunningInContainer(t *testing.T) {
 	_ = IsRunningInContainer()
 }
 
+func TestGetDatabaseDirUsesDataDirWhenDatabaseDirUnset(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if got, want := GetDatabaseDir("/custom/data"), filepath.Join("/custom/data", "db"); got != want {
+		t.Fatalf("GetDatabaseDir() = %q, want %q", got, want)
+	}
+}
+
 func TestContainerDefaultDirectoriesUseProjectScope(t *testing.T) {
 	if !IsRunningInContainer() {
 		t.Skip("container path contract applies only inside a container")
@@ -212,9 +219,7 @@ func TestContainerDefaultDirectoriesUseProjectScope(t *testing.T) {
 	if os.Getenv("CACHE_DIR") != "" {
 		t.Skip("CACHE_DIR override is set")
 	}
-	if os.Getenv("DATABASE_DIR") != "" {
-		t.Skip("DATABASE_DIR override is set")
-	}
+	t.Setenv("DATABASE_DIR", filepath.Join("/data", "db", "sqlite"))
 	projectName := "gitignore"
 	configDir, dataDir, logsDir, backupDir := GetDefaultDirs(projectName)
 	want := map[string]string{

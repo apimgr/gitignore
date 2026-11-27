@@ -17,7 +17,7 @@ func TestGraphQLHandlerAndSchemaEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&Config{Templates: templates})
+	s := New(&ServerOptions{Templates: templates})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/graphql", strings.NewReader(`{"query":"{ template(name: \"Go\") { name } }"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -38,7 +38,7 @@ func TestGraphQLGETSupportsQueryVariablesAndUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&Config{Templates: templates})
+	s := New(&ServerOptions{Templates: templates})
 	values := url.Values{
 		"query":         {"query GetTemplate($name: String!) { template(name: $name) { name } }"},
 		"operationName": {"GetTemplate"},
@@ -67,7 +67,7 @@ func TestGraphQLGETSupportsQueryVariablesAndUsage(t *testing.T) {
 }
 
 func TestGraphQLHandlerRejectsMalformedAndMultipleJSONValues(t *testing.T) {
-	s := New(&Config{})
+	s := New(&ServerOptions{})
 	for _, body := range []string{"{", `{"query":"{ list { name } }"} {}`} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/server/graphql", strings.NewReader(body))
@@ -79,7 +79,7 @@ func TestGraphQLHandlerRejectsMalformedAndMultipleJSONValues(t *testing.T) {
 }
 
 func TestGraphQLHandlerLocalizesErrors(t *testing.T) {
-	s := New(&Config{})
+	s := New(&ServerOptions{})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/graphql?lang=es", strings.NewReader("{"))
 	recorder := httptest.NewRecorder()
 	i18n.Middleware(http.HandlerFunc(s.handleGraphQL)).ServeHTTP(recorder, request)
@@ -106,7 +106,7 @@ func TestGraphQLExecutionErrorsAreLocalizedWithoutLosingLocations(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&Config{Templates: templates})
+	s := New(&ServerOptions{Templates: templates})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/graphql?lang=es", strings.NewReader(`{"query":"{ unknownField }"}`))
 	recorder := httptest.NewRecorder()
 	i18n.Middleware(http.HandlerFunc(s.handleGraphQL)).ServeHTTP(recorder, request)

@@ -37,7 +37,7 @@ func TestReadConsentRejectsMalformedPercentEncoding(t *testing.T) {
 }
 
 func TestConsentWithdrawalClearsStoredCategoryAndSiteData(t *testing.T) {
-	s := &Server{config: &Config{Cfg: config.DefaultConfig()}}
+	s := &Server{config: &ServerOptions{Cfg: config.DefaultConfig()}}
 	req := httptest.NewRequest(http.MethodPost, "/server/consent", nil)
 	for _, cookie := range []*http.Cookie{
 		{Name: "theme", Value: "light"},

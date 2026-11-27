@@ -22,7 +22,7 @@ func TestSecurityReportSubmissionStoresEncryptedReportAndReturnsTrackingID(t *te
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := config.DefaultConfig()
 	cfg.Server.Security.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
-	s := New(&Config{Cfg: cfg, Version: "1.2.3", Commit: "abc1234"})
+	s := New(&ServerOptions{Cfg: cfg, Version: "1.2.3", Commit: "abc1234"})
 	form := url.Values{
 		"severity": {"high"}, "component": {"server"}, "summary": {"Unsafe disclosure"},
 		"endpoint": {"/api/v1/example"}, "reproduction": {"Send a crafted request."},
@@ -68,7 +68,7 @@ func TestAPIContactDescriptionIncludesConditionalSecurityFields(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := config.DefaultConfig()
 	cfg.Server.Pages.Contact.Enabled = true
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	securityToken, err := securityID(time.Now())
 	if err != nil {
 		t.Fatal(err)

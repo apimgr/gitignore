@@ -60,7 +60,8 @@ func printCompletions(shell, binaryName string) int {
 	case "fish":
 		fmt.Print(generateFishCompletions(binaryName))
 	case "sh", "dash", "ksh":
-		fmt.Print(generatePosixCompletions(binaryName))
+		fmt.Fprintln(os.Stderr, text("cli.client.shell.unsupported", "shell", shell))
+		return 2
 	case "powershell", "pwsh":
 		fmt.Print(generatePowershellCompletions(binaryName))
 	default:
@@ -79,7 +80,7 @@ func printInit(shell, binaryName string) int {
 	case "fish":
 		fmt.Printf("%s --shell completions fish | source\n", binaryName)
 	case "sh", "dash", "ksh":
-		fmt.Printf("eval \"$(%s --shell completions %s)\"\n", binaryName, shell)
+		fmt.Printf("# %s has no programmable completions\n", shell)
 	case "powershell", "pwsh":
 		fmt.Printf("Invoke-Expression (& %s --shell completions powershell)\n", binaryName)
 	default:
@@ -132,10 +133,6 @@ func generateFishCompletions(bin string) string {
 func fishSingleQuote(value string) string {
 	value = strings.ReplaceAll(value, "\\", "\\\\")
 	return strings.ReplaceAll(value, "'", "\\'")
-}
-
-func generatePosixCompletions(bin string) string {
-	return text("cli.client.shell.posix_comment", "binary", bin, "commands", joinWords(commandWords)) + "\n"
 }
 
 func generatePowershellCompletions(bin string) string {

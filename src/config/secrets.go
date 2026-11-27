@@ -52,7 +52,7 @@ func writeGeneratedSecretAudit(key string) {
 
 // loadSecretsConfig applies the protected configuration file after every
 // ordinary configuration source so its values have the required precedence.
-func loadSecretsConfig(configPath string, cfg *Config) error {
+func loadSecretsConfig(configPath string, cfg *ServerConfig) error {
 	secretsPath := filepath.Join(filepath.Dir(configPath), "secrets.yml")
 	secrets, err := readSecrets(secretsPath)
 	if err != nil {
@@ -70,7 +70,7 @@ func loadSecretsConfig(configPath string, cfg *Config) error {
 
 // loadSensitiveSecrets reads protected values, migrates a legacy encryption
 // key from server.yml, and generates required secrets when they are absent.
-func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
+func loadSensitiveSecrets(cfg *ServerConfig, configPath string) (bool, error) {
 	secretsPath := filepath.Join(filepath.Dir(configPath), "secrets.yml")
 	secrets, err := readSecrets(secretsPath)
 	if err != nil {
@@ -132,6 +132,37 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 		if encryptionKeyGenerated {
 			generatedKeys = append(generatedKeys, "server.security.encryption_key")
 		}
+	}
+	backup := nestedSecretMap(server, "backup")
+	backupPassword, _ := backup["encryption_password"].(string)
+	if location, ok := configValueLocations["server.backup.encryption_password"]; ok && location.file == filepath.Base(configPath) {
+		needsConfigSave = true
+	}
+	if backupPassword == "" {
+		backupPassword = cfg.Server.Backup.EncryptionPassword
+		if backupPassword != "" {
+			needsConfigSave = true
+		}
+	}
+	if strings.HasPrefix(backupPassword, "enc:v1:") {
+		if plaintext, decryptErr := decryptDNSCredential(cfg.Server.Security.EncryptionKey, backupPassword); decryptErr == nil {
+			cfg.Server.Backup.EncryptionPassword = plaintext
+		} else {
+			// Keep unreadable ciphertext marked so backup creation can fail closed.
+			cfg.Server.Backup.EncryptionPassword = backupPassword
+		}
+	} else if backupPassword != "" {
+		encrypted, encryptErr := encryptDNSCredential(cfg.Server.Security.EncryptionKey, backupPassword)
+		if encryptErr != nil {
+			return false, fmt.Errorf("cannot protect backup encryption password: %w", encryptErr)
+		}
+		backup["encryption_password"] = encrypted
+		secretsChanged = true
+		cfg.Server.Backup.EncryptionPassword = backupPassword
+	}
+	if backupPassword != "" {
+		server["backup"] = backup
+		secrets["server"] = server
 	}
 	dnsConfig := cfg.Server.SSL.LetsEncrypt
 	credentialNode := nestedSecretMap(nestedSecretMap(nestedSecretMap(server, "ssl"), "letsencrypt"), "dns_credentials")
@@ -401,7 +432,7 @@ func generatePrefixedToken(prefix string) (string, error) {
 }
 
 func validateEncryptionKey(value string) error {
-	var cfg Config
+	var cfg ServerConfig
 	cfg.Server.Security.EncryptionKey = value
 	return ensureEncryptionKey(&cfg)
 }

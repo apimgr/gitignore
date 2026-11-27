@@ -10,7 +10,7 @@ import (
 func TestAccessLogSuppressesSuccessfulHealthAndRecordsFailures(t *testing.T) {
 	var entries []AccessLogEntry
 	failed := false
-	s := &Server{config: &Config{AccessLog: func(entry AccessLogEntry) { entries = append(entries, entry) }}}
+	s := &Server{config: &ServerOptions{AccessLog: func(entry AccessLogEntry) { entries = append(entries, entry) }}}
 	handler := s.accessLogMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !failed {
 			w.WriteHeader(http.StatusOK)
@@ -35,7 +35,7 @@ func TestAccessLogSuppressesSuccessfulHealthAndRecordsFailures(t *testing.T) {
 
 func TestAccessLogRedactsSensitiveQueryParameters(t *testing.T) {
 	var entry AccessLogEntry
-	s := &Server{config: &Config{AccessLog: func(value AccessLogEntry) { entry = value }}}
+	s := &Server{config: &ServerOptions{AccessLog: func(value AccessLogEntry) { entry = value }}}
 	request := httptest.NewRequest(http.MethodGet, "/search?term=hello&TOKEN=secret&session=s1&code=c1&key=k1&password=p1&secret=s2&auth=a1&pwd=p2&api_key=k2&apikey=k3&access_token=t1&refresh_token=t2&authToken=t3&security_id=sid&review_token=review&csrf_token=csrf", nil)
 	request.Header.Set("Referer", "https://example.test/page?session=ref-secret&keep=shown")
 	s.accessLogMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(httptest.NewRecorder(), request)

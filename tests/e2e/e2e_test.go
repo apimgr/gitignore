@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,7 +64,7 @@ func TestMain(m *testing.M) {
 		os.Exit(2)
 	}
 	debugToken = hex.EncodeToString(tokenBytes)
-	if err := os.WriteFile(filepath.Join(configDir, "secrets.yml"), []byte("server:\n  token: "+debugToken+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "config", "secrets.yml"), []byte("server:\n  token: "+debugToken+"\n"), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "create E2E secrets: %v\n", err)
 		os.Exit(2)
 	}
@@ -318,7 +319,18 @@ func TestGraphQLQueryAndSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"name":"Go"`) {
+	var queryResult struct {
+		Data struct {
+			Template struct {
+				Name     string `json:"name"`
+				Category string `json:"category"`
+			} `json:"template"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &queryResult); err != nil {
+		t.Fatalf("decode GraphQL query response: %v: %s", err, body)
+	}
+	if response.StatusCode != http.StatusOK || queryResult.Data.Template.Name != "Go" || queryResult.Data.Template.Category == "" {
 		t.Fatalf("GraphQL query status %d did not return the Go template: %s", response.StatusCode, body)
 	}
 
@@ -331,7 +343,33 @@ func TestGraphQLQueryAndSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(schema), `"name":"Query"`) || !strings.Contains(string(schema), `"name":"totalSizeBytes"`) {
+	var schemaResult struct {
+		Data struct {
+			Schema struct {
+				Types []struct {
+					Name   string `json:"name"`
+					Fields []struct {
+						Name string `json:"name"`
+					} `json:"fields"`
+				} `json:"types"`
+			} `json:"__schema"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(schema, &schemaResult); err != nil {
+		t.Fatalf("decode GraphQL schema response: %v: %s", err, schema)
+	}
+	statsTypeHasTotalSize := false
+	for _, typ := range schemaResult.Data.Schema.Types {
+		if typ.Name != "Stats" {
+			continue
+		}
+		for _, field := range typ.Fields {
+			if field.Name == "totalSizeBytes" {
+				statsTypeHasTotalSize = true
+			}
+		}
+	}
+	if response.StatusCode != http.StatusOK || !statsTypeHasTotalSize {
 		t.Fatalf("GraphQL introspection status %d is incomplete: %s", response.StatusCode, schema)
 	}
 }
@@ -468,8 +506,8 @@ func TestNoJSBrowserProgressiveEnhancement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(title, "GitIgnore") || !strings.Contains(text, "templates") {
-		t.Fatalf("home page without JavaScript did not render its content: title=%q", title)
+	if !strings.EqualFold(title, "gitignore") || !strings.Contains(strings.ToLower(text), "templates") {
+		t.Fatalf("home page without JavaScript did not render its content: title=%q body=%q", title, text)
 	}
 
 	err = chromedp.Do(ctx,

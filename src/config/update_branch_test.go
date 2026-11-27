@@ -45,7 +45,7 @@ func TestLoadNormalizesUpdateBranchAliases(t *testing.T) {
 	if err := os.WriteFile(path, []byte("server:\n  update:\n    branch: daily\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestLoadUsesDefaultForUnknownUpdateBranch(t *testing.T) {
 	if err := os.WriteFile(path, []byte("server:\n  update:\n    branch: unknown\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load rejected an unknown update branch: %v", err)
 	}

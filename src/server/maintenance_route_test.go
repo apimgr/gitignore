@@ -15,7 +15,7 @@ func TestMaintenanceStatusUsesAuthenticatedVersionedAPIRoute(t *testing.T) {
 	cfg.Server.Token = "adm_maintenance0123456789012345678901234567"
 	state := &MaintenanceState{}
 	state.Enter("database_connection", "Database connection failed", time.Now().UTC())
-	s := New(&Config{Version: "test", Cfg: cfg, MaintenanceState: state})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg, MaintenanceState: state})
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/server/maintenance", nil)
 	recorder := httptest.NewRecorder()

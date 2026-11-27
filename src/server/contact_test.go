@@ -33,7 +33,7 @@ func TestContactWebhookTargetsUsesPerTransportFallback(t *testing.T) {
 		"telegram":        "https://security.example.test/telegram",
 		"telegram_secret": "security-telegram-secret",
 	}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 
 	targets := s.contactWebhookTargets("security")
 	got := make(map[string]notify.Target, len(targets))
@@ -71,7 +71,7 @@ func TestContactWebhookTargetsAndDispatchSupportWebhookOnlyPrivacy(t *testing.T)
 		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
 	})}
 	cfg.Server.Branding.Title = "GitIgnore API"
-	s := New(&Config{
+	s := New(&ServerOptions{
 		Cfg: cfg, Version: "1.2.3",
 		WebhookDispatcher: notify.NewDispatcher(notify.Options{
 			HTTPClient: client, RetryAfter: []time.Duration{},
@@ -110,7 +110,7 @@ func TestContactWebhookTargetsDoNotUseGeneralForConfiguredDPO(t *testing.T) {
 		"generic":        "https://general.example.test/privacy",
 		"generic_secret": "general-secret",
 	}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	if targets := s.contactWebhookTargets("privacy"); len(targets) != 0 {
 		t.Fatalf("privacy webhook targets with DPO email = %d, want none", len(targets))
 	}
@@ -118,7 +118,7 @@ func TestContactWebhookTargetsDoNotUseGeneralForConfiguredDPO(t *testing.T) {
 
 func TestVersionedContactErrorsUseAPIEnvelope(t *testing.T) {
 	cfg := config.DefaultConfig()
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/contact", nil)
 	recorder := httptest.NewRecorder()
 	s.renderContact(recorder, request, http.StatusBadRequest, map[string]interface{}{"error": "Invalid contact form."})
@@ -139,7 +139,7 @@ func TestVersionedContactErrorsUseAPIEnvelope(t *testing.T) {
 
 func TestCleanupExpiredContactChallenges(t *testing.T) {
 	now := time.Now()
-	s := New(&Config{Cfg: config.DefaultConfig()})
+	s := New(&ServerOptions{Cfg: config.DefaultConfig()})
 	s.contactChallenges = map[string]contactChallenge{
 		"expired": {expires: now.Add(-time.Second)},
 		"active":  {expires: now.Add(time.Minute)},

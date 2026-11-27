@@ -225,8 +225,8 @@ func markdownFragment(source string) string {
 			level++
 		}
 		if level > 0 && len(line) > level && line[level] == ' ' {
-			headingLevel := min(level+1, 6)
-			fmt.Fprintf(&out, "<h%d>%s</h%d>", headingLevel, inlineMarkdownHTML(line[level+1:]), headingLevel)
+			headingLevel := min(level+2, 6)
+			fmt.Fprintf(&out, "<h%d data-markdown-heading=\"true\">%s</h%d>", headingLevel, inlineMarkdownHTML(line[level+1:]), headingLevel)
 		} else if strings.HasPrefix(line, "- ") {
 			out.WriteString("<p>• " + inlineMarkdownHTML(line[2:]) + "</p>")
 		} else {
@@ -290,8 +290,19 @@ func sanitizePublicHTML(source string) string {
 			}
 			return
 		}
-		allowed := map[string]bool{"p": true, "div": true, "span": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "em": true, "strong": true, "b": true, "i": true, "ul": true, "ol": true, "li": true, "a": true, "table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true, "pre": true, "code": true, "blockquote": true, "hr": true, "dl": true, "dt": true, "dd": true, "sup": true, "sub": true, "br": true}
-		if !allowed[n.Data] {
+		tag := n.Data
+		markdownHeading := false
+		for _, attr := range n.Attr {
+			if attr.Key == "data-markdown-heading" && attr.Val == "true" {
+				markdownHeading = true
+				break
+			}
+		}
+		if !markdownHeading && len(tag) == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6' {
+			tag = fmt.Sprintf("h%d", min(int(tag[1]-'0')+2, 6))
+		}
+		allowed := map[string]bool{"p": true, "div": true, "span": true, "h3": true, "h4": true, "h5": true, "h6": true, "em": true, "strong": true, "b": true, "i": true, "ul": true, "ol": true, "li": true, "a": true, "table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true, "pre": true, "code": true, "blockquote": true, "hr": true, "dl": true, "dt": true, "dd": true, "sup": true, "sub": true, "br": true}
+		if !allowed[tag] {
 			if n.Data == "script" || n.Data == "style" || n.Data == "form" || n.Data == "iframe" || n.Data == "object" || n.Data == "embed" {
 				return
 			}
@@ -301,7 +312,7 @@ func sanitizePublicHTML(source string) string {
 			return
 		}
 		out.WriteByte('<')
-		out.WriteString(n.Data)
+		out.WriteString(tag)
 		if n.Data == "a" {
 			for _, a := range n.Attr {
 				if a.Key == "href" && !strings.Contains(strings.ToLower(a.Val), "javascript:") && !strings.HasPrefix(a.Val, "//") && !strings.HasPrefix(a.Val, "/server/contact") {
@@ -310,11 +321,11 @@ func sanitizePublicHTML(source string) string {
 			}
 		}
 		out.WriteByte('>')
-		if n.Data != "hr" && n.Data != "br" {
+		if tag != "hr" && tag != "br" {
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				write(c)
 			}
-			out.WriteString("</" + n.Data + ">")
+			out.WriteString("</" + tag + ">")
 		}
 	}
 	for c := wrapper.FirstChild; c != nil; c = c.NextSibling {

@@ -15,7 +15,7 @@ func TestLLMSTxtRoutesAndGeneratedEndpoints(t *testing.T) {
 	cfg.Server.Branding.Title = "GitIgnore API"
 	cfg.Web.APIContact = "api@example.com"
 	cfg.Web.Security.Contact = "security@example.com"
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 
 	for _, path := range []string{"/.well-known/llms.txt", "/llms.txt"} {
 		recorder := httptest.NewRecorder()
@@ -52,7 +52,7 @@ func TestLLMSTxtRoutesAndGeneratedEndpoints(t *testing.T) {
 
 func TestLLMSTxtUsesRequestLanguageForGeneratedCopy(t *testing.T) {
 	cfg := config.DefaultConfig()
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
 	request.Header.Set("Accept-Language", "es")
@@ -73,7 +73,7 @@ func TestLLMSTxtOptionalSections(t *testing.T) {
 	cfg.Web.LLMS.IncludeEndpoints = false
 	cfg.Web.LLMS.IncludeSchemas = true
 	cfg.Web.LLMS.CustomSections = []string{"## Project Notes\nUse the catalog API."}
-	s := New(&Config{Version: "test", Cfg: cfg})
+	s := New(&ServerOptions{Version: "test", Cfg: cfg})
 	recorder := httptest.NewRecorder()
 	s.router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/llms.txt", nil))
 	body := recorder.Body.String()

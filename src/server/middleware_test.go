@@ -247,7 +247,7 @@ func TestCSPDirectives(t *testing.T) {
 }
 
 func TestSecurityHeadersSetsExpectedHeaders(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	handler := s.securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -270,7 +270,7 @@ func TestSecurityHeadersSetsExpectedHeaders(t *testing.T) {
 }
 
 func TestOneShotSecurityReportPageDoesNotLeakReferrerOrCache(t *testing.T) {
-	s := &Server{config: &Config{Cfg: config.DefaultConfig()}}
+	s := &Server{config: &ServerOptions{Cfg: config.DefaultConfig()}}
 	req := httptest.NewRequest(http.MethodGet, "/server/security/report/track?token=one-shot", nil)
 	rec := httptest.NewRecorder()
 	s.securityHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, req)
@@ -283,7 +283,7 @@ func TestOneShotSecurityReportPageDoesNotLeakReferrerOrCache(t *testing.T) {
 }
 
 func TestSecurityHeadersHSTSWhenTLS(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	handler := s.securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
 	req := httptest.NewRequest("GET", "/", nil)
@@ -312,7 +312,7 @@ func TestSecurityHeadersHonorConfiguredWebSecurity(t *testing.T) {
 	cfg.Web.Headers.NEL.Enabled = false
 	cfg.Web.CSP.Mode = "report-only"
 	cfg.Web.CSP.ScriptSrcExtra = "https://scripts.example.test"
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "https://example.test/", nil)
 	req.TLS = &tls.ConnectionState{}
@@ -354,7 +354,7 @@ func TestReplaceConfigHotReloadsRateLimitSettings(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.RateLimit.GlobalBurst = 3
 	cfg.Server.RateLimit.Read = config.RateLimitRuleConfig{Requests: 3, Window: 60}
-	s := New(&Config{Cfg: cfg})
+	s := New(&ServerOptions{Cfg: cfg})
 	global := s.limiter
 	read := s.rateLimiters["read"]
 	global.persistent = false
@@ -431,7 +431,7 @@ func TestRequestFloodCountsRateLimitedRequestsAndPersistsBlock(t *testing.T) {
 	cfg.Server.RateLimit.Read.Requests = 1
 	cfg.Server.Security.AbuseDetection.RequestFlood.Multiplier = 10
 	s := &Server{
-		config:  &Config{Cfg: cfg},
+		config:  &ServerOptions{Cfg: cfg},
 		limiter: newRateLimiter(1000, 60),
 		rateLimiters: map[string]*rateLimiter{
 			"read":          newRateLimiter(1, 60),
@@ -491,7 +491,7 @@ func TestCleanupExpiredIPBlocksPreservesRenewedBlock(t *testing.T) {
 func TestSecurityRequestAuditIncludesAnonymousNetworkActor(t *testing.T) {
 	paths := apppath.New()
 	paths.SetLogsDir(t.TempDir())
-	s := &Server{config: &Config{Paths: paths}}
+	s := &Server{config: &ServerOptions{Paths: paths}}
 	r := httptest.NewRequest(http.MethodGet, "/blocked", nil)
 	r.RemoteAddr = "192.0.2.21:1234"
 	s.auditSecurityRequestEvent(r, "security.ip_blocked", "warning", "failure", map[string]any{"ip": "192.0.2.21", "reason": "test"})

@@ -25,7 +25,7 @@ type FetchRemoteImageConfig struct {
 func DefaultFetchRemoteImageConfig() FetchRemoteImageConfig {
 	return FetchRemoteImageConfig{
 		MaxSize: 10 << 20, Timeout: 30 * time.Second,
-		AllowedTypes: []string{"image/png", "image/jpeg", "image/gif", "image/webp", "image/x-icon"},
+		AllowedTypes:   []string{"image/png", "image/jpeg", "image/gif", "image/webp", "image/x-icon"},
 		AllowedSchemes: []string{"https"},
 	}
 }

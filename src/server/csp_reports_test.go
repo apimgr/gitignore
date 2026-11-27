@@ -16,7 +16,7 @@ import (
 func TestCSPReportLogsSanitizedViolationAndReturnsNoContent(t *testing.T) {
 	paths := path.New()
 	paths.SetLogsDir(t.TempDir())
-	srv := New(&Config{Paths: paths})
+	srv := New(&ServerOptions{Paths: paths})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/reports/csp", strings.NewReader(`{"csp-report":{"blocked-uri":"https://cdn.example/font.woff?token=private#fragment","violated-directive":"font-src"}}`))
 	request.Header.Set("Content-Type", "application/csp-report")
 	recorder := httptest.NewRecorder()
@@ -42,7 +42,7 @@ func TestCSPReportLogsSanitizedViolationAndReturnsNoContent(t *testing.T) {
 func TestCSPReportAcceptsReportingAPIEnvelope(t *testing.T) {
 	paths := path.New()
 	paths.SetLogsDir(t.TempDir())
-	srv := New(&Config{Paths: paths})
+	srv := New(&ServerOptions{Paths: paths})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/reports/csp", strings.NewReader(`[{"type":"csp-violation","body":{"blocked-uri":"data","effective-directive":"font-src"}}]`))
 	request.Header.Set("Content-Type", "application/reports+json")
 	recorder := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestCSPReportAcceptsReportingAPIEnvelope(t *testing.T) {
 func TestDefaultReportLogsCSPViolation(t *testing.T) {
 	paths := path.New()
 	paths.SetLogsDir(t.TempDir())
-	srv := New(&Config{Paths: paths})
+	srv := New(&ServerOptions{Paths: paths})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/server/reports/default", strings.NewReader(`[ {"type":"csp-violation","body":{"blocked-uri":"https://cdn.example/script.js?token=private","effective-directive":"script-src"}} ]`))
 	recorder := httptest.NewRecorder()
 	srv.handleDefaultReport(recorder, request)
@@ -90,7 +90,7 @@ func TestDefaultAndNELReportRoutesShareConfiguredLimit(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Web.Reports.RateLimitPerMinute = 60
 	cfg.Web.Reports.RateLimitPerIPBurst = 1
-	srv := New(&Config{Paths: paths, Cfg: cfg})
+	srv := New(&ServerOptions{Paths: paths, Cfg: cfg})
 
 	for _, route := range []string{"/api/v1/server/reports/csp", "/api/v1/server/reports/default", "/api/v1/server/reports/nel"} {
 		request := httptest.NewRequest(http.MethodPost, route, strings.NewReader(`[ {"type":"csp-violation","body":{"blocked-uri":"https://cdn.example/script.js","effective-directive":"script-src"}} ]`))

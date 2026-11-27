@@ -29,8 +29,8 @@ func TestConfigManagerAppliesChangedConfigAndClassifiesChanges(t *testing.T) {
 	manager, err := NewConfigManager(ConfigManagerOptions{
 		ConfigPath: configPath,
 		Initial:    initial,
-		Load:       func() (*Config, error) { return next, nil },
-		Apply: func(_ *Config, changes ConfigChanges) error {
+		Load:       func() (*ServerConfig, error) { return next, nil },
+		Apply: func(_ *ServerConfig, changes ConfigChanges) error {
 			applied = changes
 			return nil
 		},
@@ -65,12 +65,12 @@ func TestConfigManagerAppliesChangedConfigAndClassifiesChanges(t *testing.T) {
 }
 
 func TestConfigManagerAccumulatesAndClearsRestartSettings(t *testing.T) {
-	manager := newTestConfigManager(t, DefaultConfig(), func() (*Config, error) {
+	manager := newTestConfigManager(t, DefaultConfig(), func() (*ServerConfig, error) {
 		return DefaultConfig(), nil
 	}, nil)
 	next := DefaultConfig()
 	next.Server.Port = "64001"
-	manager.load = func() (*Config, error) { return next, nil }
+	manager.load = func() (*ServerConfig, error) { return next, nil }
 	writeWatchedConfig(t, manager.configPath, "server:\n  port: '64001'\n")
 	if err := manager.CheckNow(); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestConfigManagerAccumulatesAndClearsRestartSettings(t *testing.T) {
 	next = DefaultConfig()
 	next.Server.Port = "64001"
 	next.Server.Address = "127.0.0.1"
-	manager.load = func() (*Config, error) { return next, nil }
+	manager.load = func() (*ServerConfig, error) { return next, nil }
 	writeWatchedConfig(t, manager.configPath, "server:\n  port: '64001'\n  address: 127.0.0.1\n")
 	if err := manager.CheckNow(); err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestConfigManagerAccumulatesAndClearsRestartSettings(t *testing.T) {
 func TestConfigManagerRetriesFailureWithoutReplacingLastGoodConfig(t *testing.T) {
 	initial := DefaultConfig()
 	loadErr := errors.New("invalid file")
-	manager := newTestConfigManager(t, initial, func() (*Config, error) { return nil, loadErr }, nil)
+	manager := newTestConfigManager(t, initial, func() (*ServerConfig, error) { return nil, loadErr }, nil)
 	writeWatchedConfig(t, manager.configPath, "server: [invalid\n")
 	if err := manager.CheckNow(); !errors.Is(err, loadErr) {
 		t.Fatalf("CheckNow() error = %v, want loader error", err)
@@ -108,7 +108,7 @@ func TestConfigManagerRetriesFailureWithoutReplacingLastGoodConfig(t *testing.T)
 
 	loaded := DefaultConfig()
 	loaded.Server.Mode = "development"
-	manager.load = func() (*Config, error) { return loaded, nil }
+	manager.load = func() (*ServerConfig, error) { return loaded, nil }
 	if err := manager.CheckNow(); err != nil {
 		t.Fatalf("retry after fixing loader failed: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestConfigManagerApplyFailureDoesNotAcceptNewState(t *testing.T) {
 	next.Server.Mode = "development"
 	applyErr := errors.New("apply failed")
 	applyFailure := true
-	manager := newTestConfigManager(t, initial, func() (*Config, error) { return next, nil }, func(*Config, ConfigChanges) error {
+	manager := newTestConfigManager(t, initial, func() (*ServerConfig, error) { return next, nil }, func(*ServerConfig, ConfigChanges) error {
 		if applyFailure {
 			return applyErr
 		}
@@ -154,11 +154,11 @@ func TestConfigManagerWatchesDropinsSecretsAndAssets(t *testing.T) {
 	manager, err := NewConfigManager(ConfigManagerOptions{
 		ConfigPath: configPath,
 		Initial:    DefaultConfig(),
-		Load: func() (*Config, error) {
+		Load: func() (*ServerConfig, error) {
 			loads.Add(1)
 			return DefaultConfig(), nil
 		},
-		Apply: func(_ *Config, _ ConfigChanges) error {
+		Apply: func(_ *ServerConfig, _ ConfigChanges) error {
 			applies.Add(1)
 			return nil
 		},
@@ -192,7 +192,7 @@ func TestConfigManagerIgnoresHiddenAndBackupDropins(t *testing.T) {
 	manager, err := NewConfigManager(ConfigManagerOptions{
 		ConfigPath: configPath,
 		Initial:    DefaultConfig(),
-		Load: func() (*Config, error) {
+		Load: func() (*ServerConfig, error) {
 			loads.Add(1)
 			return DefaultConfig(), nil
 		},
@@ -241,7 +241,7 @@ func TestConfigManagerWatchesOnlyInDirectoryDropinSymlinks(t *testing.T) {
 	manager, err := NewConfigManager(ConfigManagerOptions{
 		ConfigPath: configPath,
 		Initial:    DefaultConfig(),
-		Load:       func() (*Config, error) { return DefaultConfig(), nil },
+		Load:       func() (*ServerConfig, error) { return DefaultConfig(), nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +274,7 @@ func TestConfigManagerWatchesOnlyInDirectoryDropinSymlinks(t *testing.T) {
 
 func TestConfigManagerReportsErrorsAndStops(t *testing.T) {
 	initial := DefaultConfig()
-	manager := newTestConfigManager(t, initial, func() (*Config, error) {
+	manager := newTestConfigManager(t, initial, func() (*ServerConfig, error) {
 		return nil, errors.New("load failed")
 	}, nil)
 	writeWatchedConfig(t, manager.configPath, "changed\n")
@@ -298,7 +298,7 @@ func TestConfigManagerReportsErrorsAndStops(t *testing.T) {
 	}
 }
 
-func newTestConfigManager(t *testing.T, initial *Config, load func() (*Config, error), apply func(*Config, ConfigChanges) error) *ConfigManager {
+func newTestConfigManager(t *testing.T, initial *ServerConfig, load func() (*ServerConfig, error), apply func(*ServerConfig, ConfigChanges) error) *ConfigManager {
 	t.Helper()
 	directory := t.TempDir()
 	configPath := filepath.Join(directory, "server.yml")
@@ -329,7 +329,7 @@ func TestConfigManagerRestartSettingsContainOnlyPaths(t *testing.T) {
 	initial := DefaultConfig()
 	next := DefaultConfig()
 	next.Server.Port = "64002"
-	manager := newTestConfigManager(t, initial, func() (*Config, error) { return next, nil }, nil)
+	manager := newTestConfigManager(t, initial, func() (*ServerConfig, error) { return next, nil }, nil)
 	writeWatchedConfig(t, manager.configPath, "server:\n  port: '64002'\n")
 	if err := manager.CheckNow(); err != nil {
 		t.Fatal(err)

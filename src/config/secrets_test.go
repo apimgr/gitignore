@@ -18,7 +18,7 @@ func TestLoadRecordsGeneratedSecretAuditEvents(t *testing.T) {
 	logsDir := filepath.Join(dir, "logs")
 	SetAuditLogDir(logsDir)
 	t.Cleanup(func() { SetAuditLogDir("") })
-	if _, err := Load(filepath.Join(dir, "server.yml")); err != nil {
+	if _, err := LoadFile(filepath.Join(dir, "server.yml")); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	file, err := os.Open(filepath.Join(logsDir, "audit.log"))
@@ -109,7 +109,7 @@ func TestLoadRecordsGeneratedSecretAuditEvents(t *testing.T) {
 func TestLoadStoresEncryptionKeyOnlyInSecretsFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.yml")
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestLoadMigratesLegacyEncryptionKeyAndPreservesOtherSecrets(t *testing.T) {
 	if err := os.WriteFile(secretsPath, []byte("server:\n  token: adm_test\n"), 0600); err != nil {
 		t.Fatalf("write existing secrets.yml: %v", err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -199,9 +199,9 @@ func TestLoadReplacesInvalidEncryptionKeyWithoutFailing(t *testing.T) {
 	if err := os.WriteFile(secretsPath, []byte("server:\n  token: adm_test\n  security:\n    encryption_key: invalid-key\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(configPath)
+	cfg, err := LoadFile(configPath)
 	if err != nil {
-		t.Fatalf("Load() rejected an invalid encryption key: %v", err)
+		t.Fatalf("LoadFile() rejected an invalid encryption key: %v", err)
 	}
 	decoded, err := base64.StdEncoding.DecodeString(cfg.Server.Security.EncryptionKey)
 	if err != nil || len(decoded) != 32 {
@@ -408,7 +408,7 @@ func TestBackupEncryptionPasswordLoadsAndPersistsOnlyInSecrets(t *testing.T) {
 		t.Fatalf("write secrets.yml: %v", err)
 	}
 
-	cfg, err := Load(configPath)
+	cfg, err := LoadFile(configPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -431,8 +431,17 @@ func TestBackupEncryptionPasswordLoadsAndPersistsOnlyInSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read secrets.yml: %v", err)
 	}
-	if !strings.Contains(string(secrets), "encryption_password: updated backup password") {
-		t.Fatal("updated backup encryption password was not stored in secrets.yml")
+	if strings.Contains(string(secrets), "updated backup password") || !strings.Contains(string(secrets), "enc:v1:") {
+		t.Fatal("updated backup encryption password was not encrypted in secrets.yml")
+	}
+	stored, err := readSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup := nestedSecretMap(nestedSecretMap(stored, "server"), "backup")
+	encoded, _ := backup["encryption_password"].(string)
+	if decoded, err := decryptDNSCredential(cfg.Server.Security.EncryptionKey, encoded); err != nil || decoded != "updated backup password" {
+		t.Fatalf("stored backup password decrypt = %q, %v", decoded, err)
 	}
 	info, err := os.Stat(secretsPath)
 	if err != nil {
@@ -440,6 +449,37 @@ func TestBackupEncryptionPasswordLoadsAndPersistsOnlyInSecrets(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("secrets.yml mode = %04o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestLegacyBackupEncryptionPasswordMovesToEncryptedSecrets(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.yml")
+	secretsPath := filepath.Join(dir, "secrets.yml")
+	password := "legacy backup password"
+	if err := os.WriteFile(configPath, []byte("server:\n  backup:\n    encryption_password: "+password+"\n"), 0600); err != nil {
+		t.Fatalf("write server.yml: %v", err)
+	}
+	cfg, err := LoadFile(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Backup.EncryptionPassword != password {
+		t.Fatal("legacy backup password was not available at runtime")
+	}
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(configData), password) || strings.Contains(string(configData), "encryption_password") {
+		t.Fatal("server.yml retained the legacy backup password")
+	}
+	secretsData, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(secretsData), password) || !strings.Contains(string(secretsData), "enc:v1:") {
+		t.Fatal("legacy backup password was not migrated as encrypted data")
 	}
 }
 

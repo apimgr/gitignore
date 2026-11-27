@@ -26,7 +26,7 @@ func newTestDebugHandlersServer(t *testing.T) *Server {
 	s.config.Version = "test"
 	s.config.Commit = "abc123"
 	s.config.BuildDate = "2026-01-01"
-	s.config.Cfg = &config.Config{}
+	s.config.Cfg = &config.ServerConfig{}
 	return s
 }
 

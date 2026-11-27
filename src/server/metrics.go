@@ -132,7 +132,7 @@ func (s *Server) metricsServiceHandler(service string) http.Handler {
 	})
 }
 
-func metricsServiceToken(cfg *config.Config, service string) string {
+func metricsServiceToken(cfg *config.ServerConfig, service string) string {
 	if cfg == nil {
 		return ""
 	}
@@ -203,7 +203,7 @@ type lokiStream struct {
 	Values [][2]string       `json:"values"`
 }
 
-func (s *Server) lokiStreams(cfg *config.Config) lokiStreamsResponse {
+func (s *Server) lokiStreams(cfg *config.ServerConfig) lokiStreamsResponse {
 	response := lokiStreamsResponse{Streams: []lokiStream{}}
 	if s.config == nil || s.config.Paths == nil {
 		return response

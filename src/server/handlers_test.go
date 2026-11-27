@@ -104,6 +104,25 @@ func TestHandleAPIAutodiscoverGatesI2PAddress(t *testing.T) {
 	}
 }
 
+func TestHandleAPIAutodiscoverKeepsOverlayOriginsOutOfURLs(t *testing.T) {
+	s := newTestCompatServer(t)
+	s.config.Cfg.Server.Tor.Expose = true
+	s.SetTorOnionAddress("exampleonion")
+	request := httptest.NewRequest(http.MethodGet, "http://exampleonion.onion/api/autodiscover", nil)
+	response := httptest.NewRecorder()
+	s.handleAPIAutodiscover(response, request)
+	body := response.Body.String()
+	if !strings.Contains(body, `"urls": []`) {
+		t.Fatalf("Tor autodiscovery urls are not empty: %s", body)
+	}
+	if !strings.Contains(body, `"onion": "exampleonion.onion"`) {
+		t.Fatalf("Tor autodiscovery onion field is missing: %s", body)
+	}
+	if strings.Contains(body, "exampleonion.onion/api") {
+		t.Fatalf("Tor address leaked into autodiscovery URLs: %s", body)
+	}
+}
+
 func TestHandleAPITemplateFound(t *testing.T) {
 	s := newTestCompatServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates/Go", nil)
@@ -291,7 +310,7 @@ func TestHandleFaviconMissingReturns404(t *testing.T) {
 }
 
 func TestHandleRobotsTxtDefaultWithoutConfig(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	req := httptest.NewRequest(http.MethodGet, "/robots.txt", nil)
 	rec := httptest.NewRecorder()
 	s.handleRobotsTxt(rec, req)
@@ -317,7 +336,7 @@ func TestHandleRobotsTxtFromConfig(t *testing.T) {
 }
 
 func TestHandleSecurityTxtOmitsUnconfiguredEmail(t *testing.T) {
-	s := &Server{config: &Config{}}
+	s := &Server{config: &ServerOptions{}}
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/security.txt", nil)
 	rec := httptest.NewRecorder()
 	s.handleSecurityTxt(rec, req)

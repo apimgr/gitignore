@@ -60,7 +60,7 @@ func TestParseDebugBodyLimit(t *testing.T) {
 func newTestDebugServer() *Server {
 	cfg := config.DefaultConfig()
 	cfg.Server.Token = "adm_debugtest0123456789012345678901234"
-	s := &Server{config: &Config{Cfg: cfg}, router: chi.NewRouter()}
+	s := &Server{config: &ServerOptions{Cfg: cfg}, router: chi.NewRouter()}
 	if mode.ShouldShowDebugEndpoints() {
 		s.registerDebugRoutes(s.router)
 	}
@@ -177,7 +177,7 @@ func TestDebugEndpointGroupsRespectConfiguration(t *testing.T) {
 	cfg.Server.Token = "adm_debugtest0123456789012345678901234"
 	cfg.Server.Debug.Pprof = false
 	cfg.Server.Debug.RuntimeEndpoints = false
-	s := &Server{config: &Config{Cfg: cfg}, router: chi.NewRouter()}
+	s := &Server{config: &ServerOptions{Cfg: cfg}, router: chi.NewRouter()}
 	s.registerDebugRoutes(s.router)
 	for _, path := range []string{"/debug/pprof/", "/debug/vars", "/debug/routes"} {
 		recorder := httptest.NewRecorder()

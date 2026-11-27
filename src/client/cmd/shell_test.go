@@ -41,7 +41,6 @@ func TestGenerateCompletionsContainAllCommandsAndBinaryName(t *testing.T) {
 		"bash":       generateBashCompletions,
 		"zsh":        generateZshCompletions,
 		"fish":       generateFishCompletions,
-		"posix":      generatePosixCompletions,
 		"powershell": generatePowershellCompletions,
 	}
 	for name, gen := range generators {
@@ -81,9 +80,14 @@ func TestHandleShellHelp(t *testing.T) {
 }
 
 func TestPrintCompletionsKnownAndUnknownShells(t *testing.T) {
-	for _, shell := range []string{"bash", "zsh", "fish", "sh", "dash", "ksh", "powershell", "pwsh"} {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell", "pwsh"} {
 		if got := printCompletions(shell, "gitignore-cli"); got != 0 {
 			t.Errorf("printCompletions(%s) = %d, want 0", shell, got)
+		}
+	}
+	for _, shell := range []string{"sh", "dash", "ksh"} {
+		if got := printCompletions(shell, "gitignore-cli"); got != 2 {
+			t.Errorf("printCompletions(%s) = %d, want 2", shell, got)
 		}
 	}
 	if got := printCompletions("cobol", "gitignore-cli"); got != 2 {

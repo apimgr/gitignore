@@ -96,6 +96,9 @@ func (s *Server) handleAPIAutodiscover(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) autodiscoverURLs(r *http.Request) []string {
 	urls := make([]string, 0)
+	if s.isTorRequest(r) {
+		return urls
+	}
 	seen := make(map[string]bool)
 	add := func(value string) {
 		origin, ok := canonicalOrigin(value)

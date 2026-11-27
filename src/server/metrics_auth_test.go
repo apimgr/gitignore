@@ -13,10 +13,10 @@ import (
 // newTestServerWithToken builds a minimal Server wired with a metrics instance
 // and the given bearer token for exercising the /metrics auth gate.
 func newTestServerWithToken(token string) *Server {
-	cfg := &config.Config{}
+	cfg := &config.ServerConfig{}
 	cfg.Server.Metrics.Auth.Tokens.Prometheus = token
 	return &Server{
-		config:  &Config{Cfg: cfg},
+		config:  &ServerOptions{Cfg: cfg},
 		metrics: metrics.New(metrics.Options{Version: "test", IncludeRuntime: true}),
 	}
 }
@@ -73,13 +73,13 @@ func TestMetricsTokenAcceptsCorrectToken(t *testing.T) {
 }
 
 func TestMetricsServicesUseIndependentBearerTokens(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.ServerConfig{}
 	cfg.Server.Metrics.Auth.Tokens = config.MetricsTokenConfig{
 		Prometheus: "prom-token",
 		Grafana:    "grafana-token",
 		Loki:       "loki-token",
 	}
-	s := &Server{config: &Config{Cfg: cfg}, metrics: metrics.New(metrics.Options{Version: "test"})}
+	s := &Server{config: &ServerOptions{Cfg: cfg}, metrics: metrics.New(metrics.Options{Version: "test"})}
 	for _, service := range []string{"prometheus", "grafana", "loki"} {
 		t.Run(service, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/server/metrics/"+service, nil)
@@ -116,9 +116,9 @@ func TestMetricsServicesUseIndependentBearerTokens(t *testing.T) {
 }
 
 func TestMetricsAllowUnauthenticatedRequiresExplicitConfiguration(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.ServerConfig{}
 	cfg.Server.Metrics.Auth.AllowUnauthenticated = true
-	s := &Server{config: &Config{Cfg: cfg}, metrics: metrics.New(metrics.Options{Version: "test"})}
+	s := &Server{config: &ServerOptions{Cfg: cfg}, metrics: metrics.New(metrics.Options{Version: "test"})}
 	response := httptest.NewRecorder()
 	s.metricsServiceHandler("prometheus").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/server/metrics", nil))
 	if response.Code != http.StatusOK {

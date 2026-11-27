@@ -359,7 +359,7 @@ The owner cookie name is recorded in `IDEA.md`. When a deployment changes an old
 | `server.backup.retention.max_backups` | `yaml.d/maintenance.yml` | `1` | Integer `1–365`; zero is invalid and resets to `1`. |
 | `server.backup.retention.keep_weekly`, `.keep_monthly`, `.keep_yearly` | `yaml.d/maintenance.yml` | `0`, `0`, `0` | Integers `0–52`, `0–12`, `0–10`; zero disables that retention tier. |
 | `server.backup.retention.max_total_size` | `yaml.d/maintenance.yml` | `10%` | Percent or byte-size; zero disables size cap. |
-| `server.backup.encryption_password` | `secrets.yml` | Empty | Optional; required when compliance policy requires encrypted backups. Without it, backups are unencrypted. |
+| `server.backup.encryption_password` | `secrets.yml` | Empty | Optional; stored encrypted at rest as `enc:v1:`. Legacy plaintext migrates at startup. If ciphertext cannot be decrypted, scheduled backups fail closed with `backup.password_unreadable`; they never create an unencrypted archive. |
 | `server.restore.max_archive_size`, `.max_expanded_size`, `.max_file_size` | `yaml.d/maintenance.yml` | `1G`, `4G`, `512M` | Byte sizes with units. |
 | `server.restore.max_files`, `.max_ratio` | `yaml.d/maintenance.yml` | `10000`, `100` | Positive integers. |
 | `server.update.branch` | `yaml.d/maintenance.yml` | `stable` | `stable`, `beta`, or `devel`; `daily`, `rolling`, `dev`, `development` normalize to `devel`. |

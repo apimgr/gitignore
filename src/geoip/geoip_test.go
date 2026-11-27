@@ -20,17 +20,19 @@ import (
 // fakeReader is an in-memory mmReader for tests. It populates lookup records by
 // result type, keyed on the string form of the IP.
 type fakeReader struct {
-	country map[string]string
-	asn     map[string]asnRecord
-	city    map[string]cityRecord
-	closed  bool
+	country       map[string]string
+	legacyCountry map[string]string
+	asn           map[string]asnRecord
+	city          map[string]cityRecord
+	closed        bool
 }
 
 func (f *fakeReader) Lookup(ip net.IP, result any) error {
 	key := ip.String()
 	switch v := result.(type) {
 	case *countryRecord:
-		v.CountryCode = f.country[key]
+		v.Country.ISOCode = f.country[key]
+		v.LegacyCountryCode = f.legacyCountry[key]
 	case *asnRecord:
 		*v = f.asn[key]
 	case *cityRecord:
@@ -97,6 +99,20 @@ func TestCountryAllowed_MissingDBFailsOpen(t *testing.T) {
 	// country reader nil (no database loaded).
 	if allowed, code := m.CountryAllowed(net.ParseIP("1.2.3.4")); !allowed || code != "" {
 		t.Fatalf("missing DB must fail open: allowed=%v code=%q", allowed, code)
+	}
+}
+
+func TestLookupCountryUsesISOCodeThenLegacyFallback(t *testing.T) {
+	m := New(config.GeoIPConfig{Enabled: true}, t_dataDir)
+	m.country = &fakeReader{
+		country:       map[string]string{"1.1.1.1": "us"},
+		legacyCountry: map[string]string{"2.2.2.2": "ca"},
+	}
+	for ip, want := range map[string]string{"1.1.1.1": "US", "2.2.2.2": "CA"} {
+		got, ok := m.LookupCountry(net.ParseIP(ip))
+		if !ok || got.CountryCode != want {
+			t.Errorf("LookupCountry(%s) = %+v, %v; want %s", ip, got, ok, want)
+		}
 	}
 }
 

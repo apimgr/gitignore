@@ -12,6 +12,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/apimgr/gitignore/src/db"
 )
@@ -129,18 +130,37 @@ type Scheduler struct {
 	running bool
 }
 
+const defaultSchedulerTimezone = "America/New_York"
+
+var schedulerTimezoneWarning sync.Once
+
+func schedulerLocation(configured, defaultTimezone string) *time.Location {
+	if configured == "" {
+		configured = defaultTimezone
+	}
+	location, err := time.LoadLocation(configured)
+	if err == nil {
+		return location
+	}
+
+	location, defaultErr := time.LoadLocation(defaultTimezone)
+	if defaultErr == nil {
+		schedulerTimezoneWarning.Do(func() {
+			log.Printf("invalid server.scheduler.timezone %q, using default %q", configured, defaultTimezone)
+		})
+		return location
+	}
+
+	schedulerTimezoneWarning.Do(func() {
+		log.Printf("invalid server.scheduler.timezone %q and default %q, using UTC", configured, defaultTimezone)
+	})
+	return time.UTC
+}
+
 // New builds a scheduler from config. An unknown or empty timezone falls back
 // to America/New_York, then UTC.
 func New(cfg Config) *Scheduler {
-	tz := cfg.Timezone
-	if tz == "" {
-		tz = "America/New_York"
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		log.Printf("scheduler: unknown timezone %q, falling back to UTC: %v", tz, err)
-		loc = time.UTC
-	}
+	loc := schedulerLocation(cfg.Timezone, defaultSchedulerTimezone)
 	catchUp := cfg.CatchUpWindow
 	if catchUp <= 0 {
 		catchUp = time.Hour

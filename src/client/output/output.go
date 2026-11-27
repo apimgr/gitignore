@@ -35,7 +35,7 @@ func ResolveColor(flagValue string) bool {
 	case "no":
 		return false
 	default:
-		if _, set := os.LookupEnv("NO_COLOR"); set {
+		if os.Getenv("NO_COLOR") != "" {
 			return false
 		}
 		return isatty.IsTerminal(os.Stdout.Fd())

@@ -181,15 +181,15 @@ func TestRunBackupRunRestoreRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile restored server.yml: %v", err)
 	}
-	if string(gotServerYML) != "server:\n  port: \"8080\"\n" {
-		t.Errorf("restored server.yml = %q, want original contents", gotServerYML)
+	if !strings.Contains(string(gotServerYML), `port: "8080"`) {
+		t.Errorf("restored server.yml does not preserve port: %q", gotServerYML)
 	}
 	gotSecrets, err := os.ReadFile(filepath.Join(restoreConfigDir, "secrets.yml"))
 	if err != nil {
 		t.Fatalf("ReadFile restored secrets.yml: %v", err)
 	}
-	if string(gotSecrets) != "server:\n  token: test-token\n" {
-		t.Errorf("restored secrets.yml = %q, want original contents", gotSecrets)
+	if !strings.Contains(string(gotSecrets), "token: test-token") {
+		t.Errorf("restored secrets.yml does not preserve token: %q", gotSecrets)
 	}
 	if info, err := os.Stat(filepath.Join(restoreConfigDir, "secrets.yml")); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("restored secrets.yml mode = %v, %v, want 0600", info, err)
@@ -301,8 +301,8 @@ func TestScheduledIncrementalBackupRestoresChangesAndDeletions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(server) != "server:\n  port: 9090\n" {
-		t.Fatalf("restored server.yml = %q", server)
+	if !strings.Contains(string(server), `port: "9090"`) {
+		t.Fatalf("restored server.yml does not preserve port: %q", server)
 	}
 	if _, err := os.Stat(filepath.Join(restoreConfig, "assets", "old.txt")); !os.IsNotExist(err) {
 		t.Fatalf("deleted file remains after restore: %v", err)

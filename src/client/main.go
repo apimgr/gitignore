@@ -1,18 +1,20 @@
 // Command gitignore-cli is the CLI client for the gitignore template server.
-// It talks to the server's public, unauthenticated /api/v1/* endpoints
-// (see IDEA.md: "No user accounts, registration, or login of any kind") to
-// list/search/combine .gitignore templates from the shell, e.g.:
+// It talks to public /api/v1/* endpoints without a token and accepts an
+// optional Bearer token for protected operations, including private CLI updates.
 //
 //	gitignore-cli Go Node > .gitignore
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apimgr/gitignore/src/client/api"
@@ -22,8 +24,10 @@ import (
 	"github.com/apimgr/gitignore/src/client/output"
 	clipath "github.com/apimgr/gitignore/src/client/path"
 	"github.com/apimgr/gitignore/src/client/tui"
+	clientupdate "github.com/apimgr/gitignore/src/client/update"
 	"github.com/apimgr/gitignore/src/common/display"
 	"github.com/apimgr/gitignore/src/common/i18n"
+	serverconfig "github.com/apimgr/gitignore/src/config"
 )
 
 // Version information (set by build flags via -ldflags -X).
@@ -71,6 +75,8 @@ func main() {
 	colorFlag := flag.String("color", "auto", "Color output: auto, yes, no")
 	langFlag := flag.String("lang", "", "Language for output")
 	serverFlag := flag.String("server", "", "Server URL")
+	tokenFlag := flag.String("token", "", "API token for protected operations")
+	updateFlag := flag.String("update", "", "Check for CLI updates: check, yes")
 	configFlag := flag.String("config", "", "Config profile name")
 	outputFlag := flag.String("output", "", "Output format: text, json, table")
 	shellFlag := flag.Bool("shell", false, "Shell integration: --shell {completions|init|help} [SHELL]")
@@ -121,6 +127,12 @@ func main() {
 		cfg.Server.Primary = result
 		changed = true
 	}
+	if result, save := config.SaveIfEmptyOrInvalid(cfg.Auth.Token, *tokenFlag, func(value string) bool {
+		return strings.TrimSpace(value) != ""
+	}); save {
+		cfg.Auth.Token = result
+		changed = true
+	}
 	if *colorFlag != "" && *colorFlag != "auto" {
 		if result, save := config.SaveIfEmptyOrInvalid(cfg.Color, *colorFlag, func(s string) bool {
 			return s == "yes" || s == "no" || s == "auto"
@@ -162,6 +174,12 @@ func main() {
 	}
 	client := api.New("")
 	client.Lang = clientLanguage
+	token, tokenErr := resolveClientToken(*tokenFlag, cfg)
+	if tokenErr != nil {
+		printer.ErrorText(tokenErr.Error())
+		os.Exit(output.ExitConfig)
+	}
+	client.Token = token
 
 	serverURL, err := config.ResolveServer(*serverFlag, cfg)
 	if err != nil {
@@ -188,6 +206,27 @@ func main() {
 	// Resolve the output language (--lang → config → LC_ALL/LANG → en) and
 	// advertise it so the server localizes error messages (AI.md PART 30).
 	client.Lang = clientLanguage
+	updateAction := strings.ToLower(strings.TrimSpace(*updateFlag))
+	updateResult, updateErr := clientupdate.Check(context.Background(), client, Version, updateAction, serverconfig.IsTruthy(cfg.Update.Auto), display.DetectDisplayEnv().IsTerminal, os.Stdin, os.Stdout)
+	if updateErr != nil {
+		if updateAction != "" || updateResult.Forced {
+			printer.ErrorText(updateErr.Error())
+			os.Exit(output.ExitGeneral)
+		}
+		printer.WarnText(updateErr.Error())
+	}
+	if updateAction == "check" {
+		if updateResult.Available {
+			fmt.Fprintf(os.Stdout, "CLI update %s is available. Run %s --update yes to install it.\n", updateResult.Version, cmd.BinaryName)
+		} else {
+			fmt.Fprintln(os.Stdout, "No CLI update is available.")
+		}
+		os.Exit(output.ExitSuccess)
+	}
+	if updateAction == "yes" && !updateResult.Installed {
+		fmt.Fprintln(os.Stdout, "No CLI update is available.")
+		os.Exit(output.ExitSuccess)
+	}
 
 	if *showVersion {
 		cmd.PrintVersion(Version, CommitID, BuildDate, client)
@@ -206,6 +245,45 @@ func main() {
 	}
 
 	os.Exit(cmd.Dispatch(client, printer, format, args))
+}
+
+func resolveClientToken(flagValue string, cfg *config.Config) (string, error) {
+	if value := strings.TrimSpace(flagValue); value != "" {
+		return value, nil
+	}
+	if value := strings.TrimSpace(os.Getenv(strings.ToUpper(api.ProjectName) + "_TOKEN")); value != "" {
+		return value, nil
+	}
+	if cfg == nil {
+		return "", nil
+	}
+	if tokenFile := strings.TrimSpace(cfg.Auth.TokenFile); tokenFile != "" {
+		tokenFile = os.ExpandEnv(tokenFile)
+		if strings.HasPrefix(tokenFile, "~") {
+			if home, err := os.UserHomeDir(); err == nil {
+				tokenFile = filepath.Join(home, strings.TrimLeft(strings.TrimPrefix(tokenFile, "~"), "/\\"))
+			}
+		}
+		info, err := os.Stat(tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("read API token file: %w", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() > 64*1024 {
+			return "", fmt.Errorf("API token file must be a regular file no larger than 64 KiB")
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+			return "", fmt.Errorf("API token file permissions must be 0600 or more restrictive")
+		}
+		data, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("read API token file: %w", err)
+		}
+		if value := strings.TrimSpace(string(data)); value != "" {
+			return value, nil
+		}
+		return "", fmt.Errorf("API token file is empty")
+	}
+	return strings.TrimSpace(cfg.Auth.Token), nil
 }
 
 // isTUIEligible reports whether the current process environment qualifies

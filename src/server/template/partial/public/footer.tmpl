@@ -1,0 +1,17 @@
+{{define "footer"}}<footer class="footer">
+{{if and .TorEnabled .TorRunning .OnionAddress}}
+<p class="footer-address"><a class="footer-network-link" href="{{path "/server/help#tor-access"}}" aria-label="{{t .Lang "help.tor_access"}}"><span aria-hidden="true">🧅</span></a> <code id="footer-onion-address" class="onion-address">{{.OnionAddress}}</code> <button class="btn copy-btn footer-copy-btn" type="button" aria-live="polite" aria-label="{{t .Lang "common.copy_to_clipboard"}}" data-copy="footer-onion-address" data-copied-label="{{t .Lang "common.copied"}}"><span aria-hidden="true">📋</span></button></p>
+{{end}}
+{{if and .I2PEnabled .I2PRunning .I2PAddress}}
+<p class="footer-address"><a class="footer-network-link" href="{{path "/server/help#i2p-access"}}" aria-label="{{t .Lang "health.feature.i2p"}}"><span aria-hidden="true">🔗</span></a> <code id="footer-i2p-address" class="i2p-address">{{.I2PAddress}}</code> <button class="btn copy-btn footer-copy-btn" type="button" aria-live="polite" aria-label="{{t .Lang "common.copy_to_clipboard"}}" data-copy="footer-i2p-address" data-copied-label="{{t .Lang "common.copied"}}"><span aria-hidden="true">📋</span></button></p>
+{{end}}
+<nav class="footer-links" aria-label="{{t .Lang "a11y.footer_navigation"}}">
+<a href="{{path "/server/about"}}">{{t .Lang "nav.about"}}</a>
+<a href="{{path "/server/privacy"}}">{{t .Lang "nav.privacy"}}</a>
+<a href="{{path "/server/help"}}">{{t .Lang "nav.help"}}</a>
+<a href="{{path "/server/preferences"}}">{{t .Lang "common.preferences"}}</a>
+<a href="{{path "/server/preferences#language"}}" lang="{{.Lang}}">{{.LanguageName}}</a>
+</nav>
+<p class="footer-meta"><a href="https://github.com/apimgr/gitignore" target="_blank" rel="noopener noreferrer">{{t .Lang "common.made_with"}}</a> <span aria-hidden="true">❤️</span> <span>·</span> <span>{{.Version}}</span></p>
+<p class="footer-meta"><a href="{{path "/server/healthz"}}">{{tf .Lang "common.last_updated" "datetime" .BuildDateHuman}}</a></p>
+</footer>{{end}}

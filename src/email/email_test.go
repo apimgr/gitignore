@@ -128,15 +128,46 @@ func TestSendDeliversMessage(t *testing.T) {
 	}
 	got := m.body()
 	for _, want := range []string{
-		"From: gitignore <no-reply@example.com>",
+		`From: "gitignore" <no-reply@example.com>`,
 		"To: admin@example.com",
-		"Reply-To: ops@example.com",
+		"Reply-To: <ops@example.com>",
 		"Subject: Hello",
+		"Message-ID: <",
+		"Auto-Submitted: auto-generated",
+		"MIME-Version: 1.0",
+		"Content-Type: multipart/alternative;",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Type: text/html; charset=UTF-8",
 		"Line one",
 		"Line two",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("delivered message missing %q\n---\n%s", want, got)
+		}
+	}
+}
+
+func TestSendRejectsHeaderInjectionBeforeDial(t *testing.T) {
+	s := &Sender{Host: "127.0.0.1", Port: 1, TLSMode: "none", FromEmail: "sender@example.com"}
+	for _, tc := range []struct{ to, subject string }{
+		{"bad\r\nBcc: victim@example.com", "subject"},
+		{"valid@example.com", "bad\nSubject: injected"},
+	} {
+		if err := s.Send(tc.to, tc.subject, "body"); err == nil {
+			t.Errorf("Send(%q, %q) unexpectedly succeeded", tc.to, tc.subject)
+		}
+	}
+}
+
+func TestPrivateTLSVerificationSkipped(t *testing.T) {
+	for _, host := range []string{"10.0.0.1", "172.16.0.1", "192.168.1.1", "100.64.0.1", "127.0.0.1", "169.254.1.1", "::1", "fd00::1", "fe80::1"} {
+		if !PrivateTLSVerificationSkipped(host) {
+			t.Errorf("expected private host %q to skip certificate verification", host)
+		}
+	}
+	for _, host := range []string{"8.8.8.8", "2001:4860:4860::8888", "mail.internal", "localhost"} {
+		if PrivateTLSVerificationSkipped(host) {
+			t.Errorf("unexpected verification bypass for %q", host)
 		}
 	}
 }

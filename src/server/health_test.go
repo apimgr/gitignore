@@ -69,8 +69,22 @@ func TestHealthFeaturesHidesPersistedTorStateWhenBinaryIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	info := s.healthFeatures().Tor
-	if info.Enabled || info.Running || info.Status != "disabled" || info.Hostname != "" {
+	if info.Enabled || info.Running || info.State != "disabled" || info.Status != "disabled" || info.Hostname != "" {
 		t.Fatalf("Tor health state with missing binary = %+v, want disabled and empty", info)
+	}
+}
+
+func TestHealthOverlayStatesPreserveLifecycleAndNormalizedStatus(t *testing.T) {
+	s := newTestHealthServer(t)
+	s.config.I2PStatus = func() I2PInfo {
+		return I2PInfo{Enabled: true, Status: "starting", State: "building", Provider: "i2pd"}
+	}
+	features := s.healthFeatures()
+	if features.I2P.State != "building" || features.I2P.Status != "starting" {
+		t.Fatalf("I2P health state = %+v, want lifecycle building and normalized starting", features.I2P)
+	}
+	if features.Tor.State == "" || features.Tor.Status == "" {
+		t.Fatalf("Tor health omitted lifecycle/status contract: %+v", features.Tor)
 	}
 }
 
@@ -303,6 +317,27 @@ func TestHealthzJSONShape(t *testing.T) {
 	}
 	if resp.GoVersion == "" {
 		t.Errorf("go_version must be populated")
+	}
+}
+
+func TestHealthzMaintenanceReturns503WithPublicSafeMetadata(t *testing.T) {
+	s := newTestHealthServer(t)
+	state := &MaintenanceState{}
+	state.Enter("database_connection", "Database connection failed", time.Now().UTC())
+	s.config.MaintenanceState = state
+	rec := doHealth(s, "/server/healthz", "application/json", "")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("maintenance health status = %d, want 503", rec.Code)
+	}
+	if rec.Header().Get("X-Maintenance-Mode") != "true" || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("maintenance headers missing: %v", rec.Header())
+	}
+	var response HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("invalid maintenance health JSON: %v", err)
+	}
+	if response.Status != "maintenance" || response.Maintenance == nil || response.Maintenance.Reason != "database_connection" {
+		t.Fatalf("maintenance health payload = %+v", response)
 	}
 }
 

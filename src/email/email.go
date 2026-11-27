@@ -7,11 +7,22 @@
 package email
 
 import (
+	"bytes"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
+	"io"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
+	"net/mail"
+	"net/netip"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 	"time"
 )
@@ -45,14 +56,6 @@ func (s *Sender) addr() string {
 	return net.JoinHostPort(s.Host, fmt.Sprintf("%d", s.Port))
 }
 
-// fromHeader returns the RFC 5322 From header value.
-func (s *Sender) fromHeader() string {
-	if s.FromName != "" {
-		return fmt.Sprintf("%s <%s>", s.FromName, s.FromEmail)
-	}
-	return s.FromEmail
-}
-
 // resolveTLSMode returns the effective TLS mode, resolving "auto" from the port:
 // 465 uses implicit TLS, everything else uses STARTTLS when the server offers it.
 func (s *Sender) resolveTLSMode() string {
@@ -66,6 +69,34 @@ func (s *Sender) resolveTLSMode() string {
 	return "starttls"
 }
 
+func (s *Sender) configuredTLSMode() string {
+	mode := strings.ToLower(strings.TrimSpace(s.TLSMode))
+	if mode == "" {
+		return "auto"
+	}
+	return mode
+}
+
+// PrivateTLSVerificationSkipped reports whether the configured host literal
+// receives AI.md's private-address certificate verification exception.
+func PrivateTLSVerificationSkipped(host string) bool {
+	a, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	if err != nil {
+		return false
+	}
+	shared := netip.MustParsePrefix("100.64.0.0/10")
+	return a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || shared.Contains(a)
+}
+
+func (s *Sender) tlsConfig() *tls.Config {
+	cfg := &tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12}
+	// AI.md permits this exception only for private IP literals configured by the operator.
+	if PrivateTLSVerificationSkipped(s.Host) {
+		cfg.InsecureSkipVerify = true
+	}
+	return cfg
+}
+
 // Send delivers a single plain-text message to one recipient. It returns an
 // error if SMTP is not usable or delivery fails. It never queues or retries —
 // AI.md PART 17 forbids queuing.
@@ -75,20 +106,33 @@ func (s *Sender) Send(to, subject, body string) error {
 
 // SendWithReplyTo delivers one message using a caller-specific reply address.
 func (s *Sender) SendWithReplyTo(to, replyTo, subject, body string) error {
+	return s.SendWithReplyToHTML(to, replyTo, subject, body, htmlFromPlain(body))
+}
+
+// SendHTML delivers a text and HTML alternative message to one recipient.
+func (s *Sender) SendHTML(to, subject, plainBody, htmlBody string) error {
+	return s.SendWithReplyToHTML(to, s.ReplyTo, subject, plainBody, htmlBody)
+}
+
+// SendWithReplyToHTML delivers a multipart message using a caller-specific reply address.
+func (s *Sender) SendWithReplyToHTML(to, replyTo, subject, plainBody, htmlBody string) error {
 	if !s.CanSend() {
 		return errors.New("email: SMTP not configured")
 	}
-	if strings.TrimSpace(to) == "" {
-		return errors.New("email: empty recipient")
+	if err := validateMessage(s, to, replyTo, subject, plainBody, htmlBody); err != nil {
+		return err
 	}
 
-	client, err := s.dial()
+	client, encrypted, err := s.dial()
 	if err != nil {
 		return fmt.Errorf("email: connect: %w", err)
 	}
 	defer func() { _ = client.Close() }()
 
 	if s.Username != "" {
+		if !encrypted {
+			return errors.New("email: SMTP AUTH requires TLS; credentials were not sent")
+		}
 		auth := smtp.PlainAuth("", s.Username, s.Password, s.Host)
 		if err := client.Auth(auth); err != nil {
 			return fmt.Errorf("email: auth: %w", err)
@@ -106,7 +150,11 @@ func (s *Sender) SendWithReplyTo(to, replyTo, subject, body string) error {
 	if err != nil {
 		return fmt.Errorf("email: DATA: %w", err)
 	}
-	if _, err := w.Write(s.buildMessage(to, replyTo, subject, body)); err != nil {
+	message, err := s.buildMessage(to, replyTo, subject, plainBody, htmlBody)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(message); err != nil {
 		return fmt.Errorf("email: write body: %w", err)
 	}
 	if err := w.Close(); err != nil {
@@ -116,74 +164,156 @@ func (s *Sender) SendWithReplyTo(to, replyTo, subject, body string) error {
 }
 
 // buildMessage assembles the RFC 5322 message with CRLF line endings.
-func (s *Sender) buildMessage(to, replyTo, subject, body string) []byte {
-	var b strings.Builder
-	b.WriteString("From: " + s.fromHeader() + "\r\n")
-	b.WriteString("To: " + to + "\r\n")
-	if replyTo != "" {
-		b.WriteString("Reply-To: " + replyTo + "\r\n")
+func validateMessage(s *Sender, to, replyTo, subject, plainBody, htmlBody string) error {
+	for label, value := range map[string]string{"recipient": to, "reply-to": replyTo, "subject": subject, "from name": s.FromName, "from email": s.FromEmail} {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("email: invalid %s: CR/LF is not allowed", label)
+		}
 	}
-	b.WriteString("Subject: " + subject + "\r\n")
-	b.WriteString("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n")
-	b.WriteString("MIME-Version: 1.0\r\n")
-	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
-	b.WriteString("\r\n")
-	// Normalize to CRLF and dot-stuff is handled by net/smtp's DataWriter.
-	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
-	return []byte(b.String())
+	parsed, err := mail.ParseAddress(to)
+	if err != nil || parsed.Address != to || strings.ContainsAny(to, " <>\t") {
+		return errors.New("email: invalid recipient addr-spec")
+	}
+	from, err := mail.ParseAddress(s.FromEmail)
+	if err != nil || from.Address != s.FromEmail || strings.ContainsAny(s.FromEmail, " <>\t") {
+		return errors.New("email: invalid sender address")
+	}
+	if subject == "" {
+		return errors.New("email: empty subject")
+	}
+	if strings.TrimSpace(plainBody) == "" {
+		return errors.New("email: plain-text body must not be empty")
+	}
+	if replyTo != "" {
+		if _, err := mail.ParseAddress(replyTo); err != nil {
+			return errors.New("email: invalid reply-to address")
+		}
+	}
+	if strings.TrimSpace(htmlBody) == "" {
+		return errors.New("email: HTML body must not be empty")
+	}
+	return nil
+}
+
+func htmlFromPlain(body string) string { return "<pre>" + html.EscapeString(body) + "</pre>" }
+
+func normalizeCRLF(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.ReplaceAll(value, "\n", "\r\n")
+}
+
+func (s *Sender) buildMessage(to, replyTo, subject, plainBody, htmlBody string) ([]byte, error) {
+	var b bytes.Buffer
+	boundarySeed := make([]byte, 18)
+	if _, err := rand.Read(boundarySeed); err != nil {
+		return nil, err
+	}
+	boundary := "alt-" + hex.EncodeToString(boundarySeed)
+	messageIDSeed := make([]byte, 16)
+	if _, err := rand.Read(messageIDSeed); err != nil {
+		return nil, err
+	}
+	domain := s.FromEmail[strings.LastIndex(s.FromEmail, "@")+1:]
+	from := (&mail.Address{Name: s.FromName, Address: s.FromEmail}).String()
+	encodedSubject := mime.QEncoding.Encode("UTF-8", subject)
+	if len([]byte(from)) > 900 || len([]byte(to)) > 900 || len([]byte(encodedSubject)) > 900 {
+		return nil, errors.New("email: header exceeds safe line length")
+	}
+	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\n", from, to)
+	if replyTo != "" {
+		fmt.Fprintf(&b, "Reply-To: %s\r\n", (&mail.Address{Address: replyTo}).String())
+	}
+	fmt.Fprintf(&b, "Subject: %s\r\nDate: %s\r\nMessage-ID: <%s@%s>\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", encodedSubject, time.Now().Format(time.RFC1123Z), hex.EncodeToString(messageIDSeed), domain, boundary)
+	mw := multipart.NewWriter(&b)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return nil, err
+	}
+	for _, part := range []struct{ typ, body string }{{"text/plain", plainBody}, {"text/html", htmlBody}} {
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Type", part.typ+"; charset=UTF-8")
+		h.Set("Content-Transfer-Encoding", "quoted-printable")
+		pw, err := mw.CreatePart(h)
+		if err != nil {
+			return nil, err
+		}
+		qp := quotedprintable.NewWriter(pw)
+		if _, err := io.WriteString(qp, normalizeCRLF(part.body)); err != nil {
+			return nil, err
+		}
+		if err := qp.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 // dial establishes an SMTP client using the resolved TLS mode.
-func (s *Sender) dial() (*smtp.Client, error) {
-	switch s.resolveTLSMode() {
+func (s *Sender) dial() (*smtp.Client, bool, error) {
+	mode := s.configuredTLSMode()
+	if mode == "auto" && s.Port == 465 {
+		mode = "tls"
+	}
+	switch mode {
 	case "tls":
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: dialTimeout}, "tcp", s.addr(), &tls.Config{ServerName: s.Host})
+		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: dialTimeout}, "tcp", s.addr(), s.tlsConfig())
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		client, err := smtp.NewClient(conn, s.Host)
 		if err != nil {
 			_ = conn.Close()
-			return nil, err
+			return nil, false, err
 		}
 		if err := client.Hello(localName()); err != nil {
 			_ = client.Close()
-			return nil, err
+			return nil, false, err
 		}
-		return client, nil
+		return client, true, nil
 	case "none":
-		return s.dialPlain(false)
+		return s.dialPlain(false, false)
+	case "starttls":
+		return s.dialPlain(true, true)
+	case "auto":
+		return s.dialPlain(true, false)
 	default:
-		// starttls
-		return s.dialPlain(true)
+		return nil, false, fmt.Errorf("email: unknown TLS mode %q", mode)
 	}
 }
 
 // dialPlain opens a plain TCP connection, performs the EHLO handshake, and
 // optionally upgrades via STARTTLS when the server advertises it.
-func (s *Sender) dialPlain(useSTARTTLS bool) (*smtp.Client, error) {
+func (s *Sender) dialPlain(useSTARTTLS, requireSTARTTLS bool) (*smtp.Client, bool, error) {
 	conn, err := net.DialTimeout("tcp", s.addr(), dialTimeout)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	client, err := smtp.NewClient(conn, s.Host)
 	if err != nil {
 		_ = conn.Close()
-		return nil, err
+		return nil, false, err
 	}
 	if err := client.Hello(localName()); err != nil {
 		_ = client.Close()
-		return nil, err
+		return nil, false, err
 	}
 	if useSTARTTLS {
 		if ok, _ := client.Extension("STARTTLS"); ok {
-			if err := client.StartTLS(&tls.Config{ServerName: s.Host}); err != nil {
+			if err := client.StartTLS(s.tlsConfig()); err != nil {
 				_ = client.Close()
-				return nil, err
+				return nil, false, err
 			}
+			return client, true, nil
+		}
+		if requireSTARTTLS {
+			_ = client.Close()
+			return nil, false, errors.New("email: STARTTLS required but not offered")
 		}
 	}
-	return client, nil
+	return client, false, nil
 }
 
 // TestConnection attempts an SMTP handshake (EHLO) against host:port using the
@@ -191,7 +321,7 @@ func (s *Sender) dialPlain(useSTARTTLS bool) (*smtp.Client, error) {
 // handshake fails. It sends no mail.
 func TestConnection(host string, port int, tlsMode string) error {
 	probe := &Sender{Host: host, Port: port, TLSMode: tlsMode}
-	client, err := probe.dial()
+	client, _, err := probe.dial()
 	if err != nil {
 		return err
 	}
@@ -232,7 +362,7 @@ func Detect(candidates []DetectCandidate) (host string, port int, ok bool) {
 			ports = detectPorts
 		}
 		for _, p := range ports {
-			mode := "starttls"
+			mode := "auto"
 			if p == 465 {
 				mode = "tls"
 			}

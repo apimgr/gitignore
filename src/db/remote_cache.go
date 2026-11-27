@@ -58,6 +58,29 @@ type remoteSQLiteCache struct {
 	syncDebounce *time.Timer
 }
 
+func (c *remoteSQLiteCache) metricsSnapshot() (CacheMetricSnapshot, bool) {
+	if c == nil || c.reader == nil {
+		return CacheMetricSnapshot{}, false
+	}
+	c.readSyncMu.RLock()
+	defer c.readSyncMu.RUnlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var snapshot CacheMetricSnapshot
+	snapshot.Cache = "remote_db"
+	for _, table := range cacheTables {
+		var count int64
+		if err := c.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+table+`"`).Scan(&count); err != nil {
+			continue
+		}
+		snapshot.Size += count
+	}
+	if info, err := os.Stat(c.path); err == nil {
+		snapshot.Bytes = info.Size()
+	}
+	return snapshot, true
+}
+
 func openRemoteSQLiteCache(ctx context.Context, remote *sql.DB, remoteDSN string, cfg CacheConfig) (*remoteSQLiteCache, bool, error) {
 	if !cfg.Enabled {
 		return nil, true, nil
@@ -198,20 +221,8 @@ func (c *remoteSQLiteCache) syncNowWithPolicy(ctx context.Context, keepDirtyOnFe
 	}
 	c.readSyncMu.Lock()
 	defer c.readSyncMu.Unlock()
-	if err := c.applySnapshot(ctx, rowsByTable); err != nil {
-		c.failSyncApply()
-		return err
-	}
 	now := time.Now().UTC()
-	stamp := now.Format(time.RFC3339Nano)
-	err = writeWithDB(ctx, c.writer, true, "local cache sync metadata", func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO cache_metadata(name, value) VALUES ('last_sync', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value", stamp); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO cache_metadata(name, value) VALUES ('dirty', '0') ON CONFLICT(name) DO UPDATE SET value = excluded.value")
-		return err
-	})
-	if err != nil {
+	if err := c.applySnapshot(ctx, rowsByTable, now); err != nil {
 		c.failSyncApply()
 		return err
 	}
@@ -287,50 +298,35 @@ func (c *remoteSQLiteCache) failSyncFetch(keepDirty bool) {
 	c.mu.Unlock()
 }
 
-func (c *remoteSQLiteCache) applySnapshot(ctx context.Context, rowsByTable map[string][][]any) error {
-	for _, table := range cacheTables {
-		columns := cacheTableColumns[table]
-		quoted := quoteSQLIdentifiers(columns)
-		placeholders := make([]string, len(columns))
-		for i := range columns {
-			placeholders[i] = "?"
-		}
-		query := "INSERT OR REPLACE INTO \"" + table + "\" (" + strings.Join(quoted, ",") + ") VALUES (" + strings.Join(placeholders, ",") + ")"
-		for {
-			var deleted int64
-			err := writeWithDB(ctx, c.writer, true, "local cache clear", func(tx *sql.Tx) error {
-				result, err := tx.ExecContext(ctx, `DELETE FROM "`+table+`" WHERE rowid IN (SELECT rowid FROM "`+table+`" LIMIT 500)`)
-				if err != nil {
-					return fmt.Errorf("clear local cache table %s: %w", table, err)
-				}
-				deleted, err = result.RowsAffected()
-				return err
-			})
-			if err != nil {
+func (c *remoteSQLiteCache) applySnapshot(ctx context.Context, rowsByTable map[string][][]any, syncedAt time.Time) error {
+	stamp := syncedAt.UTC().Format(time.RFC3339Nano)
+	return writeWithDB(ctx, c.writer, true, "atomic local cache reconciliation", func(tx *sql.Tx) error {
+		for _, table := range cacheTables {
+			columns, ok := cacheTableColumns[table]
+			if !ok || len(columns) == 0 {
+				return fmt.Errorf("local cache table %s has no declared columns", table)
+			}
+			quoted := quoteSQLIdentifiers(columns)
+			placeholders := make([]string, len(columns))
+			for index := range columns {
+				placeholders[index] = "?"
+			}
+			query := "INSERT OR REPLACE INTO \"" + table + "\" (" + strings.Join(quoted, ",") + ") VALUES (" + strings.Join(placeholders, ",") + ")"
+			if _, err := tx.ExecContext(ctx, `DELETE FROM "`+table+`"`); err != nil {
 				return fmt.Errorf("clear local cache table %s: %w", table, err)
 			}
-			if deleted < 500 {
-				break
-			}
-			runtime.Gosched()
-		}
-		rows := rowsByTable[table]
-		for start := 0; start < len(rows); start += 500 {
-			end := min(start+500, len(rows))
-			if err := writeWithDB(ctx, c.writer, true, "local cache import", func(tx *sql.Tx) error {
-				for _, values := range rows[start:end] {
-					if _, err := tx.ExecContext(ctx, query, values...); err != nil {
-						return err
-					}
+			for _, values := range rowsByTable[table] {
+				if _, err := tx.ExecContext(ctx, query, values...); err != nil {
+					return fmt.Errorf("import local cache table %s: %w", table, err)
 				}
-				return nil
-			}); err != nil {
-				return fmt.Errorf("import local cache table %s: %w", table, err)
 			}
-			runtime.Gosched()
 		}
-	}
-	return nil
+		if _, err := tx.ExecContext(ctx, "INSERT INTO cache_metadata(name, value) VALUES ('last_sync', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value", stamp); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO cache_metadata(name, value) VALUES ('dirty', '0') ON CONFLICT(name) DO UPDATE SET value = excluded.value")
+		return err
+	})
 }
 
 func quoteSQLIdentifiers(values []string) []string {

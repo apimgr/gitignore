@@ -518,10 +518,12 @@ func (s *Server) handlePreferencesSave(w http.ResponseWriter, r *http.Request) {
 	values := preferenceInput(r, true, true)
 	s.applyPreferences(w, r, values, false)
 	if r.FormValue("consent_form") == "1" {
-		consentState := map[string]interface{}{"essential": true, "preferences": r.FormValue("consent_preferences") == "on", "analytics": r.FormValue("consent_analytics") == "on", "timestamp": time.Now().Unix()}
+		previousConsent, _ := readConsent(r)
+		consentState := consentState{Essential: true, Preferences: r.FormValue("consent_preferences") == "on", Analytics: r.FormValue("consent_analytics") == "on", Timestamp: time.Now().Unix()}
 		consent, _ := json.Marshal(consentState)
 		setPreferenceCookie(w, r, "cookie_consent", encodeConsentCookie(consent), s)
-		s.auditConsentChange(r, "cookie_consent", map[string]bool{"essential": true, "preferences": consentState["preferences"].(bool), "analytics": consentState["analytics"].(bool)})
+		s.applyConsentWithdrawal(w, r, previousConsent, consentState, false)
+		s.auditConsentChange(r, "cookie_consent", map[string]bool{"essential": true, "preferences": consentState.Preferences, "analytics": consentState.Analytics})
 		if s.config != nil && s.currentConfig() != nil && s.currentConfig().Server.Privacy.Data.Sold {
 			if r.FormValue("ccpa_opt_out") == "on" {
 				setPreferenceCookie(w, r, "ccpa_opt_out", "true", s)

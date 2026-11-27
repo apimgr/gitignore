@@ -4,6 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +14,56 @@ import (
 	"github.com/apimgr/gitignore/src/db"
 	"github.com/apimgr/gitignore/src/pgp"
 )
+
+func TestPrepareBackupSourcesExportsAppSecrets(t *testing.T) {
+	dataDir := t.TempDir()
+	configDir := t.TempDir()
+	if err := db.Init(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT OR REPLACE INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?)", "installation_secret", "encoded-secret", "now")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sources, cleanup, err := prepareBackupSources(nil, configDir, dataDir)
+	if err != nil {
+		t.Fatalf("prepareBackupSources: %v", err)
+	}
+	defer cleanup()
+	var secretSource string
+	for _, source := range sources {
+		if source.archivePath == "app_secrets.json" {
+			secretSource = source.diskPath
+		}
+	}
+	if secretSource == "" {
+		t.Fatal("app_secrets.json was not included")
+	}
+	var secrets []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	data, err := os.ReadFile(secretSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, secret := range secrets {
+		if secret.Name == "installation_secret" && secret.Value == "encoded-secret" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("installation secret missing from exported app secrets: %#v", secrets)
+	}
+}
 
 // TestCollectBackupSources verifies configuration secrets, user-managed files,
 // security files, the database, and custom templates are collected.

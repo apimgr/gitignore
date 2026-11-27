@@ -7,7 +7,7 @@ func TestIsDumbTerminal(t *testing.T) {
 		term string
 		want bool
 	}{
-		{"", true},
+		{"", false},
 		{"dumb", true},
 		{"xterm-256color", false},
 		{"screen", false},
@@ -22,8 +22,15 @@ func TestIsDumbTerminal(t *testing.T) {
 
 func TestAutoDetectDisplayModeNonInteractive(t *testing.T) {
 	e := DisplayEnv{IsTerminal: false, TerminalType: "xterm"}
-	if got := e.autoDetectDisplayMode(); got != DisplayModeCLI {
-		t.Errorf("non-interactive stdout = %v, want CLI", got)
+	if got := e.autoDetectDisplayMode(); got != DisplayModeHeadless {
+		t.Errorf("no display or terminal = %v, want Headless", got)
+	}
+}
+
+func TestAutoDetectDisplayModeDisplayWithoutTerminal(t *testing.T) {
+	e := DisplayEnv{IsTerminal: false, HasDisplay: true, TerminalType: "xterm"}
+	if got := e.autoDetectDisplayMode(); got != DisplayModeGUI {
+		t.Errorf("display without terminal = %v, want GUI", got)
 	}
 }
 
@@ -96,7 +103,11 @@ func TestDetectDisplayEnvRunsWithoutPanicking(t *testing.T) {
 	if e.IsTerminal {
 		t.Skip("stdout unexpectedly a terminal in this environment; skipping mode assertion")
 	}
-	if e.Mode != DisplayModeCLI {
-		t.Errorf("non-terminal stdout Mode = %v, want CLI", e.Mode)
+	want := DisplayModeHeadless
+	if e.HasDisplay {
+		want = DisplayModeGUI
+	}
+	if e.Mode != want {
+		t.Errorf("non-terminal stdout Mode = %v, want %v", e.Mode, want)
 	}
 }

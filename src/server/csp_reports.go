@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -109,7 +110,11 @@ func (s *Server) handleCSPReport(w http.ResponseWriter, r *http.Request) {
 	if !s.allowBrowserReport(r) {
 		return
 	}
-	s.logCSPReports(r, readReportBody(w, r))
+	if s.allowCSPReportSample() {
+		s.logCSPReports(r, readReportBody(w, r))
+	} else if r.Body != nil {
+		_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, maxCSPReportBytes+1))
+	}
 }
 
 func (s *Server) handleDefaultReport(w http.ResponseWriter, r *http.Request) {
@@ -119,9 +124,28 @@ func (s *Server) handleDefaultReport(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, report := range parseCSPReports(readReportBody(w, r)) {
 		if report.Legacy != nil || report.Type == "csp-violation" {
-			s.logCSPReport(r, report)
+			if s.allowCSPReportSample() {
+				s.logCSPReport(r, report)
+			}
 		}
 	}
+}
+
+func (s *Server) allowCSPReportSample() bool {
+	rate := 1.0
+	if cfg := s.currentConfig(); cfg != nil {
+		rate = cfg.Web.CSP.ReportsSampleRate
+		if !cfg.Web.CSP.ReportsEnabled {
+			return false
+		}
+	}
+	if rate <= 0 {
+		return false
+	}
+	if rate >= 1 {
+		return true
+	}
+	return rand.Float64() < rate
 }
 
 func (s *Server) handleNELReport(w http.ResponseWriter, r *http.Request) {

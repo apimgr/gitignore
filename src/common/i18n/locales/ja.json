@@ -114,6 +114,7 @@
       "total_requests": "リクエスト総数",
       "requests_24h": "リクエスト数（24 時間）",
       "active_connections": "アクティブ接続数",
+      "attempts": "復旧の試行回数",
       "last_checked": "最終確認:"
     },
     "feature": {
@@ -304,12 +305,23 @@
     "swagger_description": "Swagger UI - インタラクティブな REST API エクスプローラー",
     "graphql_description": "インタラクティブな GraphQL エクスプローラー",
     "tor_access": "Tor アクセス",
+    "tor_summary": "このアプリケーションは、プライバシー保護を強化する Tor の隠しサービスとして利用できます。",
     "onion_address": "Onion アドレス",
     "how_to_connect": "接続方法",
     "download_tor": "Tor Browser をダウンロード",
     "open_tor": "Tor Browser を開き、接続が完了するまで待ちます",
     "paste_onion": "上記の onion アドレスをコピーし、Tor Browser のアドレスバーに貼り付けます",
-    "tor_privacy": "Tor を使用すると追加のプライバシーが得られます...",
+    "tor_privacy": "Tor は IP アドレスを隠し、Tor ネットワーク経由で接続をルーティングして暗号化します。",
+    "i2p_access": "I2P アクセス",
+    "i2p_summary": "このアプリケーションは、プライバシー保護を強化する I2P eepsite として利用できます。",
+    "i2p_address": "I2P アドレス",
+    "i2p_how_to_connect": "接続方法",
+    "i2p_install": "I2P または i2pd をインストールし、ネットワークへの統合を待ちます：",
+    "i2p_download": "I2P をダウンロード",
+    "i2pd_download": "i2pd をダウンロード",
+    "i2p_proxy": "ブラウザーで I2P HTTP プロキシを使用するように設定します（既定：127.0.0.1:4444）。",
+    "i2p_paste": "上記の .b32.i2p アドレスをコピーし、ブラウザーのアドレスバーに貼り付けます。",
+    "i2p_privacy": "I2P は接続を I2P ネットワーク経由でルーティングします。eepsite は HTTP を使用し、I2P トンネルが通信を暗号化するため、このサービスでは TLS 証明書を使用しません。",
     "faq": "よくある質問",
     "troubleshooting": "トラブルシューティング"
   },
@@ -569,7 +581,9 @@
     },
     "common": {
       "from_label": "送信元",
-      "time_label": "時間"
+      "time_label": "時間",
+      "host_label": "ホスト",
+      "version_label": "バージョン"
     },
     "test_prefix": "[テスト]",
     "templates": {
@@ -660,6 +674,25 @@
         "heading": "更新を準備しました",
         "staged": "更新を準備しました。サービスの再起動時に適用されます。",
         "version_label": "バージョン"
+      },
+      "database_error": {
+        "error_label": "エラー",
+        "heading": "データベース接続の問題",
+        "since_label": "開始時刻",
+        "subject": "データベース接続の問題 - {app_name}",
+        "summary": "アプリケーションがデータベースに接続できません。"
+      },
+      "shutdown": {
+        "heading": "サーバー停止",
+        "reason_label": "理由",
+        "subject": "サーバー停止 - {app_name}",
+        "summary": "サーバーは正常に停止しました。"
+      },
+      "startup": {
+        "heading": "サーバー起動",
+        "mode_label": "モード",
+        "subject": "サーバー起動 - {app_name}",
+        "summary": "サーバーが正常に起動しました。"
       }
     }
   },
@@ -923,7 +956,7 @@
     "running_in_mode_label": "モード",
     "update_branch_usage": "更新チャネルを設定: stable、beta、devel（別名: daily、rolling、dev、development）",
     "invalid_update_branch": "更新チャネルが無効です。有効なチャネル: stable、beta、devel。",
-    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\n情報:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nシェルの統合:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nサーバー構成:\n  --mode {production|development} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nサービスコマンド:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nメンテナンスコマンド:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  プロジェクトシークレットをローテーション（トークンと確認が必要）\n\n更新コマンド:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nスケジューラコマンド:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\n電子メールコマンド:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
+    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\n情報:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nシェルの統合:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nサーバー構成:\n  --mode {production|development|debug} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nサービスコマンド:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nメンテナンスコマンド:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  プロジェクトシークレットをローテーション（トークンと確認が必要）\n\n更新コマンド:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nスケジューラコマンド:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\n電子メールコマンド:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
     "client": {
       "api": {
         "invalid_url": "無効な URL: {url}",
@@ -1284,6 +1317,8 @@
       "service_stopped": "停止済み",
       "set_backup_directory_failed": "バックアップ ディレクトリの設定に失敗しました: {error}",
       "set_cache_directory_failed": "に失敗しましたキャッシュ ディレクトリの設定: {error}",
+      "invalid_directory_path": "{path} ディレクトリのパスが無効です。",
+      "set_database_directory_failed": "データベース ディレクトリの設定に失敗しました: {error}",
       "set_data_directory_failed": "データ ディレクトリの設定に失敗しました: {error}",
       "set_log_directory_failed": "ログ ディレクトリの設定に失敗しました: {error}",
       "setup_complete": "セットアップが完了しました。",
@@ -1910,6 +1945,17 @@
         "analytics_suffix_not_sold": "Analytics データは匿名化され、販売されることはありません。",
         "analytics_suffix_sold": "分析データは第三者と共有される場合があります。"
       }
+    },
+    "flash": {
+      "action_completed": "操作が完了しました。",
+      "announcement_dismissed": "お知らせを閉じました。",
+      "consent_required": "続行する前にCookieへの同意方法を選択してください。",
+      "consent_saved": "Cookieへの同意設定を保存しました。",
+      "contact_sent": "メッセージを送信しました。",
+      "preferences_saved": "設定を保存しました。",
+      "privacy_choice_saved": "プライバシー設定を保存しました。",
+      "theme_saved": "テーマ設定を保存しました。",
+      "token_action_completed": "トークン操作が完了しました。"
     }
   },
   "llms": {

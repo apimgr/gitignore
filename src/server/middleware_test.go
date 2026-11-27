@@ -269,6 +269,19 @@ func TestSecurityHeadersSetsExpectedHeaders(t *testing.T) {
 	}
 }
 
+func TestOneShotSecurityReportPageDoesNotLeakReferrerOrCache(t *testing.T) {
+	s := &Server{config: &Config{Cfg: config.DefaultConfig()}}
+	req := httptest.NewRequest(http.MethodGet, "/server/security/report/track?token=one-shot", nil)
+	rec := httptest.NewRecorder()
+	s.securityHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, req)
+	if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("Referrer-Policy = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
 func TestSecurityHeadersHSTSWhenTLS(t *testing.T) {
 	s := &Server{config: &Config{}}
 	handler := s.securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -283,6 +296,50 @@ func TestSecurityHeadersHSTSWhenTLS(t *testing.T) {
 	}
 	if rec.Header().Get("Content-Security-Policy") == "" && rec.Header().Get("Content-Security-Policy-Report-Only") == "" {
 		t.Error("expected a CSP header (enforced or report-only) to be set")
+	}
+}
+
+func TestSecurityHeadersHonorConfiguredWebSecurity(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Web.HSTS.MaxAgeSeconds = 31536000
+	cfg.Web.HSTS.IncludeSubdomains = false
+	cfg.Web.HSTS.Preload = false
+	cfg.Web.Headers.COOP = "same-origin"
+	cfg.Web.Headers.COEP = "require-corp"
+	cfg.Web.Headers.CORP = "same-site"
+	cfg.Web.Headers.OriginAgentCluster = false
+	cfg.Web.Headers.CrossDomainPolicies = "master-only"
+	cfg.Web.Headers.NEL.Enabled = false
+	cfg.Web.CSP.Mode = "report-only"
+	cfg.Web.CSP.ScriptSrcExtra = "https://scripts.example.test"
+	s := New(&Config{Cfg: cfg})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "https://example.test/", nil)
+	req.TLS = &tls.ConnectionState{}
+	s.securityHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Strict-Transport-Security"); got != "max-age=31536000" {
+		t.Fatalf("HSTS = %q", got)
+	}
+	for header, want := range map[string]string{
+		"Cross-Origin-Opener-Policy":        "same-origin",
+		"Cross-Origin-Embedder-Policy":      "require-corp",
+		"Cross-Origin-Resource-Policy":      "same-site",
+		"X-Permitted-Cross-Domain-Policies": "master-only",
+	} {
+		if got := rec.Header().Get(header); got != want {
+			t.Errorf("%s = %q, want %q", header, got, want)
+		}
+	}
+	if rec.Header().Get("Origin-Agent-Cluster") != "" || rec.Header().Get("NEL") != "" {
+		t.Errorf("disabled headers still emitted: %v", rec.Header())
+	}
+	policy := rec.Header().Get("Content-Security-Policy-Report-Only")
+	if !strings.Contains(policy, "script-src 'self' https://scripts.example.test") {
+		t.Errorf("configured CSP source missing: %s", policy)
+	}
+	if !strings.Contains(rec.Header().Get("Reporting-Endpoints"), "nel=") || len(rec.Header().Values("Report-To")) != 2 {
+		t.Errorf("reporting groups missing: %v", rec.Header())
 	}
 }
 

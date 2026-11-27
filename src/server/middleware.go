@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -375,6 +376,54 @@ func cspDirectivesForCaptcha(tlsActive bool, api, provider string) string {
 	return strings.Join(directives, "; ")
 }
 
+func applyCSPConfig(policy string, cfg config.WebCSPConfig) string {
+	if !cfg.Enabled {
+		return ""
+	}
+	directives := strings.Split(policy, "; ")
+	values := map[string]struct{ extra, override string }{
+		"default-src":     {cfg.DefaultSrcExtra, cfg.DefaultSrcOverride},
+		"script-src":      {cfg.ScriptSrcExtra, cfg.ScriptSrcOverride},
+		"style-src":       {cfg.StyleSrcExtra, cfg.StyleSrcOverride},
+		"img-src":         {cfg.ImgSrcExtra, cfg.ImgSrcOverride},
+		"font-src":        {cfg.FontSrcExtra, cfg.FontSrcOverride},
+		"connect-src":     {cfg.ConnectSrcExtra, cfg.ConnectSrcOverride},
+		"media-src":       {cfg.MediaSrcExtra, cfg.MediaSrcOverride},
+		"worker-src":      {cfg.WorkerSrcExtra, cfg.WorkerSrcOverride},
+		"manifest-src":    {cfg.ManifestSrcExtra, cfg.ManifestSrcOverride},
+		"frame-src":       {cfg.FrameSrcExtra, cfg.FrameSrcOverride},
+		"frame-ancestors": {cfg.FrameAncestorsExtra, cfg.FrameAncestorsOverride},
+		"base-uri":        {cfg.BaseURIExtra, cfg.BaseURIOverride},
+		"form-action":     {cfg.FormActionExtra, cfg.FormActionOverride},
+		"object-src":      {cfg.ObjectSrcExtra, cfg.ObjectSrcOverride},
+	}
+	for index, directive := range directives {
+		name := strings.Fields(directive)
+		if len(name) == 0 {
+			continue
+		}
+		options, ok := values[name[0]]
+		if !ok {
+			continue
+		}
+		if override := strings.TrimSpace(options.override); override != "" {
+			directives[index] = name[0] + " " + override
+		} else if extra := strings.TrimSpace(options.extra); extra != "" {
+			directives[index] += " " + extra
+		}
+	}
+	if !cfg.ReportsEnabled {
+		filtered := directives[:0]
+		for _, directive := range directives {
+			if !strings.HasPrefix(directive, "report-to ") && !strings.HasPrefix(directive, "report-uri ") {
+				filtered = append(filtered, directive)
+			}
+		}
+		directives = filtered
+	}
+	return strings.Join(directives, "; ")
+}
+
 func replaceDirective(directives []string, name, value string) []string {
 	for index, directive := range directives {
 		if strings.HasPrefix(directive, name+" ") {
@@ -392,38 +441,91 @@ func replaceDirective(directives []string, name, value string) []string {
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		cfg := s.currentConfig()
+		web := config.DefaultConfig().Web
+		if cfg != nil {
+			web = cfg.Web
+			if cfg.Server.SEO.NoIndex || !isPublicSEOPage(r.URL.Path) {
+				h.Set("X-Robots-Tag", "noindex, nofollow")
+			}
+		}
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "SAMEORIGIN")
 		h.Set("X-XSS-Protection", "1; mode=block")
-		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("X-Permitted-Cross-Domain-Policies", "none")
-		h.Set("Origin-Agent-Cluster", "?1")
-		h.Set("Cross-Origin-Opener-Policy", "unsafe-none")
-		h.Set("Cross-Origin-Embedder-Policy", "unsafe-none")
-		h.Set("Cross-Origin-Resource-Policy", "cross-origin")
+		if web.Headers.ReferrerPolicy != "" {
+			h.Set("Referrer-Policy", web.Headers.ReferrerPolicy)
+		}
+		if strings.HasPrefix(r.URL.Path, "/server/security/report/") {
+			h.Set("Referrer-Policy", "no-referrer")
+			h.Set("Cache-Control", "private, no-store")
+		}
+		if web.Headers.CrossDomainPolicies != "" {
+			h.Set("X-Permitted-Cross-Domain-Policies", web.Headers.CrossDomainPolicies)
+		}
+		if web.Headers.OriginAgentCluster {
+			h.Set("Origin-Agent-Cluster", "?1")
+		}
+		if web.Headers.COOP != "" {
+			h.Set("Cross-Origin-Opener-Policy", web.Headers.COOP)
+		}
+		if web.Headers.COEP != "" {
+			h.Set("Cross-Origin-Embedder-Policy", web.Headers.COEP)
+		}
+		if web.Headers.CORP != "" {
+			h.Set("Cross-Origin-Resource-Policy", web.Headers.CORP)
+		}
+		if web.Headers.DNSPrefetchControl != "" {
+			h.Set("X-DNS-Prefetch-Control", web.Headers.DNSPrefetchControl)
+		}
 		h.Set("Permissions-Policy", permissionsPolicyDefault)
 
-		sslEnabled := s.currentConfig() != nil && s.currentConfig().Server.SSL.Enabled
+		sslEnabled := cfg != nil && cfg.Server.SSL.Enabled
 		tlsActive := r.TLS != nil || sslEnabled
 		if s.isTorRequest(r) || isI2PHost(r.Host) {
 			tlsActive = false
 		}
 
-		csp := s.trackingCSP(r, s.apiBasePath())
-		if mode.IsAppModeDev() {
+		csp := applyCSPConfig(s.trackingCSP(r, s.apiBasePath()), web.CSP)
+		if csp != "" && (strings.EqualFold(web.CSP.Mode, "report-only") || mode.IsAppModeDev() && !(strings.EqualFold(web.CSP.Mode, "enforce") && config.IsConfigValueSet("web.csp.mode"))) {
 			h.Set("Content-Security-Policy-Report-Only", csp)
-		} else {
+		} else if csp != "" {
 			h.Set("Content-Security-Policy", csp)
 		}
 
 		base := s.detectServerURL(r)
 		reportURL := base + s.apiBasePath() + "/server/reports/default"
-		h.Set("Reporting-Endpoints", `default="`+reportURL+`"`)
-		h.Set("Report-To", `{"group":"default","max_age":10886400,"endpoints":[{"url":"`+reportURL+`"}]}`)
-		h.Set("NEL", `{"report_to":"default","max_age":2592000,"include_subdomains":true}`)
+		nelURL := base + s.apiBasePath() + "/server/reports/nel"
+		h.Set("Reporting-Endpoints", `default="`+reportURL+`", nel="`+nelURL+`"`)
+		h.Add("Report-To", `{"group":"default","max_age":10886400,"endpoints":[{"url":"`+reportURL+`"}]}`)
+		h.Add("Report-To", `{"group":"nel","max_age":10886400,"endpoints":[{"url":"`+nelURL+`"}]}`)
+		if web.Headers.NEL.Enabled {
+			maxAge := web.Headers.NEL.MaxAgeSeconds
+			if maxAge <= 0 {
+				maxAge = 2592000
+			}
+			includeSubdomains := "false"
+			if web.Headers.NEL.IncludeSubdomains {
+				includeSubdomains = "true"
+			}
+			sampleRate := web.Headers.NEL.SampleRate
+			if sampleRate < 0 {
+				sampleRate = 0
+			}
+			if sampleRate > 1 {
+				sampleRate = 1
+			}
+			h.Set("NEL", fmt.Sprintf(`{"report_to":"nel","max_age":%d,"include_subdomains":%s,"failure_fraction":%g}`, maxAge, includeSubdomains, sampleRate))
+		}
 
-		if tlsActive && !s.isTorRequest(r) {
-			h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		if tlsActive && !s.isTorRequest(r) && web.HSTS.Enabled && web.HSTS.MaxAgeSeconds > 0 {
+			value := fmt.Sprintf("max-age=%d", web.HSTS.MaxAgeSeconds)
+			if web.HSTS.IncludeSubdomains {
+				value += "; includeSubDomains"
+			}
+			if web.HSTS.Preload {
+				value += "; preload"
+			}
+			h.Set("Strict-Transport-Security", value)
 		}
 
 		next.ServeHTTP(w, r)

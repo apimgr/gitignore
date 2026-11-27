@@ -30,7 +30,7 @@ func detectShell() string {
 func handleShell(args []string) int {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, cliText("cli.shell.usage"))
-		return 64
+		return 2
 	}
 
 	sub := args[0]
@@ -56,7 +56,7 @@ func handleShell(args []string) int {
 		return 0
 	default:
 		fmt.Fprintln(os.Stderr, cliText("cli.shell.usage"))
-		return 64
+		return 2
 	}
 }
 
@@ -74,7 +74,7 @@ func printShellCompletions(shell, binaryName string) int {
 		fmt.Print(generateServerPowershellCompletions(binaryName))
 	default:
 		fmt.Fprintln(os.Stderr, cliText("cli.error_unsupported_shell", "shell", shell))
-		return 64
+		return 2
 	}
 	return 0
 }
@@ -93,7 +93,7 @@ func printShellInit(shell, binaryName string) int {
 		fmt.Printf("Invoke-Expression (& %s --shell completions powershell)\n", binaryName)
 	default:
 		fmt.Fprintln(os.Stderr, cliText("cli.error_unsupported_shell", "shell", shell))
-		return 64
+		return 2
 	}
 	return 0
 }

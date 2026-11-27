@@ -6,11 +6,17 @@ import (
 	"strings"
 )
 
+func writeJSON(w http.ResponseWriter, value interface{}) {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	_ = encoder.Encode(value)
+}
+
 // writeJSONError writes the unified JSON error envelope (AI.md PART 9/14).
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ok":      false,
 		"error":   code,
 		"message": message,
@@ -32,7 +38,7 @@ func (m *Manager) HandleGetTemplate(w http.ResponseWriter, r *http.Request, name
 	// Check if requesting JSON
 	if strings.Contains(accept, "application/json") || strings.HasSuffix(r.URL.Path, ".json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"ok":   true,
 			"data": tmpl,
 		})
@@ -59,7 +65,7 @@ func (m *Manager) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"ok":    true,
 			"data":  templates,
 			"count": len(templates),
@@ -86,7 +92,7 @@ func (m *Manager) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"ok":    true,
 			"data":  results,
 			"count": len(results),
@@ -128,7 +134,7 @@ func (m *Manager) HandleCombine(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"success":   true,
 			"data":      combined,
 			"templates": names,
@@ -149,7 +155,7 @@ func (m *Manager) HandleCategories(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"ok":    true,
 			"data":  categories,
 			"count": len(categories),
@@ -175,7 +181,7 @@ func (m *Manager) HandleCategoryTemplates(w http.ResponseWriter, r *http.Request
 
 	if strings.Contains(accept, "application/json") {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, map[string]interface{}{
 			"success":  true,
 			"data":     templates,
 			"count":    len(templates),
@@ -198,7 +204,7 @@ func (m *Manager) HandleStats(w http.ResponseWriter, r *http.Request) {
 	stats := m.Stats()
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"ok":   true,
 		"data": stats,
 	})

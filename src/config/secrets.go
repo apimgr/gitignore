@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -131,6 +133,37 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 			generatedKeys = append(generatedKeys, "server.security.encryption_key")
 		}
 	}
+	dnsConfig := cfg.Server.SSL.LetsEncrypt
+	credentialNode := nestedSecretMap(nestedSecretMap(nestedSecretMap(server, "ssl"), "letsencrypt"), "dns_credentials")
+	decryptedCredentials := make(map[string]string, len(credentialNode))
+	for name, rawValue := range credentialNode {
+		value, ok := rawValue.(string)
+		if !ok || strings.TrimSpace(name) == "" {
+			return false, fmt.Errorf("invalid DNS credential entry %q", name)
+		}
+		if strings.HasPrefix(value, "enc:v1:") {
+			value, err = decryptDNSCredential(cfg.Server.Security.EncryptionKey, value)
+			if err != nil {
+				return false, fmt.Errorf("cannot decrypt DNS credential %s", name)
+			}
+		} else if value != "" {
+			encryptedValue, encryptErr := encryptDNSCredential(cfg.Server.Security.EncryptionKey, value)
+			if encryptErr != nil {
+				return false, fmt.Errorf("cannot protect DNS credential %s: %w", name, encryptErr)
+			}
+			credentialNode[name] = encryptedValue
+			secretsChanged = true
+		}
+		decryptedCredentials[name] = value
+	}
+	dnsConfig.DNSCredentials = decryptedCredentials
+	cfg.Server.SSL.LetsEncrypt = dnsConfig
+	letsencrypt := nestedSecretMap(nestedSecretMap(server, "ssl"), "letsencrypt")
+	letsencrypt["dns_credentials"] = credentialNode
+	serverSSL := nestedSecretMap(server, "ssl")
+	serverSSL["letsencrypt"] = letsencrypt
+	server["ssl"] = serverSSL
+	secrets["server"] = server
 	metrics := nestedSecretMap(server, "metrics")
 	metricsAuth := nestedSecretMap(metrics, "auth")
 	metricTokens := nestedSecretMap(metricsAuth, "tokens")
@@ -221,6 +254,54 @@ func loadSensitiveSecrets(cfg *Config, configPath string) (bool, error) {
 	return needsConfigSave && !invalidConfigFiles[configFileCacheKey(secretsPath)], nil
 }
 
+func encryptDNSCredential(keyText, plaintext string) (string, error) {
+	key, err := base64.StdEncoding.DecodeString(keyText)
+	if err != nil || len(key) != 32 {
+		return "", fmt.Errorf("invalid encryption key")
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := cryptorand.Read(nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return "enc:v1:" + base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+func decryptDNSCredential(keyText, encoded string) (string, error) {
+	key, err := base64.StdEncoding.DecodeString(keyText)
+	if err != nil || len(key) != 32 {
+		return "", fmt.Errorf("invalid encryption key")
+	}
+	sealed, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(encoded, "enc:v1:"))
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(sealed) < gcm.NonceSize() {
+		return "", fmt.Errorf("invalid encrypted value")
+	}
+	plaintext, err := gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
 // RotateEncryptionKey atomically persists a replacement encryption key in
 // secrets.yml and advances its monotonic file-backed version.
 func RotateEncryptionKey(configPath, next string) (int, error) {
@@ -244,6 +325,32 @@ func RotateEncryptionKey(configPath, next string) (int, error) {
 	if current == next {
 		return 0, fmt.Errorf("replacement encryption key matches the current key")
 	}
+	ssl := nestedSecretMap(server, "ssl")
+	letsencrypt := nestedSecretMap(ssl, "letsencrypt")
+	credentials := nestedSecretMap(letsencrypt, "dns_credentials")
+	reencrypted := make(map[string]string, len(credentials))
+	for name, rawValue := range credentials {
+		value, ok := rawValue.(string)
+		if !ok {
+			return 0, fmt.Errorf("invalid DNS credential %s", name)
+		}
+		if strings.HasPrefix(value, "enc:v1:") {
+			value, err = decryptDNSCredential(current, value)
+			if err != nil {
+				return 0, fmt.Errorf("cannot decrypt DNS credential %s", name)
+			}
+		}
+		reencrypted[name], err = encryptDNSCredential(next, value)
+		if err != nil {
+			return 0, fmt.Errorf("cannot re-encrypt DNS credential %s: %w", name, err)
+		}
+	}
+	for name, value := range reencrypted {
+		credentials[name] = value
+	}
+	letsencrypt["dns_credentials"] = credentials
+	ssl["letsencrypt"] = letsencrypt
+	server["ssl"] = ssl
 	version := 1
 	switch value := security["encryption_key_version"].(type) {
 	case int:

@@ -114,6 +114,7 @@
       "total_requests": "Solicitudes totales",
       "requests_24h": "Solicitudes (24 horas)",
       "active_connections": "Conexiones activas",
+      "attempts": "Intentos de recuperación",
       "last_checked": "Última comprobación:"
     },
     "feature": {
@@ -304,12 +305,23 @@
     "swagger_description": "Swagger UI - Explorador interactivo de API REST",
     "graphql_description": "Explorador interactivo de GraphQL",
     "tor_access": "Acceso Tor",
+    "tor_summary": "Esta aplicación está disponible como servicio oculto de Tor para ofrecer más privacidad.",
     "onion_address": "Dirección Onion",
     "how_to_connect": "Cómo conectarse",
     "download_tor": "Descargar Tor Browser",
     "open_tor": "Abra Tor Browser y espere a que se conecte",
     "paste_onion": "Copie la dirección onion arriba y péguela en la barra de direcciones de Tor Browser",
-    "tor_privacy": "Usar Tor proporciona privacidad adicional...",
+    "tor_privacy": "Tor oculta tu dirección IP y cifra la conexión al enrutarla por la red Tor.",
+    "i2p_access": "Acceso I2P",
+    "i2p_summary": "Esta aplicación está disponible como eepsite de I2P para ofrecer más privacidad.",
+    "i2p_address": "Dirección I2P",
+    "i2p_how_to_connect": "Cómo conectarse",
+    "i2p_install": "Instala I2P o i2pd y espera a que se integre en la red:",
+    "i2p_download": "Descargar I2P",
+    "i2pd_download": "Descargar i2pd",
+    "i2p_proxy": "Configura el navegador para usar el proxy HTTP de I2P (por defecto, 127.0.0.1:4444).",
+    "i2p_paste": "Copia la dirección .b32.i2p de arriba y pégala en la barra de direcciones del navegador.",
+    "i2p_privacy": "I2P enruta la conexión por la red I2P. Los eepsites usan HTTP; el túnel de I2P cifra el transporte, por lo que este servicio no usa un certificado TLS.",
     "faq": "Preguntas frecuentes",
     "troubleshooting": "Solución de problemas"
   },
@@ -584,7 +596,9 @@
     },
     "common": {
       "from_label": "De",
-      "time_label": "Hora"
+      "time_label": "Hora",
+      "host_label": "Host",
+      "version_label": "Versión"
     },
     "test_prefix": "[PRUEBA]",
     "templates": {
@@ -675,6 +689,25 @@
         "heading": "ACTUALIZACIÓN PREPARADA",
         "staged": "Se preparó una versión y se aplicará al reiniciar el servicio.",
         "version_label": "Versión"
+      },
+      "database_error": {
+        "error_label": "Error",
+        "heading": "PROBLEMA DE CONEXIÓN CON LA BASE DE DATOS",
+        "since_label": "Desde",
+        "subject": "Problema de conexión con la base de datos - {app_name}",
+        "summary": "La aplicación no puede conectarse a su base de datos."
+      },
+      "shutdown": {
+        "heading": "SERVIDOR DETENIDO",
+        "reason_label": "Motivo",
+        "subject": "Servidor detenido - {app_name}",
+        "summary": "El servidor se detuvo correctamente."
+      },
+      "startup": {
+        "heading": "SERVIDOR INICIADO",
+        "mode_label": "Modo",
+        "subject": "Servidor iniciado - {app_name}",
+        "summary": "El servidor se inició correctamente."
       }
     }
   },
@@ -938,7 +971,7 @@
     "running_in_mode_label": "Modo",
     "update_branch_usage": "Establece el canal de actualización: stable, beta o devel (alias: daily, rolling, dev, development)",
     "invalid_update_branch": "Canal de actualización no válido. Canales válidos: stable, beta, devel.",
-    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nInformación:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nIntegración de shell:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nConfiguración del servidor:\n  --mode {production|development} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nComandos del servicio:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nComandos de mantenimiento:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Rotar un secreto del proyecto (requiere token y confirmación)\n\nComandos de actualización:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nComandos del programador:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nComandos de correo electrónico:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
+    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nInformación:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nIntegración de shell:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nConfiguración del servidor:\n  --mode {production|development|debug} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nComandos del servicio:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nComandos de mantenimiento:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Rotar un secreto del proyecto (requiere token y confirmación)\n\nComandos de actualización:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nComandos del programador:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nComandos de correo electrónico:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
     "client": {
       "api": {
         "invalid_url": "URL no válida: {url}",
@@ -1299,6 +1332,8 @@
       "service_stopped": "detenido",
       "set_backup_directory_failed": "Error al establecer el directorio de copias de seguridad: {error}",
       "set_cache_directory_failed": "Error al establecer el directorio de caché: {error}",
+      "invalid_directory_path": "La ruta del directorio {path} no es válida.",
+      "set_database_directory_failed": "Error al establecer el directorio de base de datos: {error}",
       "set_data_directory_failed": "Error al establecer el directorio de datos: {error}",
       "set_log_directory_failed": "Error al establecer el directorio de registros: {error}",
       "setup_complete": "Configuración completada.",
@@ -1925,6 +1960,17 @@
         "analytics_suffix_not_sold": "Los datos analíticos se anonimizan y nunca se venden.",
         "analytics_suffix_sold": "Los datos analíticos pueden compartirse con terceros."
       }
+    },
+    "flash": {
+      "action_completed": "Acción completada.",
+      "announcement_dismissed": "Anuncio descartado.",
+      "consent_required": "Elige una opción de consentimiento de cookies antes de continuar.",
+      "consent_saved": "Se guardó tu elección de consentimiento de cookies.",
+      "contact_sent": "Tu mensaje se ha enviado.",
+      "preferences_saved": "Se guardaron tus preferencias.",
+      "privacy_choice_saved": "Se guardó tu elección de privacidad.",
+      "theme_saved": "Se guardó tu preferencia de tema.",
+      "token_action_completed": "Se completó la acción del token."
     }
   },
   "llms": {

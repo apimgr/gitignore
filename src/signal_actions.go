@@ -30,7 +30,11 @@ const (
 // process-owned file handle to reopen. The acknowledgment is logged so an
 // operator driving a rotation can confirm the signal was delivered.
 func reopenLogs() {
-	log.Println("SIGUSR1: log reopen acknowledged (stderr is rotated by the supervisor)")
+	if err := reopenApplicationLogs(); err != nil {
+		log.Printf("SIGUSR1: failed to reopen log files: %v", err)
+		return
+	}
+	log.Println("SIGUSR1: log files reopened")
 }
 
 // dumpStatus handles the SIGUSR2 "status dump" request (AI.md PART 8) by

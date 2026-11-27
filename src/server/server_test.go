@@ -26,7 +26,7 @@ func TestConfiguredAPIVersionIsUsedByRouterAndDiscovery(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("configured API route status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"api_version":"v9"`) || !strings.Contains(rec.Body.String(), `"/api/v9/list"`) {
+	if !strings.Contains(rec.Body.String(), `"api_version": "v9"`) || !strings.Contains(rec.Body.String(), `"/api/v9/list"`) {
 		t.Errorf("API info did not advertise configured version: %s", rec.Body.String())
 	}
 
@@ -360,7 +360,7 @@ func TestNewBuildsRoutableServer(t *testing.T) {
 		Templates: mgr,
 		Paths:     pm,
 		Version:   "test",
-		Cfg:       &config.Config{},
+		Cfg:       config.DefaultConfig(),
 	})
 	if s == nil {
 		t.Fatal("New returned nil")
@@ -374,6 +374,31 @@ func TestNewBuildsRoutableServer(t *testing.T) {
 	s.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET / = %d, want 200", rec.Code)
+	}
+
+	localized := httptest.NewRecorder()
+	s.router.ServeHTTP(localized, httptest.NewRequest(http.MethodGet, "/server/about?lang=es", nil))
+	if localized.Code != http.StatusOK || !strings.Contains(localized.Body.String(), `lang="es"`) || !strings.Contains(localized.Body.String(), i18n.Translate("es", "web.handler.title.about")) {
+		t.Fatalf("server router did not localize About page: status %d, body %s", localized.Code, localized.Body.String())
+	}
+	for _, cookie := range localized.Result().Cookies() {
+		if cookie.Name == "lang" {
+			t.Fatal("server persisted the language cookie without Preferences consent")
+		}
+	}
+
+	consentedRequest := httptest.NewRequest(http.MethodGet, "/server/about?lang=es", nil)
+	consentedRequest.AddCookie(&http.Cookie{Name: "cookie_consent", Value: encodeConsentCookie([]byte(`{"essential":true,"preferences":true,"timestamp":1800000000}`))})
+	consented := httptest.NewRecorder()
+	s.router.ServeHTTP(consented, consentedRequest)
+	foundLanguageCookie := false
+	for _, cookie := range consented.Result().Cookies() {
+		if cookie.Name == "lang" && cookie.Value == "es" && cookie.MaxAge == 365*24*60*60 {
+			foundLanguageCookie = true
+		}
+	}
+	if !foundLanguageCookie {
+		t.Fatal("server did not persist language selection after Preferences consent")
 	}
 }
 

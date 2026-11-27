@@ -27,6 +27,7 @@ const (
 	schedHealthcheckSelf = "@every 5m"
 	schedTorHealth       = "@every 10m"
 	schedDiskCheck       = "@every 5m"
+	schedDatabaseCheck   = "@every 1m"
 	schedSecurityCleanup = "30 3 * * *"
 	schedHealthRefresh   = "@every 60s"
 	schedKeyserverRetry  = "@every 15m"
@@ -44,6 +45,8 @@ type Deps struct {
 	LogRetentionDays      int
 	SecurityRetentionDays int
 	SSLEnabled            bool
+	SSLRenewal            HandlerFunc
+	LogRotation           HandlerFunc
 	BackupEnabled         bool
 	// BackupDaily / BackupHourly are optional; when nil the tasks skip.
 	BackupDaily  HandlerFunc
@@ -63,6 +66,10 @@ type Deps struct {
 	// DiskCheck checks data, log, and backup volumes and emits low-space events.
 	DiskCheck         HandlerFunc
 	DiskCheckInterval string
+	// DatabaseCheck probes database read/write availability and emits the
+	// configured database_error notification when its failure threshold is met.
+	DatabaseCheck         HandlerFunc
+	DatabaseCheckInterval string
 	// TorInstalled and I2PEnabled bind their health tasks to active modes.
 	TorInstalled            bool
 	I2PEnabled              bool
@@ -92,6 +99,12 @@ func RegisterBuiltins(s *Scheduler, d Deps) error {
 			diskSchedule = "@every " + interval
 		}
 	}
+	databaseSchedule := schedDatabaseCheck
+	if interval := strings.TrimSpace(d.DatabaseCheckInterval); interval != "" {
+		if _, err := time.ParseDuration(interval); err == nil {
+			databaseSchedule = "@every " + interval
+		}
+	}
 
 	tasks := []struct {
 		id, name, schedule string
@@ -109,6 +122,7 @@ func RegisterBuiltins(s *Scheduler, d Deps) error {
 		{"backup_daily", "Backup Daily", schedBackupDaily, true, false, backupHandler(d.BackupEnabled, d.BackupDaily)},
 		{"backup_hourly", "Backup Hourly", schedBackupHourly, true, false, backupHandler(d.BackupEnabled, d.BackupHourly)},
 		{"disk_check", "Disk Space Check", diskSchedule, true, false, requiredHandler("disk_check", d.DiskCheck)},
+		{"database_check", "Database Connection Check", databaseSchedule, true, false, requiredHandler("database_check", d.DatabaseCheck)},
 		{"healthcheck_self", "Health Check", schedHealthcheckSelf, false, false, healthcheckSelfHandler},
 		{"health_registry_refresh", "Health Registry Refresh", schedHealthRefresh, true, false, healthRegistryRefreshHandler(d)},
 		{"ip_block_cleanup", "Temporary IP Block Cleanup", schedIPBlockCleanup, false, false, temporaryIPBlockCleanupHandler(d)},
@@ -295,7 +309,10 @@ func sslRenewalHandler(d Deps) HandlerFunc {
 		if !d.SSLEnabled {
 			return ErrSkipped
 		}
-		return nil
+		if d.SSLRenewal == nil {
+			return errors.New("SSL renewal handler is not configured")
+		}
+		return d.SSLRenewal(ctx)
 	}
 }
 
@@ -338,6 +355,11 @@ func logRotationHandler(d Deps) HandlerFunc {
 	return func(ctx context.Context) error {
 		if d.LogsDir == "" {
 			return ErrSkipped
+		}
+		if d.LogRotation != nil {
+			if err := d.LogRotation(ctx); err != nil {
+				return err
+			}
 		}
 		if err := audit.Rotate(d.LogsDir, d.AuditRetention, d.AuditCompress); err != nil {
 			return err

@@ -147,7 +147,10 @@ func notifySecurityResearcher(cfg *config.Config, report db.SecurityReport) erro
 	}
 	plaintext, err := server.DecryptSecurityReport(cfg.Server.Security.EncryptionKey, ciphertext)
 	if err != nil {
-		return err
+		plaintext, _, err = db.DecryptSecurityReportDuringRotation(report.TrackingID, "contact_enc", ciphertext, cfg.Server.Security.EncryptionKey)
+		if err != nil {
+			return err
+		}
 	}
 	var contact securityReportContact
 	if err := json.Unmarshal(plaintext, &contact); err != nil {

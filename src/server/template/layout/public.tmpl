@@ -1,0 +1,26 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="{{.Lang}}" dir="{{.Dir}}" class="theme-{{.Theme}}">
+{{template "head" .}}
+<body data-update-available="{{t .Lang "notifications.update_available"}}" data-update-now="{{t .Lang "common.update"}}" data-update-later="{{t .Lang "common.close"}}" data-recovery-title="{{t .Lang "pwa.recovery.title"}}" data-recovery-message="{{t .Lang "pwa.recovery.message"}}" data-toast-position="{{.ToastPosition}}" data-toast-duration="{{.ToastDuration}}" data-toast-warning-duration="{{.ToastWarningDuration}}" data-toast-dismiss="{{.ToastDismissText}}">
+<a class="skip-link" href="#main-content">{{t .Lang "nav.skip_to_content"}}</a>
+<a class="skip-link" href="#navigation">{{t .Lang "nav.skip_to_navigation"}}</a>
+{{if .Consent.Show}}<aside id="cookie-consent" class="cookie-banner" data-sold="{{.Consent.DataSold}}" aria-label="{{t .Lang "nav.privacy"}}"><div class="cookie-banner-content"><span class="cookie-message">{{.Consent.Message}} - <a class="policy-link" href="{{path .Consent.PolicyURL}}">{{.Consent.PolicyText}}</a></span><div class="cookie-buttons"><form method="post" action="{{path "/server/consent"}}"><input type="hidden" name="csrf_token" value="{{.Consent.CSRFToken}}"><input type="hidden" name="redirect" value="{{.Path}}"><input type="hidden" name="choice" value="decline"><button class="btn-decline" type="submit">{{.Consent.DeclineText}}</button></form><form method="post" action="{{path "/server/consent"}}"><input type="hidden" name="csrf_token" value="{{.Consent.CSRFToken}}"><input type="hidden" name="redirect" value="{{.Path}}"><input type="hidden" name="choice" value="accept"><button class="btn-accept" type="submit">{{.Consent.AcceptText}}</button></form><a class="policy-link" href="{{path "/server/preferences"}}">{{.Consent.ManageText}}</a></div></div></aside>{{end}}
+{{range .Announcements}}<aside class="site-banner site-banner-{{.Type}}" role="{{if or (eq .Type "warning") (eq .Type "error")}}alert{{else}}status{{end}}" data-announcement-id="{{.ID}}">
+<span class="site-banner-icon" aria-hidden="true">{{.Icon}}</span>
+<span class="site-banner-text">{{if .Title}}<strong>{{.Title}}: </strong>{{end}}{{.Message}}</span>
+{{if and .Dismissible (not $.SuppressAnnouncementDismiss)}}<form method="post" action="{{path "/announcements/dismiss"}}" class="site-banner-dismiss">
+<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+<input type="hidden" name="id" value="{{.ID}}">
+<input type="hidden" name="return_to" value="{{$.Path}}">
+<button type="submit" class="site-banner-close" aria-label="{{t $.Lang "announcements.dismiss"}}">×</button>
+</form>{{end}}</aside>{{end}}
+{{template "toast" .}}
+{{if .FlashKey}}<div class="flash-message flash-{{.FlashType}}" data-type="{{.FlashType}}" role="{{if or (eq .FlashType "warning") (eq .FlashType "error")}}alert{{else}}status{{end}}">{{t .Lang .FlashKey}}</div>{{end}}
+{{.TrackingNoscript}}
+{{template "header" .}}
+<main id="main-content">{{template "content" .}}</main>
+{{template "mobile-nav" .}}
+{{template "footer" .}}
+{{template "scripts" .}}
+</body>
+</html>{{end}}

@@ -7,6 +7,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
+func TestSetCacheSnapshotUsesOnlyBoundedLabels(t *testing.T) {
+	m := New(Options{})
+	m.SetCacheSnapshot("rate_limit", 4, 128)
+	if got := testutil.ToFloat64(m.CacheSize.WithLabelValues("rate_limit")); got != 4 {
+		t.Fatalf("rate_limit cache size = %v, want 4", got)
+	}
+	if got := testutil.ToFloat64(m.CacheBytes.WithLabelValues("rate_limit")); got != 128 {
+		t.Fatalf("rate_limit cache bytes = %v, want 128", got)
+	}
+	m.SetCacheSnapshot("unbounded-user-key", 10, 1000)
+	if got := testutil.ToFloat64(m.CacheSize.WithLabelValues("remote_db")); got != 0 {
+		t.Fatalf("unknown cache label altered remote_db size: %v", got)
+	}
+}
+
 // TestNewRegistersMandatedMetrics verifies the mandated metric families are
 // registered with the correct gitignore_ prefix and Prometheus types.
 func TestNewRegistersMandatedMetrics(t *testing.T) {

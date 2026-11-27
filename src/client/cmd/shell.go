@@ -24,7 +24,7 @@ func DetectShell() string {
 func HandleShell(args []string) int {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, text("cli.client.shell.usage"))
-		return 64
+		return 2
 	}
 
 	sub := args[0]
@@ -47,7 +47,7 @@ func HandleShell(args []string) int {
 		return 0
 	default:
 		fmt.Fprintln(os.Stderr, text("cli.client.shell.usage"))
-		return 64
+		return 2
 	}
 }
 
@@ -65,7 +65,7 @@ func printCompletions(shell, binaryName string) int {
 		fmt.Print(generatePowershellCompletions(binaryName))
 	default:
 		fmt.Fprintln(os.Stderr, text("cli.client.shell.unsupported", "shell", shell))
-		return 64
+		return 2
 	}
 	return 0
 }
@@ -84,7 +84,7 @@ func printInit(shell, binaryName string) int {
 		fmt.Printf("Invoke-Expression (& %s --shell completions powershell)\n", binaryName)
 	default:
 		fmt.Fprintln(os.Stderr, text("cli.client.shell.unsupported", "shell", shell))
-		return 64
+		return 2
 	}
 	return 0
 }
@@ -100,7 +100,7 @@ func generateBashCompletions(bin string) string {
 		COMPREPLY=( $(compgen -W "%[2]s" -- "$cur") )
 		return 0
 	fi
-	COMPREPLY=( $(compgen -W "--help --version --server --config --output --color --debug --lang" -- "$cur") )
+	COMPREPLY=( $(compgen -W "--help --version --update --server --config --output --color --debug --lang" -- "$cur") )
 }
 complete -F _%[1]s_completions %[1]s
 `, bin, words)
@@ -125,6 +125,7 @@ func generateFishCompletions(bin string) string {
 	}
 	b = append(b, []byte(fmt.Sprintf("complete -c %s -l help -d '%s'\n", bin, fishSingleQuote(text("cli.client.help_label"))))...)
 	b = append(b, []byte(fmt.Sprintf("complete -c %s -l version -d '%s'\n", bin, fishSingleQuote(text("cli.client.version_label"))))...)
+	b = append(b, []byte(fmt.Sprintf("complete -c %s -l update -xa 'check yes'\n", bin))...)
 	return string(b)
 }
 

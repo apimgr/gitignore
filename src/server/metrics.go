@@ -62,14 +62,6 @@ func (rw *metricsResponseWriter) Write(b []byte) (int, error) {
 // path label to keep cardinality bounded.
 func (s *Server) metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Track public-safe aggregate request stats for /server/healthz
-		// (AI.md PART 13 "stats") regardless of whether Prometheus metrics
-		// are enabled.
-		if s.stats != nil {
-			done := s.stats.begin(time.Now())
-			defer done()
-		}
-
 		if s.metrics == nil {
 			next.ServeHTTP(w, r)
 			return
@@ -125,14 +117,15 @@ func (s *Server) metricsServiceHandler(service string) http.Handler {
 		}
 		switch service {
 		case "prometheus":
+			s.refreshCacheMetrics()
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 			promhttp.HandlerFor(s.metrics.Registry(), promhttp.HandlerOpts{}).ServeHTTP(w, r)
 		case "grafana":
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_ = json.NewEncoder(w).Encode(grafanaDashboard())
+			_ = encodeJSON(w, grafanaDashboard())
 		case "loki":
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_ = json.NewEncoder(w).Encode(s.lokiStreams(cfg))
+			_ = encodeJSON(w, s.lokiStreams(cfg))
 		default:
 			http.NotFound(w, r)
 		}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestParseBool(t *testing.T) {
@@ -46,6 +48,29 @@ func TestParseBool(t *testing.T) {
 				t.Errorf("ParseBool(%q, %v) = %v, want %v", tc.in, tc.defaultVal, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMaintenanceRetryIntervalAcceptsDurationAndLegacySeconds(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  RetryInterval
+	}{
+		{"30s", 30},
+		{"2m", 120},
+		{"45", 45},
+	} {
+		var cfg struct {
+			Server struct {
+				Maintenance MaintenanceConfig `yaml:"maintenance"`
+			} `yaml:"server"`
+		}
+		if err := yaml.Unmarshal([]byte("server:\n  maintenance:\n    self_healing:\n      retry_interval: "+tc.value+"\n"), &cfg); err != nil {
+			t.Fatalf("unmarshal retry_interval %q: %v", tc.value, err)
+		}
+		if got := cfg.Server.Maintenance.SelfHealing.RetryInterval; got != tc.want {
+			t.Errorf("retry_interval %q = %d, want %d seconds", tc.value, got, tc.want)
+		}
 	}
 }
 
@@ -133,6 +158,32 @@ func TestLoadInvalidUpdateBranchUsesDefaultAndTracksSourceLine(t *testing.T) {
 	}
 	if location := configValueLocations["server.update.branch"]; location.file != "maintenance.yml" || location.line != 4 {
 		t.Fatalf("invalid branch location = %#v, want maintenance.yml:4", location)
+	}
+}
+
+func TestMaintenanceAreaLoadsCLIDistributionSettings(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "server.yml")
+	if err := os.WriteFile(path, []byte("server: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	areaDir := filepath.Join(directory, "yaml.d")
+	if err := os.MkdirAll(areaDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	area := "server:\n  update:\n    cli_min_version: 1.2.3\ncli:\n  binary_download:\n    dir: /srv/gitignore/cli\n    require_auth: true\n"
+	if err := os.WriteFile(filepath.Join(areaDir, "maintenance.yml"), []byte(area), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Update.CLIMinVersion != "1.2.3" {
+		t.Errorf("CLI minimum version = %q", cfg.Server.Update.CLIMinVersion)
+	}
+	if cfg.CLI.BinaryDownload.Dir != "/srv/gitignore/cli" || !cfg.CLI.BinaryDownload.RequireAuth {
+		t.Errorf("CLI binary download config = %+v", cfg.CLI.BinaryDownload)
 	}
 }
 
@@ -247,19 +298,6 @@ func TestApplyYAMLConfigFileDecodesInlineAuditLogFields(t *testing.T) {
 	}
 }
 
-func TestMustParseBool(t *testing.T) {
-	if got := MustParseBool("true", false); got != true {
-		t.Errorf("MustParseBool(true) = %v", got)
-	}
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("MustParseBool(invalid) should panic")
-		}
-	}()
-	MustParseBool("not-a-bool", false)
-}
-
 func TestIsTruthy(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -276,6 +314,38 @@ func TestIsTruthy(t *testing.T) {
 		if got := IsTruthy(tc.in); got != tc.want {
 			t.Errorf("IsTruthy(%q) = %v, want %v", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestApplyI2PEnvironmentUsesExtendedBooleanValues(t *testing.T) {
+	t.Setenv("I2P_ENABLED", "affirmative")
+	cfg := DefaultConfig()
+	if err := applyI2PEnvironment(cfg); err != nil {
+		t.Fatalf("applyI2PEnvironment: %v", err)
+	}
+	if !cfg.Server.I2P.Enabled {
+		t.Fatal("affirmative I2P_ENABLED value was not accepted")
+	}
+}
+
+func TestI2PExposeDefaultsFalseAndRoundTrips(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Server.I2P.Expose {
+		t.Fatal("I2P expose default must be false")
+	}
+	encoded, err := yaml.Marshal(cfg.Server.I2P)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "expose: false") {
+		t.Fatalf("I2P expose missing from serialized config: %s", encoded)
+	}
+	var parsed I2PConfig
+	if err := yaml.Unmarshal([]byte("expose: true\n"), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if !parsed.Expose {
+		t.Fatal("I2P expose setting did not deserialize")
 	}
 }
 
@@ -483,6 +553,9 @@ func TestDefaultNotificationsConfigStructure(t *testing.T) {
 	n := DefaultNotificationsConfig()
 	if n.Email.SMTP.Port == 0 {
 		t.Error("expected non-zero default SMTP port")
+	}
+	if n.WebUI.Position != "top-right" || n.WebUI.Duration != 3 || n.WebUI.WarningDuration != 5 {
+		t.Fatalf("WebUI toast defaults = %+v, want top-right, 3 seconds and 5 seconds", n.WebUI)
 	}
 }
 
@@ -760,6 +833,139 @@ func TestLoadPreservesLegacySchedulerAndLogSettings(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyContentAndObsoleteKeys(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "server.yml")
+	data := []byte("server:\n  branding:\n    footer_text: '<unsafe & text>'\n  pages:\n    about:\n      content: '# About'\n  security_headers:\n    hsts: true\n    hsts_max_age: 3600\n    frame_options: DENY\n  security:\n    headers:\n      clear_site_data:\n        enabled: true\n      obsolete: true\n  rate_limit:\n    enabled: false\nweb:\n  footer:\n    custom_html: '<b>new footer</b>'\n  llms:\n    enabled: false\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateLegacyServerConfig(path); err != nil {
+		t.Fatalf("migrate legacy config: %v", err)
+	}
+	migrated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(migrated, &document); err != nil {
+		t.Fatalf("parse migrated config: %v", err)
+	}
+	root := document.Content[0]
+	footer := mappingConfigPath(root, []string{"server", "branding", "content", "footer"})
+	footerFormat, footerBody := mappingValue(footer, "format"), mappingValue(footer, "body")
+	if footer == nil || footerFormat == nil || footerBody == nil || footerFormat.Value != "html" || footerBody.Value != "<b>new footer</b>" {
+		t.Fatalf("footer migration = %#v, want existing canonical destination to win", footer)
+	}
+	about := mappingConfigPath(root, []string{"server", "branding", "content", "about"})
+	aboutFormat, aboutBody := mappingValue(about, "format"), mappingValue(about, "body")
+	if about == nil || aboutFormat == nil || aboutBody == nil || aboutFormat.Value != "md" || aboutBody.Value != "# About" {
+		t.Fatalf("about page migration = %#v", about)
+	}
+	if mappingConfigPath(root, []string{"web", "llms", "enabled"}) != nil || mappingConfigPath(root, []string{"server", "rate_limit", "enabled"}) != nil {
+		t.Fatal("obsolete config keys were retained")
+	}
+	if mappingConfigPath(root, []string{"web", "hsts", "enabled"}) == nil || mappingConfigPath(root, []string{"web", "hsts", "max_age_seconds"}) == nil {
+		t.Fatal("security header values were not moved to canonical paths")
+	}
+	if mappingConfigPath(root, []string{"web", "headers", "clear_site_data", "enabled"}) == nil {
+		t.Fatal("clear_site_data was not preserved at its canonical path")
+	}
+	if mappingConfigPath(root, []string{"server", "security", "headers", "obsolete"}) != nil || mappingConfigPath(root, []string{"server", "security_headers", "frame_options"}) != nil {
+		t.Fatal("obsolete security header keys were retained")
+	}
+}
+
+func TestMigrateLegacySchedulerTasksRemovesUnknownAndDefaultValues(t *testing.T) {
+	var document yaml.Node
+	data := []byte("server:\n  scheduler:\n    tasks:\n      geoip_update:\n        enabled: true\n        schedule: '0 3 * * 0'\n        retry_on_fail: true\n        retry_delay: 1h\n        retention: 5\n      backup_hourly:\n        enabled: false\n        schedule: '@hourly'\n      custom_task:\n        enabled: true\n        retry_delay: 5m\n        retention: 3\n")
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	if !migrateLegacyKeys(document.Content[0]) {
+		t.Fatal("expected scheduler task migration to change the document")
+	}
+	tasks := mappingConfigPath(document.Content[0], []string{"server", "scheduler", "tasks"})
+	if mappingValue(tasks, "geoip_update") != nil || mappingValue(tasks, "backup_hourly") != nil {
+		t.Fatal("built-in tasks with default settings should be omitted")
+	}
+	custom := mappingValue(tasks, "custom_task")
+	if custom == nil || mappingValue(custom, "retention") != nil || mappingValue(custom, "retry_delay").Value != "5m" {
+		t.Fatalf("custom task keys = %#v", custom)
+	}
+}
+
+func TestMigrateLegacyDualPortAndSEOEmptyDestinations(t *testing.T) {
+	var document yaml.Node
+	data := []byte("server:\n  port: 8080\n  https_port: 8443\n  seo:\n    og_image: ''\n    opengraph:\n      image: https://example.test/image.png\n    twitter_handle: ''\n    twitter:\n      site: '@example'\n")
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	if !migrateLegacyKeys(document.Content[0]) {
+		t.Fatal("expected legacy port and SEO migration")
+	}
+	root := document.Content[0]
+	port := mappingConfigPath(root, []string{"server", "port"})
+	if port == nil || port.Value != "8080,8443" || port.Tag != "!!str" || port.Style&yaml.DoubleQuotedStyle == 0 {
+		t.Fatalf("migrated port = %#v", port)
+	}
+	seo := mappingConfigPath(root, []string{"server", "seo"})
+	if mappingValue(seo, "og_image").Value != "https://example.test/image.png" || mappingValue(seo, "twitter_handle").Value != "@example" {
+		t.Fatalf("SEO values were not filled from legacy empty destinations: %#v", seo)
+	}
+	if mappingConfigPath(root, []string{"server", "https_port"}) != nil || mappingConfigPath(root, []string{"server", "seo", "opengraph"}) != nil || mappingConfigPath(root, []string{"server", "seo", "twitter"}) != nil {
+		t.Fatal("legacy port or SEO paths remain")
+	}
+}
+
+func TestLegacySecretMigrationStagesValuesAndRemovesOnlyAfterImport(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "server.yml")
+	data := []byte("server:\n  security:\n    installation_secret: a2V5\n  token: operator-token\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	securityArea := filepath.Join(directory, "yaml.d", "security.yml")
+	if err := os.MkdirAll(filepath.Dir(securityArea), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	areaData := []byte("server:\n  security:\n    installation_secret_previous_expires: 2030-01-01T00:00:00Z\n    encryption_key_previous: cHJldmlvdXM=\n")
+	if err := os.WriteFile(securityArea, areaData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secrets := extractLegacySecretsFromConfig(path)
+	if secrets["installation_secret"] != "a2V5" || secrets["installation_secret_previous_until"] != "2030-01-01T00:00:00Z" || secrets["encryption_key_previous"] != "cHJldmlvdXM=" {
+		t.Fatalf("legacy secrets = %#v", secrets)
+	}
+	if err := CompleteLegacySecretMigration(path); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(migrated), "installation_secret") || strings.Contains(string(migrated), "encryption_key_previous") {
+		t.Fatalf("legacy secret keys remain after completion: %s", migrated)
+	}
+	if !strings.Contains(string(migrated), "operator-token") {
+		t.Fatal("unrelated operator token setting was removed")
+	}
+	areaMigrated, err := os.ReadFile(securityArea)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(areaMigrated), "installation_secret") || strings.Contains(string(areaMigrated), "encryption_key_previous") {
+		t.Fatalf("legacy secret keys remain in security area after completion: %s", areaMigrated)
+	}
+	backup, err := os.ReadFile(path + ".bak")
+	if err != nil || !strings.Contains(string(backup), "installation_secret") {
+		t.Fatalf("legacy secret backup missing or incomplete: %v", err)
+	}
+	if _, err := os.Stat(securityArea + ".bak"); err != nil {
+		t.Fatalf("security area secret backup missing: %v", err)
+	}
+}
+
 func TestSaveWithoutLoadedConfigReturnsError(t *testing.T) {
 	mu.Lock()
 	current = nil
@@ -811,5 +1017,141 @@ func TestUpdateAppliesAndSaves(t *testing.T) {
 	}
 	if reloaded.Server.Branding.Title != "Updated Title" {
 		t.Errorf("reloaded title = %q, want persisted Updated Title", reloaded.Server.Branding.Title)
+	}
+}
+
+func TestValidateTorConfigUsesSpecifiedRanges(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		startupTimeout int
+		introPoints    int
+		wantTimeout    int
+		wantIntro      int
+	}{
+		{name: "minimums", startupTimeout: 10, introPoints: 3, wantTimeout: 10, wantIntro: 3},
+		{name: "maximums", startupTimeout: 300, introPoints: 10, wantTimeout: 300, wantIntro: 10},
+		{name: "below minimums", startupTimeout: 9, introPoints: 2, wantTimeout: 60, wantIntro: 3},
+		{name: "above maximums", startupTimeout: 301, introPoints: 11, wantTimeout: 60, wantIntro: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Server.Tor.StartupTimeout = tc.startupTimeout
+			cfg.Server.Tor.NumIntroPoints = tc.introPoints
+			validateTorConfig(cfg)
+			if cfg.Server.Tor.StartupTimeout != tc.wantTimeout {
+				t.Errorf("startup_timeout = %d, want %d", cfg.Server.Tor.StartupTimeout, tc.wantTimeout)
+			}
+			if cfg.Server.Tor.NumIntroPoints != tc.wantIntro {
+				t.Errorf("num_intro_points = %d, want %d", cfg.Server.Tor.NumIntroPoints, tc.wantIntro)
+			}
+		})
+	}
+}
+
+func TestValidateDebugConfigRangesAndByteSize(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.Debug.MaxBodyLogSize = "invalid"
+	cfg.Server.Debug.BlockProfileRate = -1
+	cfg.Server.Debug.MutexProfileFraction = -1
+	validateDebugConfig(cfg)
+	if cfg.Server.Debug.MaxBodyLogSize != "10KB" || cfg.Server.Debug.BlockProfileRate != 1 || cfg.Server.Debug.MutexProfileFraction != 1 {
+		t.Fatalf("invalid debug settings were not reset to defaults: %+v", cfg.Server.Debug)
+	}
+}
+
+func TestValidateLoggingConfigAcceptsLevelsAndResetsInvalid(t *testing.T) {
+	for _, level := range []string{"", "debug", "info", "warn", "error"} {
+		cfg := DefaultConfig()
+		cfg.Server.Logging.Level = level
+		validateLoggingConfig(cfg)
+		if cfg.Server.Logging.Level != level {
+			t.Errorf("level %q changed to %q", level, cfg.Server.Logging.Level)
+		}
+	}
+	cfg := DefaultConfig()
+	cfg.Server.Logging.Level = "verbose"
+	validateLoggingConfig(cfg)
+	if cfg.Server.Logging.Level != "" {
+		t.Fatalf("invalid level fallback = %q, want empty mode default", cfg.Server.Logging.Level)
+	}
+	cfg = DefaultConfig()
+	cfg.Server.Logging.Access.Format = "yaml"
+	cfg.Server.Logging.Access.Rotate = "daily,invalid"
+	cfg.Server.Logging.Audit.Format = "text"
+	cfg.Server.Logging.Error.Filename = "../error.log"
+	validateLoggingConfig(cfg)
+	defaults := DefaultConfig().Server.Logging
+	if cfg.Server.Logging.Access.Format != defaults.Access.Format || cfg.Server.Logging.Access.Rotate != "" || cfg.Server.Logging.Audit.Format != "json" || cfg.Server.Logging.Error.Filename != "" {
+		t.Fatalf("invalid per-kind log settings not reset: %+v", cfg.Server.Logging)
+	}
+	cfg = DefaultConfig()
+	cfg.Server.Logging.Access.Format = "custom"
+	cfg.Server.Logging.Access.Custom = "{remote_ip} {unknown}"
+	validateLoggingConfig(cfg)
+	if cfg.Server.Logging.Access.Format != defaults.Access.Format {
+		t.Fatalf("invalid custom log variable format = %q", cfg.Server.Logging.Access.Format)
+	}
+}
+
+func TestDatabaseErrorNotificationDefaultsValidationAndSerialization(t *testing.T) {
+	cfg := DefaultConfig()
+	settings := cfg.Server.Notifications.DatabaseError
+	if !settings.Enabled || settings.Failures != 3 || settings.CheckInterval != "1m" || settings.Repeat != "24h" {
+		t.Fatalf("database_error defaults = %+v", settings)
+	}
+	if !cfg.Server.Notifications.Email.Events.DatabaseError {
+		t.Fatal("database_error email event should default enabled")
+	}
+	cfg.Server.Notifications.DatabaseError.Failures = 0
+	cfg.Server.Notifications.DatabaseError.CheckInterval = "0s"
+	cfg.Server.Notifications.DatabaseError.Repeat = "invalid"
+	validateNotificationsConfig(cfg)
+	settings = cfg.Server.Notifications.DatabaseError
+	if settings.Failures != 3 || settings.CheckInterval != "1m" || settings.Repeat != "24h" {
+		t.Fatalf("invalid database_error settings were not reset: %+v", settings)
+	}
+	serialized := generateNotificationsYAML(cfg)
+	for _, expected := range []string{"database_error: true", "enabled: true", "failures: 3", "check_interval: 1m", "repeat: 24h"} {
+		if !strings.Contains(serialized, expected) {
+			t.Errorf("generated notifications YAML missing %q", expected)
+		}
+	}
+}
+
+func TestValidateWebUINotificationDurations(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Server.Notifications.WebUI.Duration = -1
+	cfg.Server.Notifications.WebUI.WarningDuration = -1
+	validateNotificationsConfig(cfg)
+	if cfg.Server.Notifications.WebUI.Duration != 3 || cfg.Server.Notifications.WebUI.WarningDuration != 5 {
+		t.Fatalf("invalid WebUI toast durations were not reset: %+v", cfg.Server.Notifications.WebUI)
+	}
+	cfg.Server.Notifications.WebUI.Duration = 0
+	cfg.Server.Notifications.WebUI.WarningDuration = 0
+	validateNotificationsConfig(cfg)
+	if cfg.Server.Notifications.WebUI.Duration != 0 || cfg.Server.Notifications.WebUI.WarningDuration != 0 {
+		t.Fatalf("zero durations should select manual dismissal: %+v", cfg.Server.Notifications.WebUI)
+	}
+	serialized := generateNotificationsYAML(cfg)
+	for _, expected := range []string{"duration: 0", "warning_duration: 0"} {
+		if !strings.Contains(serialized, expected) {
+			t.Errorf("generated notifications YAML missing %q", expected)
+		}
+	}
+}
+
+func TestIsConfigValueSetDistinguishesExplicitValuesFromDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yml")
+	if err := os.WriteFile(path, []byte("server:\n  mode: development\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if !IsConfigValueSet("server.mode") {
+		t.Fatal("explicit server.mode was not reported as set")
+	}
+	if IsConfigValueSet("server.port") {
+		t.Fatal("default server.port was reported as explicitly set")
 	}
 }

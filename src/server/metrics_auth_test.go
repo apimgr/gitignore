@@ -107,7 +107,7 @@ func TestMetricsServicesUseIndependentBearerTokens(t *testing.T) {
 					t.Fatal("Grafana service did not return a dashboard JSON document")
 				}
 			case "loki":
-				if !strings.Contains(response.Header().Get("Content-Type"), "application/json") || !strings.Contains(response.Body.String(), `"streams":[]`) {
+				if !strings.Contains(response.Header().Get("Content-Type"), "application/json") || !strings.Contains(response.Body.String(), `"streams": []`) {
 					t.Fatal("Loki service did not return the streams response")
 				}
 			}

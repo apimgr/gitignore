@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -148,26 +149,26 @@ func initEmail(cfg *config.Config, configDir, dataDir string, i2pStatus func() s
 			e.SMTP.Host = host
 			e.SMTP.Port = port
 			e.Enabled = true
-			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_detected", "host", host, "port", e.SMTP.Port))
+			log.Printf("%s", emailText(cfg.Server.I18n.DefaultLanguage, "smtp_detected", "host", host, "port", e.SMTP.Port))
 			// Persist the detected host so future startups skip detection.
 			if err := config.Update(func(c *config.Config) {
 				c.Server.Notifications.Email.SMTP.Host = host
 				c.Server.Notifications.Email.SMTP.Port = port
 			}); err != nil {
-				fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_persist_failed", "error", err))
+				log.Printf("%s", emailText(cfg.Server.I18n.DefaultLanguage, "smtp_persist_failed", "error", err))
 			}
 		} else {
 			e.Enabled = false
-			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_not_detected"))
+			log.Printf("%s", emailText(cfg.Server.I18n.DefaultLanguage, "smtp_not_detected"))
 		}
 	} else {
 		// Test the configured connection.
 		if err := email.TestConnection(e.SMTP.Host, e.SMTP.Port, e.SMTP.TLS); err != nil {
 			e.Enabled = false
-			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_connection_failed", "host", e.SMTP.Host, "port", e.SMTP.Port, "error", err))
+			log.Printf("%s", emailText(cfg.Server.I18n.DefaultLanguage, "smtp_connection_failed", "host", e.SMTP.Host, "port", e.SMTP.Port, "error", err))
 		} else {
 			e.Enabled = true
-			fmt.Println(emailText(cfg.Server.I18n.DefaultLanguage, "smtp_connected", "host", e.SMTP.Host, "port", e.SMTP.Port))
+			log.Printf("%s", emailText(cfg.Server.I18n.DefaultLanguage, "smtp_connected", "host", e.SMTP.Host, "port", e.SMTP.Port))
 		}
 	}
 
@@ -181,10 +182,10 @@ func initEmail(cfg *config.Config, configDir, dataDir string, i2pStatus func() s
 			recipient: notifyRecipient(cfg, sender),
 			i2pStatus: i2pStatus,
 		}
-		fmt.Println("email.configured=true")
+		log.Printf("email.configured=true")
 	} else {
 		notifier = nil
-		fmt.Println("email.configured=false")
+		log.Printf("email.configured=false")
 	}
 }
 
@@ -297,6 +298,63 @@ func emitDiskLow(path string, usedPercent float64, freeBytes uint64, thresholdPe
 	})
 }
 
+// emitDatabaseError sends the database_error email after the configured probe threshold.
+func emitDatabaseError(errMsg string, since time.Time) {
+	if notifier == nil {
+		return
+	}
+	notifier.emit("database_error", notifier.cfg.Server.Notifications.Email.Events.DatabaseError, map[string]string{
+		"error": errMsg,
+		"since": since.UTC().Format(time.RFC3339),
+	})
+}
+
+// emitLifecycleEmail records every lifecycle transition and delivers its
+// optional operator email without holding up listener readiness or shutdown.
+func emitLifecycleEmail(event, reason string, wait time.Duration) {
+	if event == "startup" {
+		log.Printf("INFO Server started")
+	} else {
+		log.Printf("INFO Server stopped")
+	}
+	if notifier == nil {
+		return
+	}
+	enabled := false
+	if event == "startup" {
+		enabled = notifier.cfg.Server.Notifications.Email.Events.Startup
+	} else if event == "shutdown" {
+		enabled = notifier.cfg.Server.Notifications.Email.Events.Shutdown
+	}
+	if !enabled || !notifier.sender.CanSend() {
+		return
+	}
+	hostname, _ := os.Hostname()
+	appMode := notifier.cfg.Server.Mode
+	if appMode == "" {
+		appMode = "production"
+	}
+	extra := map[string]string{"version": Version, "hostname": hostname, "mode": appMode}
+	if event == "shutdown" {
+		extra["reason"] = reason
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		notifier.emit(event, true, extra)
+	}()
+	if wait <= 0 {
+		return
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		log.Printf("WARN %s notification exceeded its %s delivery limit", event, wait)
+	}
+}
+
 // emitUpdateAvailable sends the update_available email when the update_check
 // task first sees a newer eligible release (opt-in, default off; AI.md PART 22).
 func emitUpdateAvailable(currentVersion, newVersion string) {
@@ -344,9 +402,10 @@ func emitUpdateStaged(version string) {
 // notification, so the generic scheduler_error is suppressed for them (AI.md
 // PART 17 suppression rules). Backup and SSL-renewal tasks are covered.
 var suppressSchedulerError = map[string]bool{
-	"backup_daily":  true,
-	"backup_hourly": true,
-	"ssl_renewal":   true,
+	"backup_daily":   true,
+	"backup_hourly":  true,
+	"database_check": true,
+	"ssl_renewal":    true,
 }
 
 // emitSchedulerError sends the scheduler_error email for a failed task, unless

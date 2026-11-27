@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"runtime"
@@ -233,15 +234,23 @@ func CleanupExpiredTokens() (int64, error) {
 // Ping verifies the database connection is reachable (AI.md PART 18
 // healthcheck_self task).
 func Ping() error {
-	mu.RLock()
-	defer mu.RUnlock()
-	if conn == nil {
-		return fmt.Errorf("database is not initialized")
-	}
-
 	ctx, cancel := readCtx()
 	defer cancel()
-	return readConn.PingContext(ctx)
+	return PingContext(ctx)
+}
+
+// PingContext performs a bounded trivial read against the read handle.
+func PingContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("database ping requires a context")
+	}
+	mu.RLock()
+	reader := readConn
+	mu.RUnlock()
+	if reader == nil {
+		return fmt.Errorf("database is not initialized")
+	}
+	return reader.QueryRowContext(ctx, `SELECT 1`).Scan(new(int))
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.

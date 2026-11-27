@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	htmltemplate "html/template"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,27 +31,39 @@ import (
 type HealthResponse struct {
 	Project ProjectInfo `json:"project"`
 
-	Status         string   `json:"status"`
-	PendingRestart bool     `json:"pending_restart,omitempty"`
-	RestartReason  []string `json:"restart_reason,omitempty"`
+	Status         string             `json:"status"`
+	PendingRestart bool               `json:"pending_restart,omitempty"`
+	RestartReason  []string           `json:"restart_reason,omitempty"`
+	Maintenance    *MaintenanceHealth `json:"maintenance,omitempty"`
 
 	Version   string    `json:"version"`
 	GoVersion string    `json:"go_version"`
 	Build     BuildInfo `json:"build"`
 
-	Uptime    string      `json:"uptime"`
-	Mode      string      `json:"mode"`
-	Timestamp time.Time   `json:"timestamp"`
-	Cluster   ClusterInfo `json:"cluster"`
+	Uptime    string    `json:"uptime"`
+	Mode      string    `json:"mode"`
+	Timestamp time.Time `json:"timestamp"`
 
 	Features FeaturesInfo `json:"features"`
 	Checks   ChecksInfo   `json:"checks"`
 	Stats    StatsInfo    `json:"stats"`
 }
 
-// ClusterInfo reports the cluster mode, which is disabled for this single-instance application.
-type ClusterInfo struct {
-	Enabled bool `json:"enabled"`
+// MaintenanceHealth reports safe recovery metadata in health responses.
+type MaintenanceHealth struct {
+	Reason      string            `json:"reason"`
+	Message     string            `json:"message"`
+	Since       time.Time         `json:"since"`
+	SelfHealing SelfHealingHealth `json:"self_healing"`
+}
+
+// SelfHealingHealth reports retry state without exposing raw failure details.
+type SelfHealingHealth struct {
+	Enabled   bool       `json:"enabled"`
+	Exhausted bool       `json:"exhausted"`
+	Attempts  int        `json:"attempts"`
+	Last      *time.Time `json:"last_attempt,omitempty"`
+	Next      *time.Time `json:"next_attempt"`
 }
 
 // ProjectInfo carries branding identity (AI.md PART 16).
@@ -76,6 +90,7 @@ type FeaturesInfo struct {
 type TorInfo struct {
 	Enabled  bool   `json:"enabled"`
 	Running  bool   `json:"running"`
+	State    string `json:"state"`
 	Status   string `json:"status"`
 	Hostname string `json:"hostname"`
 }
@@ -84,6 +99,7 @@ type TorInfo struct {
 type I2PInfo struct {
 	Enabled  bool   `json:"enabled"`
 	Running  bool   `json:"running"`
+	State    string `json:"state"`
 	Status   string `json:"status"`
 	Hostname string `json:"hostname"`
 	Provider string `json:"provider"`
@@ -235,7 +251,7 @@ func (s *Server) refreshHealthCore() {
 		cacheStatus = "degraded"
 	}
 	checks := ChecksInfo{
-		Database:  okError(db.Ping() == nil),
+		Database:  okError(db.Probe(context.Background()) == nil),
 		Cache:     cacheStatus,
 		Disk:      okError(s.diskWritable()),
 		Scheduler: okError(s.schedulerHealthy()),
@@ -258,6 +274,15 @@ type StatsInfo struct {
 // the /api/** health routes; content negotiation alone decides the format.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	resp := s.buildHealthResponse()
+	if resp.Maintenance != nil {
+		retrySeconds := 30
+		if cfg := s.currentConfig(); cfg != nil && cfg.Server.Maintenance.SelfHealing.RetryInterval > 0 {
+			retrySeconds = int(cfg.Server.Maintenance.SelfHealing.RetryInterval)
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds))
+		w.Header().Set("X-Maintenance-Mode", "true")
+		w.Header().Set("X-Maintenance-Reason", resp.Maintenance.Reason)
+	}
 	setCacheHeaders(w, "html")
 
 	switch httputil.DetectResponseFormat(r) {
@@ -298,11 +323,16 @@ func (s *Server) buildHealthResponse() HealthResponse {
 	resp.Build = BuildInfo{Commit: s.config.Commit, Date: s.config.BuildDate}
 	resp.Uptime = formatUptime(time.Since(s.startTime))
 	resp.Timestamp = time.Now().UTC()
-	resp.Cluster = ClusterInfo{Enabled: false}
 
 	resp.Features = s.healthFeatures()
 	resp.Checks = s.healthChecks(resp.Features.Tor, resp.Features.I2P)
 	resp.Status = overallStatus(resp.Checks)
+	if s.config != nil && s.config.MaintenanceState != nil {
+		resp.Maintenance = maintenanceHealth(s.config.MaintenanceState.Snapshot())
+		if resp.Maintenance != nil {
+			resp.Status = "maintenance"
+		}
+	}
 	if s.config != nil && s.config.ConfigManager != nil && s.config.ConfigManager.PendingRestart() {
 		resp.PendingRestart = true
 		resp.RestartReason = s.config.ConfigManager.RestartSettings()
@@ -348,16 +378,31 @@ func (s *Server) healthFeatures() FeaturesInfo {
 	}
 	switch {
 	case running:
+		f.Tor.State = "running"
 		f.Tor.Status = "healthy"
 	case torFound:
+		f.Tor.State = "starting"
 		f.Tor.Status = "starting"
 	default:
+		f.Tor.State = "disabled"
 		f.Tor.Status = "disabled"
 	}
 	if s.config != nil && s.config.I2PStatus != nil {
 		f.I2P = s.config.I2PStatus()
 	} else {
-		f.I2P = I2PInfo{Status: "disabled", Provider: "none"}
+		f.I2P = I2PInfo{State: "disabled", Status: "disabled", Provider: "none"}
+	}
+	if f.I2P.State == "" {
+		switch f.I2P.Status {
+		case "healthy":
+			f.I2P.State = "running"
+		case "starting":
+			f.I2P.State = "starting"
+		case "unavailable":
+			f.I2P.State = "error"
+		default:
+			f.I2P.State = "disabled"
+		}
 	}
 	return f
 }
@@ -424,7 +469,7 @@ func (s *Server) diskWritable() bool {
 // newline (AI.md PART 13 JSON format).
 func (s *Server) writeHealthJSON(w http.ResponseWriter, r *http.Request, resp HealthResponse) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if resp.Status == "unhealthy" {
+	if resp.Status == "unhealthy" || resp.Status == "maintenance" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	data, err := json.MarshalIndent(resp, "", "  ")
@@ -439,7 +484,7 @@ func (s *Server) writeHealthJSON(w http.ResponseWriter, r *http.Request, resp He
 // numbered section comments in canonical order (AI.md PART 13 plain text).
 func (s *Server) writeHealthText(w http.ResponseWriter, resp HealthResponse) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	if resp.Status == "unhealthy" {
+	if resp.Status == "unhealthy" || resp.Status == "maintenance" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	var b strings.Builder
@@ -462,7 +507,6 @@ func (s *Server) writeHealthText(w http.ResponseWriter, resp HealthResponse) {
 	fmt.Fprintf(&b, "uptime: %s\n", resp.Uptime)
 	fmt.Fprintf(&b, "mode: %s\n", resp.Mode)
 	fmt.Fprintf(&b, "timestamp: %s\n\n", resp.Timestamp.Format(time.RFC3339))
-	fmt.Fprintf(&b, "cluster.enabled: %t\n\n", resp.Cluster.Enabled)
 
 	b.WriteString("# 5. Features - NON-NEGOTIABLE only (show actual status)\n")
 	fmt.Fprintf(&b, "features.tor.enabled: %t\n", resp.Features.Tor.Enabled)
@@ -516,7 +560,7 @@ func (s *Server) writeHealthFrontendText(w http.ResponseWriter, r *http.Request,
 	lang := i18n.LangFromContext(r.Context())
 	t := func(key string) string { return i18n.Translate(lang, "health."+key) }
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	if resp.Status == "unhealthy" {
+	if resp.Status == "unhealthy" || resp.Status == "maintenance" {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	var b strings.Builder
@@ -532,7 +576,6 @@ func (s *Server) writeHealthFrontendText(w http.ResponseWriter, r *http.Request,
 	fmt.Fprintf(&b, "%s:    %s\n", t("field.uptime"), displayformat.Duration(time.Since(s.startTime), lang))
 	fmt.Fprintf(&b, "%s:      %s\n", t("field.mode"), t("mode."+resp.Mode))
 	fmt.Fprintf(&b, "%s:    %s\n", t("field.checked"), humanTimestamp(lang, resp.Timestamp))
-	fmt.Fprintf(&b, "%s:   %s\n\n", t("field.cluster"), translatedBool(lang, resp.Cluster.Enabled))
 
 	fmt.Fprintf(&b, "%s\n", t("section.features"))
 	fmt.Fprintf(&b, "  %s:     %s", t("feature.tor"), t("feature_status."+resp.Features.Tor.Status))
@@ -673,7 +716,7 @@ func (s *Server) writeHealthHTML(w http.ResponseWriter, r *http.Request, resp He
 		UptimeHuman:    displayformat.Duration(time.Since(s.startTime), lang),
 	}
 	status := http.StatusOK
-	if resp.Status == "unhealthy" {
+	if resp.Status == "unhealthy" || resp.Status == "maintenance" {
 		status = http.StatusServiceUnavailable
 	}
 	documentTitle := resp.Project.Name + " - " + i18n.Translate(lang, "health.title")

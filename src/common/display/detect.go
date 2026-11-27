@@ -61,26 +61,34 @@ func DetectDisplayEnv() DisplayEnv {
 }
 
 // autoDetectDisplayMode implements AI.md PART 32's mode-selection rules:
-// remote sessions (SSH/Mosh) always prefer TUI over GUI even with a
-// forwarded display; a dumb/unset terminal or non-interactive stdout never
-// gets TUI or GUI; a native display with no remoting allows GUI.
+// remote sessions (SSH/Mosh) prefer TUI when a terminal exists; a dumb
+// terminal forces CLI, no display plus no terminal is headless, and a native
+// display with no remoting allows GUI mode.
 func (e *DisplayEnv) autoDetectDisplayMode() DisplayMode {
-	if !e.IsTerminal || e.IsDumbTerminal() {
+	if !e.IsTerminal && !e.HasDisplay {
+		return DisplayModeHeadless
+	}
+	if e.IsDumbTerminal() {
 		return DisplayModeCLI
 	}
 	if e.IsSSH || e.IsMosh {
-		return DisplayModeTUI
+		if e.IsTerminal {
+			return DisplayModeTUI
+		}
+		return DisplayModeCLI
 	}
 	if e.HasDisplay {
 		return DisplayModeGUI
 	}
-	return DisplayModeTUI
+	if e.IsTerminal {
+		return DisplayModeTUI
+	}
+	return DisplayModeCLI
 }
 
-// IsDumbTerminal reports whether TERM is unset or "dumb" — always forces
-// plain/CLI output, never TUI or GUI.
+// IsDumbTerminal reports whether TERM explicitly disables terminal features.
 func (e *DisplayEnv) IsDumbTerminal() bool {
-	return e.TerminalType == "" || e.TerminalType == "dumb"
+	return e.TerminalType == "dumb"
 }
 
 // IsAutoDetectDisplayModeGUI reports whether Mode resolved to GUI.

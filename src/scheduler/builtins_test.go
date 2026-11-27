@@ -21,7 +21,7 @@ func TestRegisterBuiltinsRegistersAllTasks(t *testing.T) {
 	wantIDs := []string{
 		"ssl_renewal", "geoip_update", "blocklist_update", "cve_update",
 		"update_check", "token_cleanup", "log_rotation", "backup_daily",
-		"backup_hourly", "disk_check", "healthcheck_self", "health_registry_refresh", "ip_block_cleanup", "security_cleanup",
+		"backup_hourly", "disk_check", "database_check", "healthcheck_self", "health_registry_refresh", "ip_block_cleanup", "security_cleanup",
 	}
 	if len(tasks) != len(wantIDs) {
 		t.Fatalf("got %d tasks, want %d", len(tasks), len(wantIDs))
@@ -30,6 +30,27 @@ func TestRegisterBuiltinsRegistersAllTasks(t *testing.T) {
 		if tasks[i].ID != id {
 			t.Errorf("tasks[%d].ID = %q, want %q", i, tasks[i].ID, id)
 		}
+	}
+	databaseCheck, ok := s.Task("database_check")
+	if !ok {
+		t.Fatal("database_check not registered")
+	}
+	if databaseCheck.Schedule != schedDatabaseCheck || !databaseCheck.Skippable {
+		t.Errorf("database_check = schedule %q, skippable %v; want %q and true", databaseCheck.Schedule, databaseCheck.Skippable, schedDatabaseCheck)
+	}
+}
+
+func TestRegisterBuiltinsUsesDatabaseCheckInterval(t *testing.T) {
+	s, _ := newTestScheduler()
+	if err := RegisterBuiltins(s, Deps{DatabaseCheckInterval: "2m"}); err != nil {
+		t.Fatalf("RegisterBuiltins: %v", err)
+	}
+	task, ok := s.Task("database_check")
+	if !ok {
+		t.Fatal("database_check not registered")
+	}
+	if task.Schedule != "@every 2m" {
+		t.Fatalf("database_check schedule = %q, want @every 2m", task.Schedule)
 	}
 }
 
@@ -155,9 +176,16 @@ func TestSSLRenewalHandlerSkipsWhenDisabled(t *testing.T) {
 }
 
 func TestSSLRenewalHandlerSucceedsWhenEnabled(t *testing.T) {
-	h := sslRenewalHandler(Deps{SSLEnabled: true})
+	h := sslRenewalHandler(Deps{SSLEnabled: true, SSLRenewal: func(context.Context) error { return nil }})
 	if err := h(context.Background()); err != nil {
 		t.Errorf("error = %v, want nil", err)
+	}
+}
+
+func TestSSLRenewalHandlerFailsWhenMissing(t *testing.T) {
+	h := sslRenewalHandler(Deps{SSLEnabled: true})
+	if err := h(context.Background()); err == nil {
+		t.Fatal("missing SSL renewal handler reported success")
 	}
 }
 

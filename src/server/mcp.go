@@ -402,5 +402,5 @@ func translatedMCPError(r *http.Request, code int, key string, args ...interface
 func (s *Server) writeMCPError(w http.ResponseWriter, r *http.Request, id interface{}, code int, key string, status int, args ...interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": id, "error": translatedMCPError(r, code, key, args...)})
+	_ = encodeJSON(w, map[string]interface{}{"jsonrpc": "2.0", "id": id, "error": translatedMCPError(r, code, key, args...)})
 }

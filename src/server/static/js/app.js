@@ -183,7 +183,7 @@ document.querySelectorAll('.site-banner-dismiss').forEach(function (form) {
     fetch(form.action, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'fetch' },
       body: new URLSearchParams(new FormData(form)).toString()
     }).then(function (response) {
       if (response.ok) {
@@ -210,6 +210,115 @@ document.querySelectorAll('[data-copy]').forEach(function (btn) {
     }
   });
 });
+
+// Toast notifications are visitor-facing action feedback; server-side form
+// messages remain visible when JavaScript is unavailable.
+var TOAST_DURATIONS = { success: 3000, info: 3000, warning: 5000, error: 0 };
+var toastQueue = [];
+var activeToasts = [];
+var toastSequence = 0;
+
+function dismissToast(id) {
+  var index = activeToasts.findIndex(function (entry) { return entry.id === id; });
+  if (index < 0) return;
+  var entry = activeToasts[index];
+  activeToasts.splice(index, 1);
+  window.clearTimeout(entry.timer);
+  entry.node.classList.remove('toast-visible');
+  entry.node.addEventListener('transitionend', function () { entry.node.remove(); }, { once: true });
+  window.setTimeout(function () { entry.node.remove(); }, 250);
+  renderQueuedToasts();
+}
+
+function renderToast(message, type, duration) {
+  var container = document.getElementById('toast-container');
+  if (!container) return null;
+  var id = ++toastSequence;
+  var toast = document.createElement('div');
+  toast.className = 'toast toast-' + type;
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+  toast.dataset.toastId = String(id);
+
+  var icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = { success: '✓', error: '✗', warning: '⚠', info: 'ℹ' }[type];
+  var text = document.createElement('span');
+  text.className = 'toast-message';
+  text.textContent = message;
+  var close = document.createElement('button');
+  close.className = 'toast-close';
+  close.type = 'button';
+  close.setAttribute('aria-label', document.body.dataset.toastDismiss || 'Dismiss');
+  close.textContent = '×';
+  var progress = document.createElement('span');
+  progress.className = 'toast-progress';
+  progress.setAttribute('aria-hidden', 'true');
+  toast.append(icon, text, close, progress);
+  container.prepend(toast);
+
+  var entry = { id: id, node: toast, timer: null, remaining: duration, started: 0 };
+  activeToasts.unshift(entry);
+  function startTimer() {
+    if (entry.remaining <= 0 || entry.timer) return;
+    entry.started = Date.now();
+    toast.style.setProperty('--toast-duration', entry.remaining + 'ms');
+    progress.style.animation = 'none';
+    void progress.offsetHeight;
+    progress.style.animation = '';
+    entry.timer = window.setTimeout(function () { dismissToast(id); }, entry.remaining);
+  }
+  function pauseTimer() {
+    if (!entry.timer) return;
+    window.clearTimeout(entry.timer);
+    entry.timer = null;
+    entry.remaining = Math.max(0, entry.remaining - (Date.now() - entry.started));
+  }
+  close.addEventListener('click', function (event) { event.stopPropagation(); dismissToast(id); });
+  toast.addEventListener('click', function () { dismissToast(id); });
+  toast.addEventListener('mouseenter', pauseTimer);
+  toast.addEventListener('mouseleave', startTimer);
+  requestAnimationFrame(function () { toast.classList.add('toast-visible'); });
+  startTimer();
+  return id;
+}
+
+function renderQueuedToasts() {
+  while (activeToasts.length < 5 && toastQueue.length) {
+    var next = toastQueue.shift();
+    renderToast(next.message, next.type, next.duration);
+  }
+}
+
+function showToast(message, type) {
+  type = Object.prototype.hasOwnProperty.call(TOAST_DURATIONS, type) ? type : 'info';
+  var bodyData = document.body.dataset;
+  var configuredDuration = Number(bodyData.toastDuration);
+  var configuredWarningDuration = Number(bodyData.toastWarningDuration);
+  if (!Number.isFinite(configuredDuration) || configuredDuration < 0) configuredDuration = 3;
+  if (!Number.isFinite(configuredWarningDuration) || configuredWarningDuration < 0) configuredWarningDuration = 5;
+  var duration = type === 'warning'
+    ? configuredWarningDuration * 1000
+    : type === 'error' ? 0 : configuredDuration * 1000;
+  if (activeToasts.length >= 5) {
+    toastQueue.push({ message: String(message), type: type, duration: duration });
+    return null;
+  }
+  return renderToast(String(message), type, duration);
+}
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && activeToasts.length) dismissToast(activeToasts[0].id);
+});
+window.showToast = showToast;
+window.dismissToast = dismissToast;
+
+var flashMessage = document.querySelector('.flash-message');
+if (flashMessage) {
+  showToast(flashMessage.textContent || '', flashMessage.dataset.type || 'success');
+  flashMessage.remove();
+}
 
 // ============================================================================
 // Service worker registration (PWA offline support)

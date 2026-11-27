@@ -1,0 +1,15 @@
+{{define "header"}}<input type="checkbox" id="nav-toggle" class="nav-checkbox" aria-controls="nav-panel" hidden>
+<header class="header">
+<a href="{{path "/"}}" class="site-brand"><img src="{{.Branding.LogoURL}}" alt="" width="28" height="28">{{.Branding.Title}}</a>
+{{template "nav" .}}
+<label class="nav-toggle" for="nav-toggle" role="button" tabindex="0" aria-controls="nav-panel" aria-label="{{t .Lang "nav.main_navigation"}}" title="{{t .Lang "nav.main_navigation"}}">☰</label>
+<div class="header-actions">
+<a class="preferences-link" href="{{path "/server/preferences"}}">{{t .Lang "common.preferences"}}</a>
+<form class="theme-form" action="{{path "/server/theme"}}" method="post">
+<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+<input type="hidden" name="return" value="{{.Path}}">
+<input type="hidden" name="theme" value="{{.NextTheme}}">
+<button type="submit" class="theme-button" aria-label="{{t .Lang "theme.change"}}">{{t .Lang (printf "theme.%s" .NextTheme)}}</button>
+</form>
+</div>
+</header>{{end}}

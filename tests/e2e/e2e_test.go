@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +32,7 @@ const (
 )
 
 var tempDir string
+var debugToken string
 
 func TestMain(m *testing.M) {
 	tempDir = os.Getenv("PROJECT_E2E_TMP")
@@ -54,6 +57,16 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "create E2E config: %v\n", err)
 		os.Exit(2)
 	}
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		fmt.Fprintf(os.Stderr, "generate E2E debug token: %v\n", err)
+		os.Exit(2)
+	}
+	debugToken = hex.EncodeToString(tokenBytes)
+	if err := os.WriteFile(filepath.Join(configDir, "secrets.yml"), []byte("server:\n  token: "+debugToken+"\n"), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "create E2E secrets: %v\n", err)
+		os.Exit(2)
+	}
 
 	logFile, err := os.OpenFile(filepath.Join(tempDir, "server.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -61,7 +74,7 @@ func TestMain(m *testing.M) {
 		os.Exit(2)
 	}
 
-	serverArgs := []string{"--address", "127.0.0.1", "--port", port, "--config", filepath.Join(tempDir, "config"), "--data", filepath.Join(tempDir, "data"), "--log", filepath.Join(tempDir, "logs"), "--cache", filepath.Join(tempDir, "cache"), "--backup", filepath.Join(tempDir, "backup")}
+	serverArgs := []string{"--debug", "--address", "127.0.0.1", "--port", port, "--config", filepath.Join(tempDir, "config"), "--data", filepath.Join(tempDir, "data"), "--log", filepath.Join(tempDir, "logs"), "--cache", filepath.Join(tempDir, "cache"), "--backup", filepath.Join(tempDir, "backup")}
 	command := exec.Command("go", append([]string{"run", "./src"}, serverArgs...)...)
 	if serverBinary := os.Getenv("PROJECT_E2E_SERVER_BINARY"); serverBinary != "" {
 		command = exec.Command(serverBinary, serverArgs...)
@@ -118,6 +131,40 @@ func TestMain(m *testing.M) {
 	}
 	logFile.Close()
 	os.Exit(result)
+}
+
+func TestThemedHTTPErrorPages(t *testing.T) {
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	missing, err := client.Get(baseURL + "/this-page-does-not-exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingBody, readErr := io.ReadAll(missing.Body)
+	missing.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if missing.StatusCode != http.StatusNotFound || !strings.Contains(string(missingBody), "theme-dark") || !strings.Contains(string(missingBody), "404") {
+		t.Errorf("404 page status=%d missing themed error content", missing.StatusCode)
+	}
+
+	request, err := http.NewRequest(http.MethodGet, baseURL+"/debug/error500", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+debugToken)
+	internal, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	internalBody, readErr := io.ReadAll(internal.Body)
+	internal.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if internal.StatusCode != http.StatusInternalServerError || !strings.Contains(string(internalBody), "theme-dark") || !strings.Contains(string(internalBody), "500") || strings.Contains(strings.ToLower(string(internalBody)), "goroutine") {
+		t.Errorf("500 page status=%d missing themed error content or exposed a stack trace", internal.StatusCode)
+	}
 }
 
 func TestSSRFeaturePages(t *testing.T) {

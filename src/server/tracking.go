@@ -217,6 +217,7 @@ func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	choice := r.FormValue("choice")
+	previous, _ := readConsent(r)
 	state := consentState{Essential: true, Timestamp: time.Now().Unix()}
 	switch choice {
 	case "accept":
@@ -235,8 +236,45 @@ func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setPreferenceCookie(w, r, "cookie_consent", encodeConsentCookie(value), s)
+	s.applyConsentWithdrawal(w, r, previous, state, choice == "decline")
 	s.auditConsentChange(r, "cookie_consent", map[string]bool{"essential": true, "preferences": state.Preferences, "analytics": state.Analytics})
 	redirectPreference(w, safePreferenceRedirect(s, r, "/"))
+}
+
+func (s *Server) applyConsentWithdrawal(w http.ResponseWriter, r *http.Request, previous, next consentState, declined bool) {
+	preferencesWithdrawn := previous.Preferences && !next.Preferences
+	analyticsWithdrawn := previous.Analytics && !next.Analytics
+	if !declined && !preferencesWithdrawn && !analyticsWithdrawn {
+		return
+	}
+	if preferencesWithdrawn {
+		for _, cookie := range r.Cookies() {
+			if cookie.Name == "theme" || cookie.Name == "lang" || strings.HasPrefix(cookie.Name, preferencePrefix) {
+				expirePreferenceCookie(w, r, cookie.Name, s)
+			}
+		}
+	}
+	cfg := s.currentConfig()
+	if cfg == nil || !cfg.Web.Headers.ClearSiteData.OnConsentWithdrawal {
+		return
+	}
+	value := `"cache", "storage"`
+	if cfg.Web.Headers.ClearSiteData.ExecutionContexts {
+		value = `"cache", "storage", "executionContexts"`
+	}
+	w.Header().Set("Clear-Site-Data", value)
+}
+
+func (s *Server) setTokenRevocationClearSiteData(w http.ResponseWriter) {
+	cfg := s.currentConfig()
+	if cfg == nil || !cfg.Web.Headers.ClearSiteData.OnTokenRevocation {
+		return
+	}
+	value := `"cache", "storage"`
+	if cfg.Web.Headers.ClearSiteData.ExecutionContexts {
+		value = `"cache", "storage", "executionContexts"`
+	}
+	w.Header().Set("Clear-Site-Data", value)
 }
 
 func (s *Server) auditConsentChange(r *http.Request, consentType string, value any) {

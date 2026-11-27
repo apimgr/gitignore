@@ -38,6 +38,20 @@ func TestMapAPIErrorCodeToHTTPStatus(t *testing.T) {
 	}
 }
 
+func TestEncodeJSONUsesTwoSpaceIndentAndFinalNewline(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	if err := encodeJSON(recorder, APIResponse{OK: true, Data: map[string]string{"status": "ok"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "\n  \"ok\": true,") || !strings.Contains(body, "\n    \"status\": \"ok\"") {
+		t.Fatalf("JSON response was not indented by two spaces: %q", body)
+	}
+	if !strings.HasSuffix(body, "\n") {
+		t.Fatalf("JSON response has no trailing newline: %q", body)
+	}
+}
+
 func TestSendAPIResponseOK(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sendAPIResponseOK(rec, map[string]string{"hello": "world"})

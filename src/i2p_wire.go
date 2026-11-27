@@ -39,7 +39,7 @@ func (runtime *i2pRuntime) healthInfo() server.I2PInfo {
 	if service != nil {
 		status = service.Status()
 	}
-	info := server.I2PInfo{Provider: string(status.Provider), Hostname: status.Address}
+	info := server.I2PInfo{Provider: string(status.Provider), Hostname: status.Address, State: string(status.State)}
 	switch status.State {
 	case i2p.StateStarting, i2p.StateBuilding:
 		info.Enabled = true

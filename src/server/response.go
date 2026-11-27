@@ -53,7 +53,7 @@ func mapAPIErrorCodeToHTTPStatus(code string) int {
 func sendAPIResponseOK(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "api")
-	_ = json.NewEncoder(w).Encode(APIResponse{OK: true, Data: data})
+	_ = encodeJSON(w, APIResponse{OK: true, Data: data})
 }
 
 // sendAPIResponseError writes an error envelope, deriving the HTTP status from
@@ -66,7 +66,13 @@ func sendAPIResponseErrorDetails(w http.ResponseWriter, code, message string, de
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "error")
 	w.WriteHeader(mapAPIErrorCodeToHTTPStatus(code))
-	_ = json.NewEncoder(w).Encode(APIResponse{OK: false, Error: code, Message: message, Details: details})
+	_ = encodeJSON(w, APIResponse{OK: false, Error: code, Message: message, Details: details})
+}
+
+func encodeJSON(w http.ResponseWriter, value interface{}) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }
 
 // apiErrorI18nKey maps a stable API error code to its translation key so error
@@ -128,6 +134,11 @@ func setVersionedCacheHeaders(w http.ResponseWriter, r *http.Request, stamp stri
 		return
 	}
 	w.Header().Set("Cache-Control", "no-cache")
+}
+
+func setRevalidatedCacheHeaders(w http.ResponseWriter, stamp string) {
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", `"`+stamp+`"`)
 }
 
 func versionPurge(w http.ResponseWriter, r *http.Request, stamp string, status int) {

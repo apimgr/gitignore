@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -15,13 +17,17 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-isatty"
 
 	"github.com/apimgr/gitignore/src/blocklist"
 	"github.com/apimgr/gitignore/src/common/audit"
+	"github.com/apimgr/gitignore/src/common/banner"
 	"github.com/apimgr/gitignore/src/common/i18n"
+	commonlogging "github.com/apimgr/gitignore/src/common/logging"
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/cve"
 	"github.com/apimgr/gitignore/src/db"
@@ -47,7 +53,11 @@ var (
 	OfficialSite = ""
 )
 
-const projectName = "gitignore"
+const (
+	projectName  = "gitignore"
+	internalOrg  = "apimgr"
+	internalName = "gitignore"
+)
 
 var outputLanguage = i18n.DefaultLang
 
@@ -122,9 +132,10 @@ func databaseConnectionConfig(cfg *config.Config) db.ConnectionConfig {
 	}
 	pool := cfg.Server.Database.Pool
 	return db.ConnectionConfig{
-		Driver: cfg.Server.Database.Driver,
-		URL:    cfg.Server.Database.URL,
-		Token:  cfg.Server.Database.Token,
+		Driver:        cfg.Server.Database.Driver,
+		URL:           cfg.Server.Database.URL,
+		Token:         cfg.Server.Database.Token,
+		LegacySecrets: cfg.LegacySecrets,
 		Pool: db.PoolConfig{
 			MaxOpen:     pool.MaxOpen,
 			MaxIdle:     pool.MaxIdle,
@@ -141,10 +152,10 @@ func databaseConnectionConfig(cfg *config.Config) db.ConnectionConfig {
 	}
 }
 
-// sysexits(3) exit codes — never invent custom schemes.
+// Exit codes follow the project contract; usage errors use status 2.
 const (
-	// exUsage is the sysexits command line usage error.
-	exUsage = 64
+	// exUsage is the command-line usage error status.
+	exUsage = 2
 	// exUnavailable means a service is unavailable.
 	exUnavailable = 69
 	// exOSErr means an operating system error occurred.
@@ -182,6 +193,18 @@ func buildEpoch() int64 {
 
 func main() {
 	dirs := apppath.GetDirectories()
+	maintenanceState := &server.MaintenanceState{}
+	maintenanceWake := make(chan struct{}, 1)
+	var databaseAvailable atomic.Bool
+	databaseAvailable.Store(true)
+	db.SetCriticalErrorHandler(func(error) {
+		databaseAvailable.Store(false)
+		maintenanceState.Enter("database_write", "Database write failed", time.Now().UTC())
+		select {
+		case maintenanceWake <- struct{}{}:
+		default:
+		}
+	})
 
 	// binaryName is the actual invoked binary name, shown in --help/--version
 	// output (AI.md PART 8). Internal identifiers (service unit, config paths,
@@ -206,18 +229,16 @@ func main() {
 	colorFlag := flag.String("color", "auto", "Color output: auto, yes, no")
 
 	// Mode: production (default) | development | dev | prod
-	modeFlag := flag.String("mode", "", "Application mode: production|development (aliases: prod|dev)")
+	modeFlag := flag.String("mode", "", "Application mode: production|development|debug (aliases: prod|dev|devel)")
 
 	// Service commands
-	serviceCmd := flag.String("service", "", "Service commands: start, stop, restart, reload, status, --install, --uninstall, --disable, --help")
+	serviceCmd := flag.String("service", "", "Service commands: start, stop, restart, reload, --install, --uninstall, --disable, --help")
 
 	// Maintenance commands
 	maintenanceCmd := flag.String("maintenance", "", "Maintenance commands: backup, restore, update, mode, setup, token, data, compliance")
 
-	// Force/assume-yes (used by --service --uninstall and other prompts)
-	forceFlag := flag.Bool("force", false, "Assume yes to confirmation prompts")
-	flag.BoolVar(forceFlag, "y", false, "Assume yes to confirmation prompts (shorthand)")
-	flag.BoolVar(forceFlag, "yes", false, "Assume yes to confirmation prompts (shorthand)")
+	// --yes is a command modifier for operations that explicitly support skipping confirmation.
+	forceFlag := flag.Bool("yes", false, "Skip supported confirmation prompts")
 
 	// Update commands
 	updateCmd := flag.String("update", "", "Update commands: check, yes, branch {stable|beta|devel}")
@@ -243,6 +264,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_command_line"))
 		os.Exit(2)
 	}
+	debugFlagSpecified := false
+	flag.Visit(func(parsed *flag.Flag) {
+		if parsed.Name == "debug" {
+			debugFlagSpecified = true
+		}
+	})
 	setOutputLanguage(*langFlag, "")
 
 	if *showHelp {
@@ -295,7 +322,6 @@ func main() {
 	} else if v := os.Getenv("DATA_DIR"); v != "" {
 		dataDir = v
 	}
-
 	// Resolve log directory (flag > LOG_DIR env > OS default).
 	logsDir := dirs.Logs
 	if *logDirFlag != "" {
@@ -322,11 +348,82 @@ func main() {
 			os.Exit(exOSErr)
 		}
 	}
+	for _, directory := range []struct {
+		name      string
+		value     *string
+		env       string
+		setErrKey string
+	}{
+		{"config", &configDir, "", ""},
+		{"data", &dataDir, "DATA_DIR", "cli.main.set_data_directory_failed"},
+		{"logs", &logsDir, "LOG_DIR", "cli.main.set_log_directory_failed"},
+	} {
+		validated, err := apppath.SafeDirPath(*directory.value)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_directory_path", "path", directory.name))
+			os.Exit(exUsage)
+		}
+		*directory.value = validated
+		if directory.env != "" {
+			if err := os.Setenv(directory.env, validated); err != nil {
+				log.Printf("%s", cliText(directory.setErrKey, "error", err))
+				os.Exit(exOSErr)
+			}
+		}
+	}
+	databaseDir, err := apppath.SafeDirPath(apppath.GetDatabaseDir(dataDir))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_directory_path", "path", "database"))
+		os.Exit(exUsage)
+	}
+	if err := os.Setenv("DATABASE_DIR", databaseDir); err != nil {
+		log.Printf("%s", cliText("cli.main.set_database_directory_failed", "error", err))
+		os.Exit(exOSErr)
+	}
+	for _, directory := range []struct {
+		name      string
+		key       string
+		path      string
+		setErrKey string
+	}{
+		{"cache", "CACHE_DIR", apppath.GetCacheDir(), "cli.main.set_cache_directory_failed"},
+		{"backup", "BACKUP_DIR", apppath.GetBackupDir(), "cli.main.set_backup_directory_failed"},
+	} {
+		validated, err := apppath.SafeDirPath(directory.path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_directory_path", "path", directory.name))
+			os.Exit(exUsage)
+		}
+		if err := os.Setenv(directory.key, validated); err != nil {
+			log.Printf("%s", cliText(directory.setErrKey, "error", err))
+			os.Exit(exOSErr)
+		}
+	}
 
-	// Resolve PID file path (flag > OS default; empty on Windows/containers).
+	// Resolve PID file path (flag > environment > OS default; empty on Windows).
 	pidFile := apppath.GetPIDFile()
 	if *pidFileFlag != "" {
 		pidFile = *pidFileFlag
+	} else if envPIDFile := strings.TrimSpace(os.Getenv("PID_FILE")); envPIDFile != "" {
+		pidFile = envPIDFile
+	}
+	if pidFile != "" {
+		validated, err := apppath.SafeDirPath(pidFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.Translate(outputLanguage, "errors.invalid_path_argument"))
+			os.Exit(exUsage)
+		}
+		pidFile = validated
+	}
+	for _, dir := range []string{configDir, dataDir} {
+		if err := ensureRuntimeDir(dir); err != nil {
+			log.Printf("ERROR required private-path parent is unavailable: %s", dir)
+			os.Exit(exUnavailable)
+		}
+	}
+	if err := apppath.EnforcePrivate(configDir, dataDir); err != nil {
+		log.Printf("private path enforcement failed: %v", err)
+		os.Exit(exUnavailable)
 	}
 
 	if os.Geteuid() == 0 {
@@ -337,14 +434,20 @@ func main() {
 	}
 	// Ensure all runtime directories exist with privilege-appropriate perms
 	// (AI.md PART 8 "Directory Validation Rules"): 0755 root / 0700 user.
-	for _, d := range []string{configDir, dataDir, logsDir, apppath.GetCacheDir(), apppath.GetBackupDir()} {
+	for _, d := range []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, apppath.GetBackupDir(), os.Getenv("DATABASE_DIR")} {
 		if err := ensureRuntimeDir(d); err != nil {
 			log.Printf("%s", cliText("cli.main.create_directory_warning", "path", d, "error", err))
+			maintenanceState.Enter("file_write", "Required file storage is unavailable", time.Now().UTC())
+		} else if err := probeRuntimeDir(d); err != nil {
+			log.Printf("required runtime directory is not writable: %s", d)
+			maintenanceState.Enter("file_write", "Required file storage is unavailable", time.Now().UTC())
 		}
 	}
 
 	// Load configuration (auto-creates with random 64xxx port on first run)
 	configPath := filepath.Join(configDir, "server.yml")
+	_, configStatErr := os.Stat(configPath)
+	firstRun := errors.Is(configStatErr, os.ErrNotExist)
 	startupSettings := config.PeekStartupSettings(configPath)
 	config.SetAuditLogDir(logsDir)
 	cfg, err := config.Load(configPath)
@@ -352,7 +455,7 @@ func main() {
 		log.Printf("%s", cliText("cli.main.load_config_warning", "error", err))
 		cfg = config.DefaultConfig()
 	}
-	if !startupSettings.PIDFile && *pidFileFlag == "" {
+	if !startupSettings.PIDFile && *pidFileFlag == "" && strings.TrimSpace(os.Getenv("PID_FILE")) == "" {
 		pidFile = ""
 	}
 	setOutputLanguage(*langFlag, cfg.Server.I18n.DefaultLanguage)
@@ -396,12 +499,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, cliText("cli.main.invalid_mode", "mode", *modeFlag))
 			os.Exit(2)
 		}
-		if err := config.Update(func(c *config.Config) { c.Server.Mode = resolved }); err != nil {
-			log.Printf("%s", cliText("cli.main.save_config_failed", "error", err))
-			os.Exit(exConfig)
-		}
-		fmt.Println(cliText("cli.main.mode_set", "mode", resolved))
-		return
+		cfg.Server.Mode = resolved
 	}
 
 	// Handle --update flag
@@ -460,40 +558,52 @@ func main() {
 	}
 
 	// ── Initialize database ──────────────────────────────────────────────────
-	if err := db.Init(dataDir, databaseConnectionConfig(cfg)); err != nil {
-		log.Printf("%s", cliText("cli.main.initialize_database_failed", "error", err))
-		os.Exit(exUnavailable)
-	}
-	pendingEncryptionKey, needsEncryptionKeyPersistence, err := db.PendingEncryptionKeyRotation(cfg.Server.Security.EncryptionKey)
-	if err != nil {
-		log.Printf("security: could not recover encryption key rotation: %v", err)
-		os.Exit(exUnavailable)
-	}
-	if needsEncryptionKeyPersistence {
-		if _, err := config.RotateEncryptionKey(configPath, pendingEncryptionKey); err != nil {
-			log.Printf("security: could not persist recovered encryption key rotation: %v", err)
-			os.Exit(exUnavailable)
+	initializeDatabase := func() error {
+		if err := db.Init(dataDir, databaseConnectionConfig(cfg)); err != nil {
+			return err
 		}
-		cfg.Server.Security.EncryptionKey = pendingEncryptionKey
+		if len(cfg.LegacySecrets) > 0 {
+			if err := config.CompleteLegacySecretMigration(configPath); err != nil {
+				log.Printf("could not remove imported legacy secret settings from configuration; backup and database copies remain available")
+			} else {
+				cfg.LegacySecrets = nil
+			}
+		}
+		pendingEncryptionKey, needsEncryptionKeyPersistence, err := db.PendingEncryptionKeyRotation(cfg.Server.Security.EncryptionKey)
+		if err != nil {
+			return fmt.Errorf("recover encryption key rotation: %w", err)
+		}
+		if needsEncryptionKeyPersistence {
+			if _, err := config.RotateEncryptionKey(configPath, pendingEncryptionKey); err != nil {
+				return fmt.Errorf("persist recovered encryption key rotation: %w", err)
+			}
+			cfg.Server.Security.EncryptionKey = pendingEncryptionKey
+		}
+		if err := db.CompleteEncryptionKeyRotation(cfg.Server.Security.EncryptionKey); err != nil {
+			return fmt.Errorf("finish encryption key rotation: %w", err)
+		}
+		if err := reconcilePGPPrivateKey(configDir); err != nil {
+			return fmt.Errorf("finish installation secret rotation: %w", err)
+		}
+		if err := audit.SetDatabaseSink(db.AppendAuditEntry); err != nil {
+			return fmt.Errorf("persist buffered audit events: %w", err)
+		}
+		return nil
 	}
-	if err := db.CompleteEncryptionKeyRotation(cfg.Server.Security.EncryptionKey); err != nil {
-		log.Printf("security: could not finish encryption key rotation: %v", err)
-		os.Exit(exUnavailable)
-	}
-	if err := reconcilePGPPrivateKey(configDir); err != nil {
-		log.Printf("security: could not finish installation secret rotation: %v", err)
-		os.Exit(exUnavailable)
-	}
-	configureRateLimitCache(cfg.Server.Cache, configDir)
-	if err := audit.SetDatabaseSink(db.AppendAuditEntry); err != nil {
-		log.Printf("failed to persist buffered audit events: %v", err)
+	if err := initializeDatabase(); err != nil {
+		databaseAvailable.Store(false)
+		maintenanceState.Enter("database_connection", "Database connection failed", time.Now().UTC())
+		log.Printf("database initialization failed; entering maintenance mode: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := applyBackupRetention(apppath.GetBackupDir(), cfg.Server.Backup.Retention, cfg.Server.Backup.EncryptionPassword); err != nil {
-		log.Printf("backup retention cleanup failed: %v", err)
-	}
-	if _, integrityErr := audit.VerifyAndReport(logsDir); integrityErr != nil {
-		log.Printf("audit chain verification found a broken entry: %v", integrityErr)
+	configureRateLimitCache(cfg.Server.Cache, configDir)
+	if databaseAvailable.Load() {
+		if _, err := applyBackupRetention(apppath.GetBackupDir(), cfg.Server.Backup.Retention, cfg.Server.Backup.EncryptionPassword); err != nil {
+			log.Printf("backup retention cleanup failed: %v", err)
+		}
+		if _, integrityErr := audit.VerifyAndReport(logsDir); integrityErr != nil {
+			log.Printf("audit chain verification found a broken entry: %v", integrityErr)
+		}
 	}
 
 	// ── Resolve server address & port ────────────────────────────────────────
@@ -513,13 +623,72 @@ func main() {
 	} else if envPort := os.Getenv("PORT"); envPort != "" {
 		serverPort = envPort
 	}
+	if normalized, ok := config.NormalizePort(serverPort); ok {
+		serverPort = normalized
+	} else {
+		log.Printf("invalid server port; selecting a valid default")
+		serverPort = config.DefaultPort()
+		if err := config.Update(func(current *config.Config) { current.Server.Port = serverPort }); err != nil {
+			log.Printf("could not persist the selected server port")
+		}
+	}
 	cfg.Server.Address = serverAddress
 	cfg.Server.Port = serverPort
-	portNum, _ := strconv.Atoi(serverPort)
+	portParts := strings.Split(serverPort, ",")
+	portNum, _ := strconv.Atoi(strings.TrimSpace(portParts[0]))
+	httpsPort := 0
+	if len(portParts) == 2 {
+		httpsPort, _ = strconv.Atoi(strings.TrimSpace(portParts[1]))
+	}
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 && (portNum < 1024 || httpsPort > 0 && httpsPort < 1024) {
+		if method := service.DetectEscalation(); method != service.EscalateNone && confirmPortEscalation(*forceFlag) {
+			executable, err := os.Executable()
+			if err == nil {
+				args := append([]string{executable}, os.Args[1:]...)
+				args = append(args,
+					"--config", configDir,
+					"--data", dataDir,
+					"--cache", apppath.GetCacheDir(),
+					"--log", logsDir,
+					"--backup", apppath.GetBackupDir(),
+					"--address", serverAddress,
+					"--port", serverPort,
+				)
+				if pidFile != "" {
+					args = append(args, "--pid", pidFile)
+				}
+				if cfg.Server.BaseURL != "" {
+					args = append(args, "--baseurl", cfg.Server.BaseURL)
+				}
+				if cfg.Server.Mode != "" {
+					args = append(args, "--mode", cfg.Server.Mode)
+				}
+				if err := service.ExecElevated(method, args); err != nil {
+					log.Printf("privilege escalation failed")
+					os.Exit(exUnavailable)
+				} else {
+					os.Exit(0)
+				}
+			}
+		}
+		log.Printf("privileged port unavailable; selecting an unprivileged default port")
+		serverPort = config.UnprivilegedDefaultPort()
+		portNum, _ = strconv.Atoi(serverPort)
+		httpsPort = 0
+		if err := config.Update(func(current *config.Config) { current.Server.Port = serverPort }); err != nil {
+			log.Printf("could not persist the selected server port")
+		}
+	}
+	if httpsPort == 0 && portNum == 443 {
+		cfg.Server.SSL.Enabled = true
+	}
+	cfg.Server.Port = serverPort
 
 	// Apply mode from environment if set
-	if envMode := os.Getenv("MODE"); envMode != "" && cfg.Server.Mode == "production" {
-		cfg.Server.Mode = resolveMode(envMode)
+	if envMode := os.Getenv("MODE"); envMode != "" && *modeFlag == "" {
+		if resolved := resolveMode(envMode); resolved != "" {
+			cfg.Server.Mode = resolved
+		}
 	}
 
 	// Wire the independent mode/debug axes: mode from config (env/--mode
@@ -529,8 +698,13 @@ func main() {
 		log.Printf("%s", cliText("cli.main.invalid_config_mode", "mode", cfg.Server.Mode, "error", err))
 	}
 	mode.InitDebug()
-	if *debugFlag {
-		mode.SetDebug(true)
+	if debugFlagSpecified {
+		mode.SetDebug(*debugFlag)
+	}
+	mode.SetProfilingRates(cfg.Server.Debug.BlockProfileRate, cfg.Server.Debug.MutexProfileFraction)
+	if _, err := openApplicationLogs(logsDir, cfg.Server.Logging, mode.Get(), mode.IsDebugEnabled()); err != nil {
+		log.Printf("application logging initialization failed: %v", err)
+		os.Exit(exUnavailable)
 	}
 	devMode := mode.IsAppModeDev()
 
@@ -642,22 +816,58 @@ func main() {
 		},
 	})
 	startedElevated := server.ProcessStartedElevated()
+	var windowsServiceReady func()
+	serverReady := make(chan struct{})
+	torCtx, torCancel := context.WithCancel(context.Background())
+	i2pCtx, i2pCancel := context.WithCancel(context.Background())
+	var torMgr *tor.TorManager
 	srv = server.New(&server.Config{
-		Address:       serverAddress,
-		Port:          portNum,
-		DevMode:       devMode,
-		Templates:     templateMgr,
-		Paths:         pathMgr,
-		Version:       Version,
-		Commit:        CommitID,
-		BuildDate:     BuildDate,
-		Cfg:           cfg,
-		ConfigManager: cfgManager,
-		GeoIP:         geoipMgr,
-		Blocklist:     blocklistMatcher,
-		SecurityDir:   securityDir,
+		Address:          serverAddress,
+		Port:             portNum,
+		HTTPSPort:        httpsPort,
+		DevMode:          devMode,
+		Templates:        templateMgr,
+		Paths:            pathMgr,
+		Version:          Version,
+		Commit:           CommitID,
+		BuildDate:        BuildDate,
+		Cfg:              cfg,
+		ConfigManager:    cfgManager,
+		GeoIP:            geoipMgr,
+		Blocklist:        blocklistMatcher,
+		SecurityDir:      securityDir,
+		MaintenanceState: maintenanceState,
 		BeforePrivilegeDrop: func() error {
 			return applyStagedUpdate(cfg, dataDir, logsDir, startedElevated)
+		},
+		BeforeServe: func() {
+			torMgr = startTor(torCtx, cfg, configDir, dataDir, portNum, srv)
+			go i2pRuntime.run(i2pCtx, cfg.Server.I2P, configDir, dataDir, logsDir, srv.HTTPHandler())
+		},
+		OnReady: func() {
+			close(serverReady)
+			if windowsServiceReady != nil {
+				windowsServiceReady()
+			}
+			emitLifecycleEmail("startup", "", 0)
+		},
+		AccessLog: func(entry server.AccessLogEntry) {
+			manager := activeApplicationLogs.Load()
+			if manager == nil {
+				return
+			}
+			_ = manager.Access(commonlogging.AccessEntry{
+				Time: entry.Time, RemoteIP: entry.RemoteIP, Method: entry.Method,
+				Path: entry.Path, Query: entry.Query, Status: entry.Status,
+				Bytes: entry.Bytes, Latency: entry.Latency, UserAgent: entry.UserAgent,
+				Referer: entry.Referer, RequestID: entry.RequestID, Host: entry.Host,
+				Protocol: entry.Protocol, TLSVersion: entry.TLSVersion,
+				Country: entry.Country, ASN: entry.ASN,
+			})
+			healthFailure := entry.Method == http.MethodGet && (strings.HasSuffix(entry.Path, "/healthz") || strings.HasSuffix(entry.Path, "/healthz.txt")) && (entry.Status < http.StatusOK || entry.Status >= http.StatusMultipleChoices)
+			if entry.Status >= http.StatusInternalServerError || healthFailure {
+				log.Printf("ERROR HTTP request failed: method=%s path=%s status=%d", entry.Method, entry.Path, entry.Status)
+			}
 		},
 		I2PStatus:         i2pRuntime.healthInfo,
 		WebhookDispatcher: webhookDispatcher,
@@ -683,7 +893,7 @@ func main() {
 	if devMode {
 		log.Println(cliText("cli.main.development_mode_enabled"))
 	}
-	ownershipRoots := []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, apppath.GetBackupDir()}
+	ownershipRoots := []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, apppath.GetBackupDir(), databaseDir}
 	if db.IsSQLite() {
 		ownershipRoots = append(ownershipRoots, filepath.Dir(db.LocalDatabasePath(dataDir)))
 	}
@@ -699,8 +909,64 @@ func main() {
 	// Detects or tests SMTP and sets the process-wide notifier. Best-effort: no
 	// working SMTP simply leaves email disabled.
 	initEmail(cfg, configDir, dataDir, i2pRuntime.healthInfo)
+	maintenanceObserver := func(event string, snapshot server.MaintenanceSnapshot) {
+		severity, result := "warning", "failure"
+		if event == "server.maintenance_recovered" {
+			severity, result = "info", "success"
+		}
+		if err := audit.Append(logsDir, audit.Entry{
+			Event: event, Category: "system", Severity: severity,
+			Actor:   audit.Actor{Type: "system"},
+			Details: map[string]any{"reason": snapshot.Reason, "attempts": snapshot.Attempts},
+			Result:  result,
+		}); err != nil {
+			log.Printf("could not record maintenance transition: event=%s", event)
+		}
+		shouldNotify := event == "server.maintenance_entered" && cfg.Server.Maintenance.Notify.OnEnter ||
+			event == "server.maintenance_recovered" && cfg.Server.Maintenance.Notify.OnExit ||
+			event == "server.self_healing_exhausted"
+		if shouldNotify && notifier != nil && notifier.sender != nil && notifier.sender.CanSend() && notifier.recipient != "" {
+			subject := "Service maintenance status: " + snapshot.Reason
+			body := "The service entered read-only maintenance mode. Reason: " + snapshot.Reason + "."
+			if event == "server.maintenance_recovered" {
+				body = "The service recovered from read-only maintenance mode. Reason: " + snapshot.Reason + ". Duration: " + time.Since(snapshot.Since).Round(time.Second).String() + "."
+			} else if event == "server.self_healing_exhausted" {
+				body = "Automatic recovery stopped after the configured retry limit. Fix the underlying issue and restart the service."
+			}
+			if err := notifier.sender.Send(notifier.recipient, subject, body); err != nil {
+				log.Printf("maintenance notification delivery failed: event=%s", event)
+			}
+		}
+	}
+	maintenanceState.SetObserver(maintenanceObserver)
+	if snapshot := maintenanceState.Snapshot(); snapshot.Active {
+		maintenanceObserver("server.maintenance_entered", snapshot)
+	}
 	errChan := make(chan error, 1)
-	go func() { errChan <- srv.Start() }()
+	windowsService, serviceDetectionErr := service.IsWindowsService()
+	if serviceDetectionErr != nil {
+		log.Printf("Windows service detection failed")
+		os.Exit(exUnavailable)
+	}
+	if windowsService {
+		go func() {
+			handled, serviceErr := service.RunAsWindowsService(func(ctx context.Context, ready func()) error {
+				windowsServiceReady = ready
+				go func() {
+					<-ctx.Done()
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_ = srv.Shutdown(shutdownCtx)
+				}()
+				return srv.Start()
+			})
+			if handled {
+				errChan <- serviceErr
+			}
+		}()
+	} else {
+		go func() { errChan <- srv.Start() }()
+	}
 	srv.SetAbuseAlertHandler(emitAbuseSecurityAlert)
 
 	// First-run GeoIP download (AI.md PART 19): best-effort, non-blocking.
@@ -709,10 +975,54 @@ func main() {
 	// ── Start the Tor hidden service (AI.md PART 31) ──────────────────────────
 	// Best-effort and non-blocking: the server never fails to start because of
 	// Tor. The manager is nil when no tor binary is installed.
-	torCtx, torCancel := context.WithCancel(context.Background())
-	torMgr := startTor(torCtx, cfg, configDir, dataDir, portNum, srv)
-	i2pCtx, i2pCancel := context.WithCancel(context.Background())
-	go i2pRuntime.run(i2pCtx, cfg.Server.I2P, configDir, dataDir, logsDir, srv.HTTPHandler())
+	readyForBanner := false
+	select {
+	case <-serverReady:
+		readyForBanner = true
+	case earlyErr := <-errChan:
+		errChan <- earlyErr
+	case <-time.After(30 * time.Second):
+		log.Printf("WARN server did not become ready in time for startup banner")
+	}
+	if readyForBanner && !*daemonFlag && !startupSettings.Daemonize {
+		var onionAddress, i2pAddress string
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if torMgr != nil {
+				onionAddress = tor.ReadHostname(dataDir)
+			}
+			if cfg.Server.I2P.Enabled {
+				i2pAddress = i2pRuntime.healthInfo().Hostname
+			}
+			if ((onionAddress != "" || torMgr == nil) && (i2pAddress != "" || !cfg.Server.I2P.Enabled)) || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		fqdn := resolveStartupFQDN()
+		if fqdn == "" {
+			log.Printf("WARN startup FQDN could not be resolved; omitting public URL from banner")
+		}
+		urls := startupURLs(fqdn, serverPort, cfg.Server.BaseURL, cfg.Server.APIVersion, cfg.Server.SSL.Enabled)
+		listenURL := ""
+		if len(urls) > 0 {
+			listenURL = urls[0]
+		}
+		now := time.Now()
+		location, err := time.LoadLocation(startupTimezone())
+		if err != nil {
+			location, _ = time.LoadLocation("America/New_York")
+		}
+		if location != nil {
+			now = now.In(location)
+		}
+		banner.PrintStartupBanner(banner.BannerConfig{
+			AppName: projectName, Version: Version, AppMode: mode.Get().String(), Debug: devMode,
+			URLs: urls, ListenURL: listenURL, StartupTime: now, FirstRun: firstRun,
+			TorURL: overlayURL(onionAddress), I2PURL: overlayURL(i2pAddress), Plain: !colorEnabled,
+			SMTPAddress: cfg.Server.Notifications.Email.SMTP.Host, SMTPPort: cfg.Server.Notifications.Email.SMTP.Port,
+		})
+	}
 
 	// Security databases download on first run and refresh on their scheduled
 	// cadence. These bootstrap updates never block the HTTP listener.
@@ -763,6 +1073,8 @@ func main() {
 	runtimeDeps := scheduler.Deps{
 		StartedElevated:  startedElevated,
 		RestartForUpdate: srv.RestartForUpdate,
+		SSLRenewal:       func(ctx context.Context) error { return srv.RenewTLS(ctx) },
+		LogRotation:      scheduler.HandlerFunc(logRotationTask),
 		AuditRetention:   auditRetention,
 		AuditCompress:    auditCompress,
 		BlocklistUpdate: func(ctx context.Context) error {
@@ -791,7 +1103,9 @@ func main() {
 			_, err := checker.Check(ctx)
 			return err
 		},
-		DiskCheckInterval: cfg.Server.Notifications.DiskLow.CheckInterval,
+		DiskCheckInterval:     cfg.Server.Notifications.DiskLow.CheckInterval,
+		DatabaseCheck:         scheduler.HandlerFunc(newDatabaseCheckHandler(cfg.Server.Notifications.DatabaseError)),
+		DatabaseCheckInterval: cfg.Server.Notifications.DatabaseError.CheckInterval,
 		TorHealth: func(ctx context.Context) error {
 			if torMgr == nil {
 				return fmt.Errorf("%s", cliText("cli.main.tor_manager_unavailable"))
@@ -813,28 +1127,209 @@ func main() {
 	runtimeDeps.TaskState = srv.SchedulerMetricsObserver()
 	// ── Start the always-running task scheduler (AI.md PART 18) ───────────────
 	var sched *scheduler.Scheduler
-	if built, err := buildScheduler(cfg, configDir, dataDir, logsDir, geoipMgr, runtimeDeps); err != nil {
-		log.Printf("%s", cliText("cli.main.build_scheduler_failed", "error", err))
-	} else {
-		sched = built
-		if err := sched.Start(context.Background()); err != nil {
+	var schedMu sync.Mutex
+	startScheduler := func() {
+		schedMu.Lock()
+		defer schedMu.Unlock()
+		if sched != nil {
+			return
+		}
+		built, err := buildScheduler(cfg, configDir, dataDir, logsDir, geoipMgr, runtimeDeps)
+		if err != nil {
+			log.Printf("%s", cliText("cli.main.build_scheduler_failed", "error", err))
+			return
+		}
+		if err := built.Start(context.Background()); err != nil {
 			log.Printf("%s", cliText("cli.main.start_scheduler_failed", "error", err))
+			return
+		}
+		sched = built
+	}
+	if databaseAvailable.Load() && !maintenanceState.Snapshot().Active {
+		startScheduler()
+	}
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			var directoryErr error
+			for _, directory := range []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, apppath.GetBackupDir(), databaseDir} {
+				if err := probeRuntimeDir(directory); err != nil {
+					directoryErr = err
+					break
+				}
+			}
+			if directoryErr != nil {
+				maintenanceState.Enter("file_write", "Required file storage is unavailable", time.Now().UTC())
+			} else if err := db.Ping(); err != nil {
+				databaseAvailable.Store(false)
+				maintenanceState.Enter("database_connection", "Database connection failed", time.Now().UTC())
+			}
+			if maintenanceState.Snapshot().Active {
+				select {
+				case maintenanceWake <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	go func() {
+		for {
+			<-maintenanceWake
+			snapshot := maintenanceState.Snapshot()
+			if !snapshot.Active || snapshot.Exhausted {
+				continue
+			}
+			attempts := snapshot.Attempts
+			retrySeconds := int(cfg.Server.Maintenance.SelfHealing.RetryInterval)
+			if retrySeconds <= 0 {
+				retrySeconds = 30
+			}
+			maxAttempts := cfg.Server.Maintenance.SelfHealing.MaxAttempts
+			var lastAttempt *time.Time
+		retry:
+			for {
+				nextAttempt := time.Now().UTC().Add(time.Duration(retrySeconds) * time.Second)
+				maintenanceState.RecordAttempt(attempts, lastAttempt, &nextAttempt)
+				timer := time.NewTimer(time.Duration(retrySeconds) * time.Second)
+				<-timer.C
+				attemptTime := time.Now().UTC()
+				if cleanupErr := cleanupMaintenanceArtifacts(logsDir, apppath.GetBackupDir(), cfg); cleanupErr != nil {
+					log.Printf("self-healing cleanup failed: %v", cleanupErr)
+				}
+				if !databaseAvailable.Load() {
+					if err := db.Close(); err != nil {
+						log.Printf("self-healing: closing unavailable database failed")
+					}
+					if err := initializeDatabase(); err != nil {
+						attempts++
+						lastAttempt = &attemptTime
+						log.Printf("self-healing: database recovery attempt failed: %v", err)
+						if maxAttempts > 0 && attempts >= maxAttempts {
+							maintenanceState.Exhaust(attempts, lastAttempt)
+							log.Printf("self-healing exhausted after %d attempts; operator action is required", attempts)
+							break retry
+						}
+						continue
+					}
+					databaseAvailable.Store(true)
+					configureRateLimitCache(cfg.Server.Cache, configDir)
+				}
+				var directoryErr error
+				for _, directory := range []string{configDir, dataDir, apppath.GetCacheDir(), logsDir, apppath.GetBackupDir(), databaseDir} {
+					if err := ensureRuntimeDir(directory); err != nil {
+						directoryErr = err
+						break
+					}
+					if err := probeRuntimeDir(directory); err != nil {
+						directoryErr = err
+						break
+					}
+				}
+				if directoryErr != nil || db.Ping() != nil {
+					attempts++
+					lastAttempt = &attemptTime
+					if directoryErr != nil {
+						maintenanceState.Enter("file_write", "Required file storage is unavailable", attemptTime)
+					} else {
+						databaseAvailable.Store(false)
+						maintenanceState.Enter("database_connection", "Database connection failed", attemptTime)
+					}
+					if maxAttempts > 0 && attempts >= maxAttempts {
+						maintenanceState.Exhaust(attempts, lastAttempt)
+						log.Printf("self-healing exhausted after %d attempts; operator action is required", attempts)
+						break retry
+					}
+					continue
+				}
+				if err := db.ProbeWrite(); err != nil {
+					attempts++
+					lastAttempt = &attemptTime
+					databaseAvailable.Store(false)
+					maintenanceState.Enter("database_write", "Database write failed", attemptTime)
+					if maxAttempts > 0 && attempts >= maxAttempts {
+						maintenanceState.Exhaust(attempts, lastAttempt)
+						break retry
+					}
+					continue
+				}
+				if _, err := applyBackupRetention(apppath.GetBackupDir(), cfg.Server.Backup.Retention, cfg.Server.Backup.EncryptionPassword); err != nil {
+					log.Printf("self-healing: backup cleanup failed: %v", err)
+				}
+				if _, integrityErr := audit.VerifyAndReport(logsDir); integrityErr != nil {
+					log.Printf("audit chain verification found a broken entry: %v", integrityErr)
+				}
+				if err := srv.RefreshHealth(); err != nil {
+					attempts++
+					lastAttempt = &attemptTime
+					maintenanceState.RecordAttempt(attempts, lastAttempt, nil)
+					if maxAttempts > 0 && attempts >= maxAttempts {
+						maintenanceState.Exhaust(attempts, lastAttempt)
+						break retry
+					}
+					continue
+				}
+				previous := maintenanceState.Recover()
+				log.Printf("Issue resolved, exiting maintenance mode after %s", time.Since(previous.Since).Round(time.Second))
+				startScheduler()
+				break retry
+			}
+		}
+	}()
+	if snapshot := maintenanceState.Snapshot(); snapshot.Active {
+		select {
+		case maintenanceWake <- struct{}{}:
+		default:
 		}
 	}
 
 	for {
 		select {
 		case err := <-errChan:
+			if err == nil {
+				if cfgManager != nil {
+					cfgManager.Stop()
+				}
+				i2pCancel()
+				torCancel()
+				if torMgr != nil {
+					_ = torMgr.Close()
+				}
+				schedMu.Lock()
+				activeScheduler := sched
+				schedMu.Unlock()
+				if activeScheduler != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+					activeScheduler.Stop(ctx)
+					cancel()
+				}
+				if geoipMgr != nil {
+					_ = geoipMgr.Close()
+				}
+				emitLifecycleEmail("shutdown", "signal", 5*time.Second)
+				_ = db.Close()
+				removePIDFile(pidFile)
+				_ = closeApplicationLogs()
+				os.Exit(0)
+			}
 			if errors.Is(err, server.ErrUpdateRestart) {
-				if sched != nil {
-					sched.Stop(context.Background())
+				schedMu.Lock()
+				activeScheduler := sched
+				schedMu.Unlock()
+				if activeScheduler != nil {
+					activeScheduler.Stop(context.Background())
 				}
 				if cfgManager != nil {
 					cfgManager.Stop()
 				}
 				i2pCancel()
 				torCancel()
+				emitLifecycleEmail("shutdown", "update restart", 5*time.Second)
+				if err := db.Close(); err != nil {
+					log.Printf("database shutdown failed")
+				}
 				removePIDFile(pidFile)
+				_ = closeApplicationLogs()
 				os.Exit(exTempFail)
 			}
 			log.Printf("%s", cliText("cli.main.server_error", "error", err))
@@ -842,6 +1337,7 @@ func main() {
 				cfgManager.Stop()
 			}
 			removePIDFile(pidFile)
+			_ = closeApplicationLogs()
 			os.Exit(exUnavailable)
 		case sig := <-sigChan:
 			switch classifySignal(sig) {
@@ -853,6 +1349,11 @@ func main() {
 				dumpStatus()
 			default:
 				log.Printf("%s", cliText("cli.received_signal", "signal", sig))
+				shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
+				if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
+					log.Printf("graceful server shutdown failed: %v", shutdownErr)
+				}
+				cancelShutdown()
 				if cfgManager != nil {
 					cfgManager.Stop()
 				}
@@ -864,15 +1365,23 @@ func main() {
 						log.Printf("%s", cliText("cli.main.stop_tor_failed", "error", err))
 					}
 				}
-				if sched != nil {
+				schedMu.Lock()
+				activeScheduler := sched
+				schedMu.Unlock()
+				if activeScheduler != nil {
 					ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
-					sched.Stop(ctx)
+					activeScheduler.Stop(ctx)
 					cancel()
 				}
 				if geoipMgr != nil {
 					_ = geoipMgr.Close()
 				}
+				emitLifecycleEmail("shutdown", "signal", 5*time.Second)
+				if err := db.Close(); err != nil {
+					log.Printf("database shutdown failed")
+				}
 				removePIDFile(pidFile)
+				_ = closeApplicationLogs()
 				os.Exit(0)
 			}
 		}
@@ -888,7 +1397,7 @@ func resolveColor(flagValue string) bool {
 	case "no":
 		return false
 	default:
-		if _, set := os.LookupEnv("NO_COLOR"); set {
+		if os.Getenv("NO_COLOR") != "" {
 			return false
 		}
 		return isatty.IsTerminal(os.Stdout.Fd())
@@ -907,6 +1416,114 @@ func ensureRuntimeDir(path string) error {
 		perm = 0755
 	}
 	return os.MkdirAll(path, perm)
+}
+
+func probeRuntimeDir(path string) error {
+	if path == "" {
+		return nil
+	}
+	probe, err := os.CreateTemp(path, ".gitignore-write-probe-*")
+	if err != nil {
+		return err
+	}
+	name := probe.Name()
+	if closeErr := probe.Close(); closeErr != nil {
+		_ = os.Remove(name)
+		return closeErr
+	}
+	if err := os.Remove(name); err != nil {
+		return err
+	}
+	return nil
+}
+
+func cleanupMaintenanceArtifacts(logsDir, backupDir string, cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if ownedDirectory(logsDir) {
+		retentionDays := cfg.Server.Maintenance.Cleanup.LogRetentionDays
+		if retentionDays <= 0 {
+			retentionDays = 7
+		}
+		entries, err := os.ReadDir(logsDir)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		cutoff := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() || strings.HasPrefix(name, "audit.log.") || !strings.Contains(name, ".log.") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil || !info.ModTime().Before(cutoff) {
+				continue
+			}
+			if err := os.Remove(filepath.Join(logsDir, name)); err != nil {
+				return err
+			}
+		}
+	}
+	if ownedDirectory(backupDir) {
+		if _, err := applyBackupRetention(backupDir, cfg.Server.Backup.Retention, cfg.Server.Backup.EncryptionPassword); err != nil {
+			return err
+		}
+	}
+	return cleanupProjectTempArtifacts()
+}
+
+func ownedDirectory(path string) bool {
+	if path == "" {
+		return false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil || filepath.Clean(abs) == filepath.VolumeName(abs)+string(os.PathSeparator) {
+		return false
+	}
+	volume := filepath.VolumeName(abs)
+	current := volume + string(os.PathSeparator)
+	relative := strings.TrimPrefix(strings.TrimPrefix(abs, volume), string(os.PathSeparator))
+	for _, segment := range strings.Split(relative, string(os.PathSeparator)) {
+		if segment == "" {
+			continue
+		}
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+		if current == abs && !info.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanupProjectTempArtifacts() error {
+	base := filepath.Join(os.TempDir(), internalOrg)
+	if !ownedDirectory(base) {
+		return nil
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasPrefix(entry.Name(), internalName+"-") {
+			continue
+		}
+		path := filepath.Join(base, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // normalizeBaseURL canonicalises a URL path prefix (AI.md PART 8 "--baseurl"):
@@ -932,10 +1549,125 @@ func resolveMode(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "production", "prod":
 		return "production"
-	case "development", "dev":
+	case "development", "dev", "devel":
 		return "development"
+	case "debug":
+		return "debug"
 	}
 	return ""
+}
+
+func startupURLs(fqdn, portPair, baseURL, apiVersion string, tlsEnabled bool) []string {
+	fqdn = strings.TrimSpace(fqdn)
+	if fqdn == "" {
+		return nil
+	}
+	ports := strings.Split(portPair, ",")
+	base := "/" + strings.Trim(strings.TrimSpace(baseURL), "/")
+	if base == "/" {
+		base = ""
+	}
+	version := strings.Trim(strings.TrimSpace(apiVersion), "/")
+	if version == "" {
+		version = "v1"
+	}
+	urls := make([]string, 0, len(ports)*2)
+	for index, value := range ports {
+		port := strings.TrimSpace(value)
+		if port == "" {
+			continue
+		}
+		scheme := "http"
+		if index == 1 || port == "443" || tlsEnabled && len(ports) == 1 {
+			scheme = "https"
+		}
+		host := fqdn
+		if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+			host = "[" + host + "]"
+		}
+		displayPort := port
+		if scheme == "http" && port == "80" || scheme == "https" && port == "443" {
+			displayPort = ""
+		}
+		origin := scheme + "://" + host
+		if displayPort != "" {
+			origin += ":" + displayPort
+		}
+		urls = append(urls, origin+base, origin+base+"/api/"+version+"/server/swagger")
+	}
+	return urls
+}
+
+func resolveStartupFQDN() string {
+	if domain := firstDomain(os.Getenv("DOMAIN")); domain != "" {
+		return domain
+	}
+	if hostname, err := os.Hostname(); err == nil && usableConfiguredHost(hostname) {
+		return hostname
+	}
+	if hostname := strings.TrimSpace(os.Getenv("HOSTNAME")); usableConfiguredHost(hostname) {
+		return hostname
+	}
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	var ipv6, ipv4 string
+	for _, address := range addresses {
+		ip, _, err := net.ParseCIDR(address.String())
+		if err != nil {
+			continue
+		}
+		parsed, parseErr := netip.ParseAddr(ip.String())
+		if parseErr != nil || !parsed.IsGlobalUnicast() || parsed.IsPrivate() || parsed.IsLoopback() || parsed.IsLinkLocalUnicast() || parsed.IsUnspecified() {
+			continue
+		}
+		if parsed.Is6() && ipv6 == "" {
+			ipv6 = parsed.String()
+		}
+		if parsed.Is4() && ipv4 == "" {
+			ipv4 = parsed.String()
+		}
+	}
+	if ipv6 != "" {
+		return ipv6
+	}
+	return ipv4
+}
+
+func firstDomain(domains string) string {
+	for _, domain := range strings.Split(domains, ",") {
+		if value := strings.TrimSpace(domain); usableConfiguredHost(value) {
+			return value
+		}
+	}
+	return ""
+}
+
+func usableConfiguredHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		return !address.IsLoopback() && !address.IsUnspecified() && !address.IsMulticast()
+	}
+	return true
+}
+
+func overlayURL(address string) string {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return ""
+	}
+	return "http://" + address
+}
+
+func startupTimezone() string {
+	if value := strings.TrimSpace(os.Getenv("TZ")); value != "" {
+		return value
+	}
+	return "America/New_York"
 }
 
 func printHelp(binaryName string) {
@@ -985,8 +1717,6 @@ func handleServiceCommand(cmd, configDir string, force bool) {
 			log.Printf("%s", cliText("cli.main.reload_service_failed", "error", err))
 			os.Exit(exOSErr)
 		}
-	case "status":
-		serviceStatus()
 	case "--install":
 		installService()
 	case "--uninstall":
@@ -998,11 +1728,32 @@ func handleServiceCommand(cmd, configDir string, force bool) {
 		serviceDisable()
 	case "--help":
 		fmt.Println(cliText("cli.main.service_commands"))
-		fmt.Println()
-		serviceStatus()
 	default:
 		fmt.Fprintln(os.Stderr, cliText("cli.main.unknown_service_command", "command", cmd))
 		os.Exit(1)
+	}
+}
+
+// confirmPortEscalation asks before re-executing the server with elevated privileges.
+func confirmPortEscalation(assumeYes bool) bool {
+	if assumeYes {
+		return true
+	}
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return false
+	}
+	fmt.Println(i18n.TranslateFormat(outputLanguage, "cli.requires_privileges", "action", "Binding to a privileged port"))
+	fmt.Print(i18n.Translate(outputLanguage, "cli.escalate_prompt"))
+	response, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && response == "" {
+		return false
+	}
+	response = strings.ToLower(strings.TrimSpace(response))
+	switch response {
+	case "", "y", "yes", "j", "ja", "o", "oui", "s", "si", "да", "نعم":
+		return true
+	default:
+		return false
 	}
 }
 

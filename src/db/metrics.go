@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -13,10 +14,18 @@ import (
 )
 
 type queryObserver func(operation, table string, duration time.Duration, err error)
+type debugQueryObserver func(query string, argCount int, rows int64, duration time.Duration, err error)
+type debugCacheObserver func(operation, key string, hit bool, duration time.Duration)
+type cacheMetricsObserver func(cache string, hit bool)
+type cacheEvictionObserver func(cache string, count uint64)
 
 var (
 	observerMu        sync.RWMutex
 	observer          queryObserver
+	debugObserver     debugQueryObserver
+	debugCache        debugCacheObserver
+	cacheMetrics      cacheMetricsObserver
+	cacheEvictions    cacheEvictionObserver
 	writeObserver     func(time.Duration, bool)
 	metricsDriverMu   sync.Mutex
 	metricsDriverMap  = map[string]string{}
@@ -29,6 +38,93 @@ func SetWriteObserver(callback func(time.Duration, bool)) {
 	observerMu.Lock()
 	writeObserver = callback
 	observerMu.Unlock()
+}
+
+// SetDebugQueryObserver installs a debug-only SQL statement observer. It
+// reports argument count rather than values so credentials and user data are
+// not copied into logs.
+func SetDebugQueryObserver(callback func(query string, argCount int, rows int64, duration time.Duration, err error)) {
+	observerMu.Lock()
+	debugObserver = callback
+	observerMu.Unlock()
+}
+
+// SetDebugCacheObserver installs a debug-only cache operation observer.
+func SetDebugCacheObserver(callback func(operation, key string, hit bool, duration time.Duration)) {
+	observerMu.Lock()
+	debugCache = callback
+	observerMu.Unlock()
+}
+
+// SetCacheMetricsObserver installs the production cache hit/miss callback.
+func SetCacheMetricsObserver(callback func(cache string, hit bool)) {
+	observerMu.Lock()
+	cacheMetrics = callback
+	observerMu.Unlock()
+}
+
+// SetCacheEvictionObserver installs the production cache eviction callback.
+func SetCacheEvictionObserver(callback func(cache string, count uint64)) {
+	observerMu.Lock()
+	cacheEvictions = callback
+	observerMu.Unlock()
+}
+
+// CacheMetricsSnapshot reports bounded item and byte counts for active caches.
+func CacheMetricsSnapshot() []CacheMetricSnapshot {
+	snapshots := make([]CacheMetricSnapshot, 0, 2)
+	size, bytes := rateLimitFallbackSnapshot()
+	snapshots = append(snapshots, CacheMetricSnapshot{Cache: "rate_limit", Size: size, Bytes: bytes})
+	mu.RLock()
+	cache := localCache
+	mu.RUnlock()
+	if cache != nil {
+		if snapshot, ok := cache.metricsSnapshot(); ok {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	return snapshots
+}
+
+// CacheMetricSnapshot contains a cache's bounded public metrics values.
+type CacheMetricSnapshot struct {
+	Cache string
+	Size  int64
+	Bytes int64
+}
+
+func observeCache(operation, query string, hit bool, start time.Time) {
+	_, table := queryLabels(query)
+	observeCacheLabel(operation, table, hit, start)
+}
+
+func observeCacheLabel(operation, key string, hit bool, start time.Time) {
+	observerMu.RLock()
+	callback := debugCache
+	metricsCallback := cacheMetrics
+	observerMu.RUnlock()
+	if callback != nil {
+		callback(operation, key, hit, time.Since(start))
+	}
+	if metricsCallback != nil {
+		cache := "remote_db"
+		if strings.HasPrefix(operation, "rate_limit") {
+			cache = "rate_limit"
+		}
+		metricsCallback(cache, hit)
+	}
+}
+
+func observeCacheEvictions(cache string, count uint64) {
+	if count == 0 {
+		return
+	}
+	observerMu.RLock()
+	callback := cacheEvictions
+	observerMu.RUnlock()
+	if callback != nil {
+		callback(cache, count)
+	}
 }
 
 func recordWriteWait(wait time.Duration, busy bool) {
@@ -81,15 +177,70 @@ func SetQueryObserver(callback func(operation, table string, duration time.Durat
 	observerMu.Unlock()
 }
 
-func observeQuery(query string, start time.Time, err error) {
+func observeQuery(query string, argCount int, start time.Time, err error) {
+	observeQueryMetrics(query, start, err)
+	observeDebugQuery(query, argCount, -1, start, err)
+}
+
+func observeQueryMetrics(query string, start time.Time, err error) {
 	observerMu.RLock()
 	callback := observer
 	observerMu.RUnlock()
-	if callback == nil {
-		return
+	if callback != nil {
+		operation, table := queryLabels(query)
+		callback(operation, table, time.Since(start), err)
 	}
-	operation, table := queryLabels(query)
-	callback(operation, table, time.Since(start), err)
+}
+
+func observeDebugQuery(query string, argCount int, rows int64, start time.Time, err error) {
+	observerMu.RLock()
+	debugCallback := debugObserver
+	observerMu.RUnlock()
+	if debugCallback != nil {
+		debugCallback(query, argCount, rows, time.Since(start), err)
+	}
+}
+
+func observeDebugRows(rows driver.Rows, query string, argCount int, start time.Time) driver.Rows {
+	observerMu.RLock()
+	callback := debugObserver
+	observerMu.RUnlock()
+	if callback == nil || rows == nil {
+		return rows
+	}
+	return &debugObservedRows{Rows: rows, query: query, argCount: argCount, start: start}
+}
+
+type debugObservedRows struct {
+	driver.Rows
+	query    string
+	argCount int
+	start    time.Time
+	count    int64
+	once     sync.Once
+}
+
+func (rows *debugObservedRows) Next(destination []driver.Value) error {
+	err := rows.Rows.Next(destination)
+	if err == nil {
+		rows.count++
+	} else {
+		rows.finish(err)
+	}
+	return err
+}
+
+func (rows *debugObservedRows) Close() error {
+	err := rows.Rows.Close()
+	rows.finish(err)
+	return err
+}
+
+func (rows *debugObservedRows) finish(err error) {
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	rows.once.Do(func() { observeDebugQuery(rows.query, rows.argCount, rows.count, rows.start, err) })
 }
 
 func queryLabels(query string) (string, string) {
@@ -271,7 +422,7 @@ func (c *instrumentedConn) ExecContext(ctx context.Context, query string, args [
 		return nil, driver.ErrSkip
 	}
 	result, err := execer.ExecContext(ctx, mapServerIdentifiers(query, c.prefix), args)
-	observeQuery(query, start, err)
+	observeQuery(query, len(args), start, err)
 	if err == nil {
 		c.noteWrite(ctx, query)
 	}
@@ -280,9 +431,13 @@ func (c *instrumentedConn) ExecContext(ctx context.Context, query string, args [
 
 func (c *instrumentedConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	if c.cacheReader && localCache != nil && localCache.isExpired() {
+		start := time.Now()
 		if rows, err := localCache.freshRemoteQuery(ctx, query, args); err == nil {
-			return rows, nil
+			observeCache("refresh", query, false, start)
+			return observeDebugRows(rows, query, len(args), start), nil
 		} else {
+			observeCache("refresh", query, false, start)
+			observeDebugQuery(query, len(args), 0, start, err)
 			return nil, err
 		}
 	}
@@ -292,14 +447,26 @@ func (c *instrumentedConn) QueryContext(ctx context.Context, query string, args 
 		return nil, driver.ErrSkip
 	}
 	rows, err := queryer.QueryContext(ctx, mapServerIdentifiers(query, c.prefix), args)
-	observeQuery(query, start, err)
+	observeQueryMetrics(query, start, err)
+	if err != nil {
+		observeDebugQuery(query, len(args), 0, start, err)
+	}
 	if err != nil && c.prefix && localCache != nil {
+		cacheStart := time.Now()
 		if cached, cacheErr := localCache.fallbackQuery(ctx, query, args); cacheErr == nil {
-			return cached, nil
+			observeCache("fallback", query, true, cacheStart)
+			return observeDebugRows(cached, query, len(args), start), nil
+		} else {
+			observeCache("fallback", query, false, cacheStart)
 		}
 	}
 	if err == nil && c.cacheReader && localCache != nil {
+		cacheStart := time.Now()
 		rows = localCache.readThrough(rows, ctx, query, args)
+		observeCache("read_through", query, false, cacheStart)
+	}
+	if err == nil {
+		rows = observeDebugRows(rows, query, len(args), start)
 	}
 	return rows, err
 }
@@ -447,7 +614,7 @@ func (s *instrumentedStmt) ExecContext(ctx context.Context, args []driver.NamedV
 	}
 	start := time.Now()
 	result, err := stmt.ExecContext(ctx, args)
-	observeQuery(s.query, start, err)
+	observeQuery(s.query, len(args), start, err)
 	if err == nil && s.conn != nil {
 		s.conn.noteWrite(ctx, s.query)
 	}
@@ -456,11 +623,14 @@ func (s *instrumentedStmt) ExecContext(ctx context.Context, args []driver.NamedV
 
 func (s *instrumentedStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	if s.cacheReader && localCache != nil && localCache.isExpired() {
+		start := time.Now()
 		rows, err := localCache.freshRemoteQuery(ctx, s.query, args)
+		observeCache("refresh", s.query, false, start)
 		if err != nil {
+			observeDebugQuery(s.query, len(args), 0, start, err)
 			return nil, err
 		}
-		return rows, nil
+		return observeDebugRows(rows, s.query, len(args), start), nil
 	}
 	stmt, ok := s.Stmt.(driver.StmtQueryContext)
 	if !ok {
@@ -468,14 +638,26 @@ func (s *instrumentedStmt) QueryContext(ctx context.Context, args []driver.Named
 	}
 	start := time.Now()
 	rows, err := stmt.QueryContext(ctx, args)
-	observeQuery(s.query, start, err)
+	observeQueryMetrics(s.query, start, err)
+	if err != nil {
+		observeDebugQuery(s.query, len(args), 0, start, err)
+	}
 	if err != nil && s.prefix && localCache != nil {
+		cacheStart := time.Now()
 		if cached, cacheErr := localCache.fallbackQuery(ctx, s.query, args); cacheErr == nil {
-			return cached, nil
+			observeCache("fallback", s.query, true, cacheStart)
+			return observeDebugRows(cached, s.query, len(args), start), nil
+		} else {
+			observeCache("fallback", s.query, false, cacheStart)
 		}
 	}
 	if err == nil && s.cacheReader && localCache != nil {
+		cacheStart := time.Now()
 		rows = localCache.readThrough(rows, ctx, s.query, args)
+		observeCache("read_through", s.query, false, cacheStart)
+	}
+	if err == nil {
+		rows = observeDebugRows(rows, s.query, len(args), start)
 	}
 	return rows, err
 }

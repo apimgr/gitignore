@@ -2,6 +2,7 @@ package path
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -39,7 +40,7 @@ func GetDirectories() Directories {
 func GetDefaultDirs(projectName string) (configDir, dataDir, logsDir, backupDir string) {
 	// Check if running in container
 	if IsRunningInContainer() {
-		return "/config", "/data", "/data/logs", "/data/backups"
+		return filepath.Join("/config", projectName), filepath.Join("/data", projectName), filepath.Join("/data", "log", projectName), filepath.Join("/data", "backups", projectName)
 	}
 
 	isRoot := false
@@ -142,6 +143,99 @@ func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0755)
 }
 
+// EnforcePrivate fixes the private configuration and data trees before they are read.
+func EnforcePrivate(configDir, dataDir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	for _, dir := range []string{
+		filepath.Join(configDir, "yaml.d"), filepath.Join(configDir, "assets"),
+		filepath.Join(configDir, "ssl"), filepath.Join(configDir, "tor"),
+		filepath.Join(configDir, "i2p"), filepath.Join(dataDir, "security"),
+		filepath.Join(dataDir, "cache", "branding"),
+		filepath.Join(dataDir, "tor"), filepath.Join(dataDir, "tor", "site"),
+	} {
+		if err := enforcePrivateTree(dir); err != nil {
+			return err
+		}
+	}
+	for _, file := range []string{filepath.Join(configDir, "server.yml"), filepath.Join(configDir, "secrets.yml")} {
+		info, err := os.Lstat(file)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cannot inspect private path %s (mode unknown)", file)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("cannot secure private path %s (mode %s)", file, info.Mode())
+		}
+		if err := enforcePrivateMode(file, info, 0600); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(file, os.O_RDWR, 0)
+		if err != nil {
+			return fmt.Errorf("private path %s (mode %s) is not usable", file, info.Mode())
+		}
+		_ = f.Close()
+	}
+	return nil
+}
+
+func enforcePrivateTree(root string) error {
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return fmt.Errorf("cannot create private path %s (mode 0700)", root)
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("cannot secure private path %s (mode unknown)", path)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("cannot inspect private path %s (mode unknown)", path)
+		}
+		mode := os.FileMode(0600)
+		if info.IsDir() {
+			mode = 0700
+		} else if !info.Mode().IsRegular() {
+			return fmt.Errorf("cannot secure private path %s (mode %s)", path, info.Mode())
+		}
+		if err := enforcePrivateMode(path, info, mode); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			probe, err := os.CreateTemp(path, ".private-probe-")
+			if err != nil {
+				return fmt.Errorf("private path %s (mode %s) is not usable", path, info.Mode())
+			}
+			name := probe.Name()
+			_ = probe.Close()
+			if err := os.Remove(name); err != nil {
+				return fmt.Errorf("private path %s (mode %s) is not usable", path, info.Mode())
+			}
+		} else {
+			file, err := os.OpenFile(path, os.O_RDWR, 0)
+			if err != nil {
+				return fmt.Errorf("private path %s (mode %s) is not usable", path, info.Mode())
+			}
+			_ = file.Close()
+		}
+		return nil
+	})
+}
+
+func enforcePrivateMode(path string, info fs.FileInfo, mode os.FileMode) error {
+	if info.Mode().Perm() == mode {
+		return nil
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		if !os.IsPermission(err) || info.Mode().Perm()&0077 != 0 {
+			return fmt.Errorf("cannot secure private path %s (mode %s)", path, info.Mode())
+		}
+	}
+	return nil
+}
+
 // IsRunningInContainer checks if running inside a container
 func IsRunningInContainer() bool {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
@@ -166,6 +260,18 @@ func GetBackupDir() string {
 	return backupDir
 }
 
+// GetDatabaseDir returns the database directory, honoring DATABASE_DIR before
+// applying the container or native default.
+func GetDatabaseDir(dataDir string) string {
+	if v := strings.TrimSpace(os.Getenv("DATABASE_DIR")); v != "" {
+		return v
+	}
+	if IsRunningInContainer() {
+		return filepath.Join("/data", "db", "sqlite")
+	}
+	return filepath.Join(dataDir, "db")
+}
+
 // isPrivileged reports whether the process is running with elevated
 // privileges (root on Unix, an administrator account on Windows).
 func isPrivileged() bool {
@@ -184,7 +290,7 @@ func GetCacheDir() string {
 		return v
 	}
 	if IsRunningInContainer() {
-		return "/data/cache"
+		return filepath.Join("/data", ProjectName, "cache")
 	}
 
 	if isPrivileged() {

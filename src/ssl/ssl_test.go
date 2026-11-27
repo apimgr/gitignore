@@ -1,9 +1,15 @@
 package ssl
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // writeStubCert writes placeholder cert/key files (existence-only) into dir.
@@ -97,10 +103,8 @@ func TestGetTLSConfigLocalCheckedBeforeLetsEncrypt(t *testing.T) {
 	}
 }
 
-// TestGetTLSConfigOverlayForcesSelfSigned verifies overlay-network domains skip
-// Let's Encrypt entirely and generate a self-signed cert under local/{fqdn}
-// (AI.md PART 15 overlay handling).
-func TestGetTLSConfigOverlayForcesSelfSigned(t *testing.T) {
+// TestGetTLSConfigOverlayHasNoCertificate verifies overlay domains stay HTTP-only.
+func TestGetTLSConfigOverlayHasNoCertificate(t *testing.T) {
 	certPath := t.TempDir()
 	fqdn := "exampleonionaddress.onion"
 
@@ -118,12 +122,12 @@ func TestGetTLSConfigOverlayForcesSelfSigned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTLSConfig: %v", err)
 	}
-	if cfg == nil || len(cfg.Certificates) != 1 {
-		t.Fatalf("expected a self-signed certificate, got %+v", cfg)
+	if cfg != nil {
+		t.Fatalf("expected no TLS config for overlay domain, got %+v", cfg)
 	}
 	certFile := filepath.Join(certPath, "local", fqdn, "cert.pem")
-	if _, err := os.Stat(certFile); err != nil {
-		t.Errorf("expected self-signed cert at %s: %v", certFile, err)
+	if _, err := os.Stat(certFile); !os.IsNotExist(err) {
+		t.Errorf("overlay domain unexpectedly created a certificate at %s", certFile)
 	}
 }
 
@@ -139,10 +143,9 @@ func TestGetTLSConfigDisabledReturnsNil(t *testing.T) {
 	}
 }
 
-// TestDNS01FallsBackToSelfSigned verifies selecting the dns-01 challenge without
-// the DNS provider integration falls back to a self-signed cert rather than
-// failing (AI.md PART 15 DNS-01 provider config).
-func TestDNS01FallsBackToSelfSigned(t *testing.T) {
+// TestDNS01FailureDoesNotFallBack verifies configured DNS issuance failures
+// cannot silently serve a self-signed certificate.
+func TestDNS01FailureDoesNotFallBack(t *testing.T) {
 	certPath := t.TempDir()
 	fqdn := "dns01-test.example"
 
@@ -153,15 +156,122 @@ func TestDNS01FallsBackToSelfSigned(t *testing.T) {
 			Enabled:     true,
 			Email:       "admin@example.com",
 			Challenge:   "dns-01",
-			DNSProvider: "cloudflare",
+			DNSProvider: "definitely-not-a-lego-provider",
 		},
 	})
 
-	cfg, err := m.GetTLSConfig([]string{fqdn})
-	if err != nil {
-		t.Fatalf("GetTLSConfig: %v", err)
+	if cfg, err := m.GetTLSConfig([]string{fqdn}); err == nil || cfg != nil {
+		t.Fatalf("expected DNS issuance failure without fallback, got config=%+v err=%v", cfg, err)
 	}
-	if cfg == nil || len(cfg.Certificates) != 1 {
-		t.Fatalf("expected self-signed fallback certificate, got %+v", cfg)
+}
+
+func TestDNSProviderRestoresEnvironmentAfterConstruction(t *testing.T) {
+	const key = "GITIGNORE_DNS_PROVIDER_TEST_VALUE"
+	t.Setenv(key, "original")
+	if _, err := dnsProvider("not-a-provider", map[string]string{key: "secret-value"}); err == nil {
+		t.Fatal("expected unknown provider error")
+	}
+	if got := os.Getenv(key); got != "original" {
+		t.Fatalf("provider environment was not restored: %q", got)
+	}
+}
+
+func TestValidateCertificateRequiresCurrentValidityAndHostname(t *testing.T) {
+	now := time.Now()
+	certificate := &x509.Certificate{
+		DNSNames:  []string{"api.example.test"},
+		NotBefore: now.Add(-time.Hour),
+		NotAfter:  now.Add(time.Hour),
+	}
+	if err := validateCertificate(certificate, []string{"api.example.test"}, now); err != nil {
+		t.Fatalf("valid certificate rejected: %v", err)
+	}
+	if err := validateCertificate(certificate, []string{"other.example.test"}, now); err == nil {
+		t.Fatal("certificate with mismatched hostname was accepted")
+	}
+	legacyCertificate := &x509.Certificate{Subject: pkix.Name{CommonName: "legacy.example.test"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}
+	if err := validateCertificate(legacyCertificate, []string{"legacy.example.test"}, now); err != nil {
+		t.Fatalf("matching legacy common name rejected: %v", err)
+	}
+	if err := validateCertificate(legacyCertificate, []string{"other.example.test"}, now); err == nil {
+		t.Fatal("mismatched legacy common name was accepted")
+	}
+	if err := validateCertificate(certificate, []string{"api.example.test"}, now.Add(2*time.Hour)); err == nil {
+		t.Fatal("expired certificate was accepted")
+	}
+	if err := validateCertificate(certificate, []string{"api.example.test"}, now.Add(-2*time.Hour)); err == nil {
+		t.Fatal("not-yet-valid certificate was accepted")
+	}
+}
+
+func TestRFC2136CredentialAliasesAndKeyPath(t *testing.T) {
+	sslDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sslDir, "acme.key"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareDNSCredentials("rfc2136", map[string]string{
+		"RFC2136_NAMESERVER": "ns.example.test",
+		"RFC2136_TSIG_FILE":  "acme.key",
+	}, sslDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared["DNSUPDATE_NAMESERVER"] != "ns.example.test" || prepared["DNSUPDATE_TSIG_FILE"] != filepath.Join(sslDir, "acme.key") {
+		t.Fatalf("prepared RFC2136 credentials = %#v", prepared)
+	}
+	if _, err := prepareDNSCredentials("rfc2136", map[string]string{"DNSUPDATE_TSIG_FILE": "../outside.key"}, sslDir); err == nil {
+		t.Fatal("path traversal key file was accepted")
+	}
+}
+
+func TestAppManagedCertificateWiresChallengeHandlers(t *testing.T) {
+	for _, challenge := range []string{"http-01", "tls-alpn-01"} {
+		t.Run(challenge, func(t *testing.T) {
+			root := t.TempDir()
+			domain := "challenge-test.example"
+			dir := filepath.Join(root, "letsencrypt", domain)
+			if err := generateSelfSigned(dir, []string{domain}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(filepath.Join(dir, "cert.pem"), filepath.Join(dir, "fullchain.pem")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(filepath.Join(dir, "key.pem"), filepath.Join(dir, "privkey.pem")); err != nil {
+				t.Fatal(err)
+			}
+			manager := NewManager(Config{Enabled: true, CertPath: root, LetsEncrypt: LetsEncryptConfig{Enabled: true, Email: "admin@example.com", Challenge: challenge}})
+			tlsConfig, err := manager.GetTLSConfig([]string{domain})
+			if err != nil {
+				t.Fatalf("GetTLSConfig: %v", err)
+			}
+			if tlsConfig.GetCertificate == nil {
+				t.Fatal("app-managed certificate has no dynamic ACME certificate callback")
+			}
+			if challenge == "tls-alpn-01" {
+				found := false
+				for _, protocol := range tlsConfig.NextProtos {
+					if protocol == "acme-tls/1" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("TLS-ALPN protocol missing from NextProtos: %v", tlsConfig.NextProtos)
+				}
+			}
+			certificate, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{ServerName: domain})
+			if err != nil || certificate == nil {
+				t.Fatalf("GetCertificate = %v, %v", certificate, err)
+			}
+			fallbackCalled := false
+			handler := manager.GetHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fallbackCalled = true
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health", nil))
+			if !fallbackCalled || response.Code != http.StatusNoContent {
+				t.Fatal("HTTP challenge wrapper did not preserve the server handler")
+			}
+		})
 	}
 }

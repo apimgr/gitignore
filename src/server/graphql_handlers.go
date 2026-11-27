@@ -98,7 +98,7 @@ func (s *Server) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 			queryError.Message = i18n.T(r, "graphql.errors.query_failed")
 		}
 	}
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := encodeJSON(w, response); err != nil {
 		return
 	}
 }
@@ -122,7 +122,7 @@ func writeGraphQLError(w http.ResponseWriter, r *http.Request, status int, key s
 	setCacheHeaders(w, "api")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	_ = encodeJSON(w, map[string]any{
 		"errors": []map[string]string{{"message": i18n.T(r, key)}},
 	})
 }

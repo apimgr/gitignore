@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/apimgr/gitignore/src/common/display"
 	"github.com/apimgr/gitignore/src/common/i18n"
 	apppath "github.com/apimgr/gitignore/src/path"
 )
@@ -71,14 +73,14 @@ const (
 // fallback when NO_COLOR is set, per the NO_COLOR convention used
 // throughout this project (see src/main.go resolveColor).
 func okMark() string {
-	if _, set := os.LookupEnv("NO_COLOR"); set {
+	if os.Getenv("NO_COLOR") != "" {
 		return "[OK]"
 	}
 	return "✅"
 }
 
 func warnMark() string {
-	if _, set := os.LookupEnv("NO_COLOR"); set {
+	if os.Getenv("NO_COLOR") != "" {
 		return "[WARN]"
 	}
 	return "⚠️ "
@@ -304,12 +306,14 @@ func GetBinaryPath() string {
 type EscalationMethod string
 
 const (
-	EscalateNone   EscalationMethod = ""
-	EscalateSudo   EscalationMethod = "sudo"
-	EscalateSu     EscalationMethod = "su"
-	EscalatePkexec EscalationMethod = "pkexec"
-	EscalateDoas   EscalationMethod = "doas"
-	EscalateRunas  EscalationMethod = "runas"
+	EscalateNone      EscalationMethod = ""
+	EscalateSudo      EscalationMethod = "sudo"
+	EscalateSu        EscalationMethod = "su"
+	EscalatePkexec    EscalationMethod = "pkexec"
+	EscalateDoas      EscalationMethod = "doas"
+	EscalateRunas     EscalationMethod = "runas"
+	EscalateOSAScript EscalationMethod = "osascript"
+	EscalateUAC       EscalationMethod = "uac"
 )
 
 // IsElevated reports whether the process already has the privileges
@@ -323,34 +327,57 @@ func IsElevated() bool {
 	return os.Geteuid() == 0
 }
 
-// DetectEscalation finds the first usable escalation method for the
-// current platform, tried in the order specified by AI.md PART 23
-// (Linux: sudo -> su -> pkexec -> doas; Windows: runas).
+// DetectEscalation finds the first usable escalation method in the platform
+// order specified by AI.md PART 23.
 func DetectEscalation() EscalationMethod {
 	if IsElevated() {
 		return EscalateNone
 	}
 
 	if runtime.GOOS == "windows" {
+		if display.DetectDisplayEnv().HasDisplay && hasExecutable("powershell") {
+			return EscalateUAC
+		}
 		if hasExecutable("runas") {
 			return EscalateRunas
 		}
 		return EscalateNone
 	}
 
-	if hasExecutable("sudo") {
-		if exec.Command("sudo", "-n", "true").Run() == nil || canSudoInteractively() {
+	sudoAvailable := func() bool {
+		return hasExecutable("sudo") && (exec.Command("sudo", "-n", "true").Run() == nil || canSudoInteractively())
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		if sudoAvailable() {
 			return EscalateSudo
 		}
-	}
-	if hasExecutable("su") {
-		return EscalateSu
-	}
-	if hasExecutable("pkexec") {
-		return EscalatePkexec
-	}
-	if hasExecutable("doas") {
-		return EscalateDoas
+		if hasExecutable("osascript") && display.DetectDisplayEnv().HasDisplay {
+			return EscalateOSAScript
+		}
+	case "freebsd", "openbsd", "netbsd":
+		if hasExecutable("doas") {
+			return EscalateDoas
+		}
+		if sudoAvailable() {
+			return EscalateSudo
+		}
+		if hasExecutable("su") {
+			return EscalateSu
+		}
+	default:
+		if sudoAvailable() {
+			return EscalateSudo
+		}
+		if hasExecutable("su") {
+			return EscalateSu
+		}
+		if hasExecutable("pkexec") {
+			return EscalatePkexec
+		}
+		if hasExecutable("doas") {
+			return EscalateDoas
+		}
 	}
 	return EscalateNone
 }
@@ -399,6 +426,12 @@ func ExecElevated(method EscalationMethod, args []string) error {
 		cmd = exec.Command("doas", args...)
 	case EscalateRunas:
 		cmd = exec.Command("runas", append([]string{"/user:Administrator"}, args...)...)
+	case EscalateOSAScript:
+		command := shellJoin(args)
+		command = strings.ReplaceAll(strings.ReplaceAll(command, `\`, `\\`), `"`, `\"`)
+		cmd = exec.Command("osascript", "-e", `do shell script "`+command+`" with administrator privileges`)
+	case EscalateUAC:
+		return execElevatedUAC(args)
 	default:
 		return fmt.Errorf("%s", serviceText("cli.service.escalation_method_unavailable"))
 	}
@@ -414,6 +447,50 @@ func shellJoin(args []string) string {
 	quoted := make([]string, len(args))
 	for i, a := range args {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
+}
+
+func execElevatedUAC(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%s", serviceText("cli.service.reexecute_arguments_missing"))
+	}
+	executable := base64.StdEncoding.EncodeToString([]byte(args[0]))
+	arguments := base64.StdEncoding.EncodeToString([]byte(windowsCommandLine(args[1:])))
+	script := "$exe=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + executable + "')); " +
+		"$line=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + arguments + "')); " +
+		"$p=Start-Process -FilePath $exe -ArgumentList $line -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func windowsCommandLine(args []string) string {
+	quoted := make([]string, len(args))
+	for index, arg := range args {
+		var out strings.Builder
+		out.WriteByte('"')
+		backslashes := 0
+		for _, char := range arg {
+			if char == '\\' {
+				backslashes++
+				continue
+			}
+			if char == '"' {
+				out.WriteString(strings.Repeat("\\", backslashes*2+1))
+				out.WriteRune(char)
+				backslashes = 0
+				continue
+			}
+			out.WriteString(strings.Repeat("\\", backslashes))
+			backslashes = 0
+			out.WriteRune(char)
+		}
+		out.WriteString(strings.Repeat("\\", backslashes*2))
+		out.WriteByte('"')
+		quoted[index] = out.String()
 	}
 	return strings.Join(quoted, " ")
 }
@@ -769,7 +846,7 @@ func installSystemd() error {
 
 	// Ensure service user exists now that its home directory is in place
 	if err := EnsureSystemUser(); err != nil {
-		fmt.Println(serviceText("cli.service.ensure_user_warning", "mark", warnMark(), "error", err))
+		return err
 	}
 
 	for _, dir := range dirs {
@@ -902,7 +979,7 @@ func installS6() error {
 	scanDir := s6ScanDirectory()
 	binaryPath := GetBinaryPath()
 	if err := EnsureSystemUser(); err != nil {
-		fmt.Println(serviceText("cli.service.ensure_user_warning", "mark", warnMark(), "error", err))
+		return err
 	}
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("%s: %w", serviceText("cli.service.create_path_failed", "path", logDir), err)
@@ -1021,7 +1098,7 @@ func installOpenRC() error {
 	binaryPath := GetBinaryPath()
 
 	if err := EnsureSystemUser(); err != nil {
-		fmt.Println(serviceText("cli.service.ensure_user_warning", "mark", warnMark(), "error", err))
+		return err
 	}
 
 	scriptContent := fmt.Sprintf(`#!/sbin/openrc-run
@@ -1030,8 +1107,7 @@ name="%s"
 description="gitignore API Server"
 command="%s"
 command_args=""
-command_user="%s:%s"
-pidfile="/var/run/%s/%s.pid"
+pidfile="/var/run/%s-%s.pid"
 command_background=true
 output_log="/var/log/%s/%s/server.log"
 error_log="/var/log/%s/%s/error.log"
@@ -1043,14 +1119,16 @@ depend() {
 }
 
 start_pre() {
-    checkpath -d -m 0755 -o %s:%s /var/run/%s
+    checkpath -d -m 0755 /var/run/%s
+    checkpath -d -m 0755 /var/log/%s
+    checkpath -d -m 0755 -o %s:%s /var/run/%s/%s
     checkpath -d -m 0755 -o %s:%s /var/log/%s/%s
 }
-`, appName, binaryPath, appName, appName,
+`, appName, binaryPath, orgName, appName,
 		orgName, appName,
 		orgName, appName,
-		orgName, appName,
-		appName, appName, orgName,
+		orgName, orgName,
+		appName, appName, orgName, appName,
 		appName, appName, orgName, appName)
 
 	scriptPath := fmt.Sprintf("/etc/init.d/%s", appName)
@@ -1091,7 +1169,7 @@ func installSysVinit() error {
 	binaryPath := GetBinaryPath()
 
 	if err := EnsureSystemUser(); err != nil {
-		fmt.Println(serviceText("cli.service.ensure_user_warning", "mark", warnMark(), "error", err))
+		return err
 	}
 
 	scriptContent := fmt.Sprintf(`#!/bin/sh
@@ -1108,16 +1186,16 @@ func installSysVinit() error {
 NAME=%s
 DAEMON=%s
 DAEMON_USER=%s
-PIDFILE=/var/run/%s/%s.pid
+PIDFILE=/var/run/%s-%s.pid
 LOGFILE=/var/log/%s/%s/server.log
 
 case "$1" in
     start)
         echo "Starting $NAME..."
-        mkdir -p $(dirname $PIDFILE) $(dirname $LOGFILE)
-        chown -R $DAEMON_USER:$DAEMON_USER $(dirname $PIDFILE) $(dirname $LOGFILE)
+        mkdir -p $(dirname $LOGFILE)
+        chown -R $DAEMON_USER:$DAEMON_USER $(dirname $LOGFILE)
         start-stop-daemon --start --quiet --background --make-pidfile \
-            --pidfile $PIDFILE --chuid $DAEMON_USER --exec $DAEMON \
+            --pidfile $PIDFILE --exec $DAEMON \
             --no-close >> $LOGFILE 2>&1
         ;;
     stop)
@@ -1140,8 +1218,8 @@ case "$1" in
         fi
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}"
-        exit 1
+        echo "Usage: $0 {start|stop|restart|status}" >&2
+        exit 2
         ;;
 esac
 exit 0
@@ -1215,7 +1293,7 @@ func installLaunchd() error {
 	// privileges to it in-process after binding (see PART 23) — the plist
 	// intentionally does NOT hardcode UserName/GroupName.
 	if err := ensureMacOSServiceUser(dataDir); err != nil {
-		fmt.Println(serviceText("cli.service.ensure_account_warning", "mark", warnMark(), "error", err))
+		return err
 	} else {
 		_ = exec.Command("chown", "-R", appName+":"+appName, dataDir).Run()
 		_ = exec.Command("chown", "-R", appName+":"+appName, logDir).Run()
@@ -1340,7 +1418,7 @@ func installBSDRC() error {
 
 	// Create the service user before writing the rc script (see PART 23)
 	if err := ensureBSDServiceUser(dataDir); err != nil {
-		fmt.Println(serviceText("cli.service.ensure_user_warning", "mark", warnMark(), "error", err))
+		return err
 	} else {
 		_ = exec.Command("chown", "-R", appName+":"+appName, dataDir).Run()
 	}

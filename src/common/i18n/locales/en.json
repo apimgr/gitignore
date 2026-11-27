@@ -114,6 +114,7 @@
       "total_requests": "Total requests",
       "requests_24h": "Requests (24 hours)",
       "active_connections": "Active connections",
+      "attempts": "Recovery attempts",
       "last_checked": "Last checked:"
     },
     "feature": {
@@ -304,12 +305,23 @@
     "swagger_description": "Swagger UI - Interactive REST API explorer",
     "graphql_description": "Interactive GraphQL explorer",
     "tor_access": "Tor Access",
+    "tor_summary": "This application is available as a Tor hidden service for enhanced privacy.",
     "onion_address": "Onion Address",
     "how_to_connect": "How to connect",
     "download_tor": "Download Tor Browser",
     "open_tor": "Open Tor Browser and wait for it to connect",
     "paste_onion": "Copy the onion address above and paste it into the Tor Browser address bar",
-    "tor_privacy": "Using Tor provides additional privacy...",
+    "tor_privacy": "Tor hides your IP address and encrypts your connection while routing it through the Tor network.",
+    "i2p_access": "I2P Access",
+    "i2p_summary": "This application is available as an I2P eepsite for enhanced privacy.",
+    "i2p_address": "I2P Address",
+    "i2p_how_to_connect": "How to connect",
+    "i2p_install": "Install I2P or i2pd and wait for it to integrate with the network:",
+    "i2p_download": "Download I2P",
+    "i2pd_download": "Download i2pd",
+    "i2p_proxy": "Configure your browser to use the I2P HTTP proxy (default 127.0.0.1:4444).",
+    "i2p_paste": "Copy the .b32.i2p address above and paste it into your browser address bar.",
+    "i2p_privacy": "Using I2P routes your connection through the I2P network. Eepsites use HTTP; the I2P tunnel provides transport encryption, so this service does not use a TLS certificate.",
     "faq": "Frequently asked questions",
     "troubleshooting": "Troubleshooting"
   },
@@ -584,7 +596,9 @@
     },
     "common": {
       "from_label": "From",
-      "time_label": "Time"
+      "time_label": "Time",
+      "version_label": "Version",
+      "host_label": "Host"
     },
     "test_prefix": "[TEST]",
     "templates": {
@@ -613,6 +627,25 @@
         "path_full": "The filesystem containing {path} is {used_percent}% full.",
         "free_space_label": "Free space",
         "threshold_label": "Alert threshold"
+      },
+      "database_error": {
+        "subject": "Database Connection Problem - {app_name}",
+        "heading": "DATABASE CONNECTION PROBLEM",
+        "summary": "The application cannot connect to its database.",
+        "error_label": "Error",
+        "since_label": "Since"
+      },
+      "startup": {
+        "subject": "Server Started - {app_name}",
+        "heading": "SERVER STARTED",
+        "summary": "The server started successfully.",
+        "mode_label": "Mode"
+      },
+      "shutdown": {
+        "subject": "Server Stopped - {app_name}",
+        "heading": "SERVER STOPPED",
+        "summary": "The server stopped gracefully.",
+        "reason_label": "Reason"
       },
       "scheduler_error": {
         "subject": "Scheduled Task Failed - {app_name}",
@@ -938,7 +971,7 @@
     "running_in_mode_label": "Mode",
     "update_branch_usage": "Set update channel: stable, beta, or devel (aliases: daily, rolling, dev, development)",
     "invalid_update_branch": "Invalid update channel. Valid channels: stable, beta, devel.",
-    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nInformation:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n  --yes                          Skip supported confirmation prompts\n\nShell Integration:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nServer Configuration:\n  --mode {production|development} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nService Commands:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nMaintenance Commands:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Rotate a project secret (requires operator token and confirmation)\n  --maintenance token list          List owner token metadata\n  --maintenance token revoke PREFIX Revoke a token (requires confirmation)\n  --maintenance data export|delete  Export or delete owner data\n  --maintenance compliance report   Show compliance summary\n\nUpdate Commands:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nScheduler Commands:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nEmail Commands:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
+    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nInformation:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n  --yes                          Skip supported confirmation prompts\n\nShell Integration:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nServer Configuration:\n  --mode {production|development|debug} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nService Commands:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nMaintenance Commands:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Rotate a project secret (requires operator token and confirmation)\n  --maintenance token list          List owner token metadata\n  --maintenance token revoke PREFIX Revoke a token (requires confirmation)\n  --maintenance data export|delete  Export or delete owner data\n  --maintenance compliance report   Show compliance summary\n\nUpdate Commands:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nScheduler Commands:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nEmail Commands:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
     "client": {
       "api": {
         "invalid_url": "Invalid URL: {url}",
@@ -980,7 +1013,7 @@
         "prompt": "Enter a command or template name. Type help for help or quit to exit.",
         "help": "Commands: list, search QUERY, categories, category NAME, get NAME, combine NAME..., stats, help, quit"
       },
-      "help": "{binary} {version} - CLI for gitignore\n\nUsage:\n  {binary} [command] [args] [flags]\n  # interactive mode (no args)\n  {binary}\n\nCommands:\n  list                          List all template names\n  search QUERY                  Search templates by name/tag\n  categories                    List categories\n  category NAME                 List templates in a category\n  get NAME | template NAME       Print a single template\n  combine NAME...                Merge templates (default when args are bare names)\n  stats                         Show server template statistics\n\nFlags:\n-h, --help                             - Show help\n-v, --version                           - Show version\n--shell completions [SHELL]            - Print shell completions (auto-detect if SHELL omitted)\n--shell init [SHELL]                   - Print shell init command (auto-detect if SHELL omitted)\n--shell help                           - Show shell integration help\n\n--server URL                           - Server URL (default: from cli.yml)\n--config NAME                          - Config profile name (default: cli)\n--output {text|json|table}              - Output format (default: text)\n--debug                                - Debug output\n--color {auto|yes|no}                  - Color output (default: auto)\n--lang CODE                            - Language for output (default: auto)\n\nShells: bash, zsh, fish, sh, dash, ksh, powershell, pwsh\n\nRun without arguments for interactive mode.\nExamples:\n  {binary} Go Node > .gitignore\n  {binary} search python\n  {binary} get Go --output json",
+      "help": "{binary} {version} - CLI for gitignore\n\nUsage:\n  {binary} [command] [args] [flags]\n  # interactive mode (no args)\n  {binary}\n\nCommands:\n  list                          List all template names\n  search QUERY                  Search templates by name/tag\n  categories                    List categories\n  category NAME                 List templates in a category\n  get NAME | template NAME       Print a single template\n  combine NAME...                Merge templates (default when args are bare names)\n  stats                         Show server template statistics\n\nFlags:\n-h, --help                             - Show help\n-v, --version                           - Show version\n--update {check|yes}                    - Check for or install a CLI update\n--shell completions [SHELL]            - Print shell completions (auto-detect if SHELL omitted)\n--shell init [SHELL]                   - Print shell init command (auto-detect if SHELL omitted)\n--shell help                           - Show shell integration help\n\n--server URL                           - Server URL (default: from cli.yml)\n--config NAME                          - Config profile name (default: cli)\n--output {text|json|table}              - Output format (default: text)\n--debug                                - Debug output\n--color {auto|yes|no}                  - Color output (default: auto)\n--lang CODE                            - Language for output (default: auto)\n\nShells: bash, zsh, fish, sh, dash, ksh, powershell, pwsh\n\nRun without arguments for interactive mode.\nExamples:\n  {binary} Go Node > .gitignore\n  {binary} search python\n  {binary} get Go --output json",
       "version_line": "{binary} {version} ({commit})",
       "server_label": "Server: {server}",
       "help_label": "Show help",
@@ -1299,6 +1332,8 @@
       "service_stopped": "stopped",
       "set_backup_directory_failed": "Failed to set backup directory: {error}",
       "set_cache_directory_failed": "Failed to set cache directory: {error}",
+      "invalid_directory_path": "Invalid {path} directory path.",
+      "set_database_directory_failed": "Failed to set database directory: {error}",
       "set_data_directory_failed": "Failed to set data directory: {error}",
       "set_log_directory_failed": "Failed to set log directory: {error}",
       "setup_complete": "Setup complete.",
@@ -1602,6 +1637,17 @@
     }
   },
   "web": {
+    "flash": {
+      "action_completed": "Action completed.",
+      "announcement_dismissed": "Announcement dismissed.",
+      "consent_required": "Please choose a cookie consent option before continuing.",
+      "consent_saved": "Your cookie consent choice was saved.",
+      "contact_sent": "Your message was sent.",
+      "preferences_saved": "Your preferences were saved.",
+      "privacy_choice_saved": "Your privacy choice was saved.",
+      "theme_saved": "Your theme preference was saved.",
+      "token_action_completed": "Your token action was completed."
+    },
     "about": {
       "overview": "Overview",
       "intro": "GitIgnore provides curated templates for languages, frameworks, editors, and tools through a versioned REST API, a GraphQL endpoint, and a server-rendered web interface.",

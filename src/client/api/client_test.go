@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +61,52 @@ func TestListSuccess(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "Go" || names[1] != "Node" {
 		t.Errorf("List() = %v, want [Go Node]", names)
+	}
+}
+
+func TestDiscoverReadsCLIUpdateMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autodiscover" {
+			t.Errorf("path = %q, want /api/autodiscover", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok": true,
+			"data": map[string]interface{}{
+				"cli_min_version": "1.2.0",
+				"cli_versions": map[string]interface{}{
+					"linux-amd64": map[string]string{"version": "1.3.0", "sha256": strings.Repeat("a", 64)},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	discovery, err := New(srv.URL).Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if discovery.CLIMinVersion != "1.2.0" {
+		t.Errorf("minimum version = %q", discovery.CLIMinVersion)
+	}
+	version := discovery.CLIVersions["linux-amd64"]
+	if version.Version != "1.3.0" || version.SHA256 != strings.Repeat("a", 64) {
+		t.Errorf("platform release = %+v", version)
+	}
+}
+
+func TestClientSendsConfiguredBearerToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Bearer owner-token"; got != want {
+			t.Errorf("Authorization = %q, want %q", got, want)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "data": []string{}})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
+	client.Token = "owner-token"
+	if _, err := client.List(); err != nil {
+		t.Fatalf("List: %v", err)
 	}
 }
 

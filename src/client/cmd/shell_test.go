@@ -57,17 +57,20 @@ func TestGenerateCompletionsContainAllCommandsAndBinaryName(t *testing.T) {
 			}
 		})
 	}
+	if !strings.Contains(generateBashCompletions("gitignore-cli"), "--update") || !strings.Contains(generateFishCompletions("gitignore-cli"), "-l update") {
+		t.Fatal("client update flag is missing from Bash or Fish completions")
+	}
 }
 
 func TestHandleShellNoArgsReturnsUsage(t *testing.T) {
-	if got := HandleShell(nil); got != 64 {
-		t.Errorf("HandleShell(nil) = %d, want 64", got)
+	if got := HandleShell(nil); got != 2 {
+		t.Errorf("HandleShell(nil) = %d, want 2", got)
 	}
 }
 
 func TestHandleShellUnknownSubcommand(t *testing.T) {
-	if got := HandleShell([]string{"bogus"}); got != 64 {
-		t.Errorf("HandleShell(bogus) = %d, want 64", got)
+	if got := HandleShell([]string{"bogus"}); got != 2 {
+		t.Errorf("HandleShell(bogus) = %d, want 2", got)
 	}
 }
 
@@ -83,8 +86,8 @@ func TestPrintCompletionsKnownAndUnknownShells(t *testing.T) {
 			t.Errorf("printCompletions(%s) = %d, want 0", shell, got)
 		}
 	}
-	if got := printCompletions("cobol", "gitignore-cli"); got != 64 {
-		t.Errorf("printCompletions(cobol) = %d, want 64", got)
+	if got := printCompletions("cobol", "gitignore-cli"); got != 2 {
+		t.Errorf("printCompletions(cobol) = %d, want 2", got)
 	}
 }
 
@@ -94,8 +97,8 @@ func TestPrintInitKnownAndUnknownShells(t *testing.T) {
 			t.Errorf("printInit(%s) = %d, want 0", shell, got)
 		}
 	}
-	if got := printInit("cobol", "gitignore-cli"); got != 64 {
-		t.Errorf("printInit(cobol) = %d, want 64", got)
+	if got := printInit("cobol", "gitignore-cli"); got != 2 {
+		t.Errorf("printInit(cobol) = %d, want 2", got)
 	}
 }
 

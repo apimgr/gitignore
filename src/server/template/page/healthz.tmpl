@@ -5,6 +5,7 @@
 {{if .Health.Project.Tagline}}<p class="page-lead">{{.Health.Project.Tagline}}</p>{{else if .Health.Project.Description}}<p class="page-lead">{{.Health.Project.Description}}</p>{{end}}
 </header>
 <div class="status-banner {{.Health.BannerClass}}"><span class="status-icon" aria-hidden="true">{{.Health.StatusIcon}}</span> <span class="status-text">{{.Health.StatusText}}</span></div>
+{{if .Health.Maintenance}}<section class="section-card" aria-labelledby="health-maintenance"><h2 id="health-maintenance">{{t .Lang "health.status.maintenance"}}</h2><p>{{.Health.Maintenance.Message}}</p><dl class="info-list"><dt>{{t .Lang "health.field.status"}}</dt><dd>{{.Health.Maintenance.Reason}}</dd><dt>{{t .Lang "health.field.attempts"}}</dt><dd>{{number .Lang .Health.Maintenance.SelfHealing.Attempts}}</dd></dl></section>{{end}}
 <section class="section-card" aria-labelledby="health-version">
 <h2 id="health-version">{{t .Lang "health.section.version"}}</h2>
 <dl class="info-list">
@@ -20,10 +21,6 @@
 <dt>{{t .Lang "health.field.mode"}}</dt><dd><span class="badge badge-{{.Health.Mode}}">{{.Health.ModeLabel}}</span></dd>
 <dt>{{t .Lang "health.field.checked"}}</dt><dd><time datetime="{{.Health.TimestampISO}}">{{.Health.TimestampHuman}}</time></dd>
 </dl>
-</section>
-<section class="section-card" aria-labelledby="health-cluster">
-<h2 id="health-cluster">{{t .Lang "health.section.cluster"}}</h2>
-<dl class="info-list"><dt>{{t .Lang "health.field.enabled"}}</dt><dd>{{enabled .Lang .Health.Cluster.Enabled}}</dd></dl>
 </section>
 <section class="section-card" aria-labelledby="health-features">
 <h2 id="health-features">{{t .Lang "health.section.features"}}</h2>

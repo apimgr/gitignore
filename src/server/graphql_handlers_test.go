@@ -22,7 +22,7 @@ func TestGraphQLHandlerAndSchemaEndpoint(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	s.handleGraphQL(recorder, request)
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"name":"Go"`) {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"name": "Go"`) {
 		t.Fatalf("GraphQL response = %d %s", recorder.Code, recorder.Body.String())
 	}
 
@@ -47,7 +47,7 @@ func TestGraphQLGETSupportsQueryVariablesAndUsage(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/server/graphql?"+values.Encode(), nil)
 	recorder := httptest.NewRecorder()
 	s.handleGraphQL(recorder, request)
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"name":"Go"`) {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"name": "Go"`) {
 		t.Fatalf("GraphQL GET response = %d %s", recorder.Code, recorder.Body.String())
 	}
 

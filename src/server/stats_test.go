@@ -1,6 +1,9 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,5 +83,62 @@ func TestStatsCollectorBucketReuseAcrossHours(t *testing.T) {
 	_, last24h, _ := s.snapshot(base.Add(24 * time.Hour))
 	if last24h != 1 {
 		t.Errorf("last24h after bucket reuse = %d, want 1 (old hour's count discarded)", last24h)
+	}
+}
+
+func TestStatsCollectorCanTrackActiveWithoutCountingHealthRequests(t *testing.T) {
+	s := &statsCollector{}
+	now := time.Now().UTC()
+	end := s.beginRequest(now, false)
+	total, last24h, active := s.snapshot(now)
+	if total != 0 || last24h != 0 || active != 1 {
+		t.Fatalf("health request snapshot = (%d, %d, %d), want (0, 0, 1)", total, last24h, active)
+	}
+	end()
+	_, _, active = s.snapshot(now)
+	if active != 0 {
+		t.Fatalf("active after health request = %d, want 0", active)
+	}
+}
+
+func TestIsHealthOrMetricsRequest(t *testing.T) {
+	for _, path := range []string{
+		"/server/healthz", "/healthz", "/api/healthz", "/api/v1/server/healthz.txt",
+		"/prefix/api/v1/server/metrics", "/metrics", "/api/metrics/prometheus",
+	} {
+		if !isHealthOrMetricsRequest(path) {
+			t.Errorf("isHealthOrMetricsRequest(%q) = false, want true", path)
+		}
+	}
+	for _, path := range []string{"/", "/api/v1/list", "/server/about"} {
+		if isHealthOrMetricsRequest(path) {
+			t.Errorf("isHealthOrMetricsRequest(%q) = true, want false", path)
+		}
+	}
+}
+
+func TestStatsMiddlewareCountsRequestsAndKeepsHealthActive(t *testing.T) {
+	stats := &statsCollector{}
+	wrapped := stats.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		total, _, active := stats.snapshot(time.Now().UTC())
+		if strings.HasSuffix(r.URL.Path, "/healthz") {
+			if total != 0 || active != 1 {
+				t.Errorf("health request stats = total %d active %d, want 0 and 1", total, active)
+			}
+		} else if total != 1 || active != 1 {
+			t.Errorf("ordinary request stats = total %d active %d, want 1 and 1", total, active)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, path := range []string{"/server/healthz", "/api/v1/templates"} {
+		response := httptest.NewRecorder()
+		wrapped.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("GET %s status = %d", path, response.Code)
+		}
+	}
+	total, _, active := stats.snapshot(time.Now().UTC())
+	if total != 1 || active != 0 {
+		t.Fatalf("completed request stats = total %d active %d, want 1 and 0", total, active)
 	}
 }

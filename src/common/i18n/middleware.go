@@ -11,26 +11,10 @@ type ctxKey struct{}
 
 var langKey = ctxKey{}
 
-// cookieName and cookieMaxAge back the language persistence cookie. They
-// default to the AI.md PART 30 values ("lang", one year) and may be overridden
-// once at startup via Configure from the server's config.server.i18n block.
-var (
+const (
 	cookieName   = "lang"
 	cookieMaxAge = 365 * 24 * 60 * 60
 )
-
-// Configure overrides the language-cookie name and max-age from configuration.
-// A non-positive maxAge or empty name leaves the corresponding default in
-// place. It must be called before the server starts serving; it is not safe
-// to call concurrently with in-flight requests.
-func Configure(name string, maxAgeSeconds int) {
-	if name != "" {
-		cookieName = name
-	}
-	if maxAgeSeconds > 0 {
-		cookieMaxAge = maxAgeSeconds
-	}
-}
 
 // SetLanguageCookie persists an explicit language choice using the configured
 // cookie name and lifetime.
@@ -68,10 +52,16 @@ func Middleware(next http.Handler) http.Handler {
 // MiddlewareWithSecure resolves the language and persists explicit query
 // choices. The server supplies its trusted-proxy-aware transport predicate.
 func MiddlewareWithSecure(next http.Handler, secure func(*http.Request) bool) http.Handler {
+	return MiddlewareWithSecureAndConsent(next, secure, func(*http.Request) bool { return true })
+}
+
+// MiddlewareWithSecureAndConsent resolves request languages and persists
+// query-selected preferences only when the caller's consent check allows it.
+func MiddlewareWithSecureAndConsent(next http.Handler, secure func(*http.Request) bool, canPersist func(*http.Request) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A ?lang= that is supported is persisted so subsequent requests keep
 		// the language without the query param (shareable links).
-		if q := r.URL.Query().Get("lang"); q != "" && IsSupported(q) {
+		if q := r.URL.Query().Get("lang"); q != "" && IsSupported(q) && canPersist(r) {
 			http.SetCookie(w, &http.Cookie{
 				Name:     cookieName,
 				Value:    normalize(q),

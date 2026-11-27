@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -45,7 +44,7 @@ func (s *Server) handleCompatList(w http.ResponseWriter, r *http.Request) {
 			result[key] = byKey[key]
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(result)
+		_ = encodeJSON(w, result)
 		return
 	}
 

@@ -454,6 +454,21 @@ func newerVersion(candidate, current string) bool {
 	return len(newIDs) > len(oldIDs)
 }
 
+// IsNewerVersion reports whether candidate is a valid version newer than current.
+func IsNewerVersion(candidate, current string) bool {
+	return newerVersion(candidate, current)
+}
+
+// VerifyChecksum verifies filePath against a published SHA-256 value.
+func VerifyChecksum(filePath, expectedHash string) error {
+	return verifyChecksum(filePath, expectedHash)
+}
+
+// ReplaceBinary atomically replaces an executable using the platform updater.
+func ReplaceBinary(currentPath, newBinaryPath string) error {
+	return replaceBinary(currentPath, newBinaryPath)
+}
+
 // downloadVerified downloads the platform binary for release to a temp file and
 // verifies its SHA256 against the release checksums.txt (MANDATORY, AI.md PART
 // 22). On success it returns the temp path (caller owns cleanup); on any failure

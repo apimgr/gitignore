@@ -114,6 +114,7 @@
       "total_requests": "请求总数",
       "requests_24h": "请求数（24 小时）",
       "active_connections": "活动连接数",
+      "attempts": "恢复尝试次数",
       "last_checked": "上次检查："
     },
     "feature": {
@@ -304,12 +305,23 @@
     "swagger_description": "Swagger UI - 交互式 REST API 浏览器",
     "graphql_description": "交互式 GraphQL 浏览器",
     "tor_access": "Tor 访问",
+    "tor_summary": "此应用以 Tor 隐藏服务的形式提供，帮助增强隐私保护。",
     "onion_address": "洋葱地址",
     "how_to_connect": "如何连接",
     "download_tor": "下载 Tor 浏览器",
     "open_tor": "打开 Tor 浏览器并等待其连接",
     "paste_onion": "复制上面的洋葱地址并粘贴到 Tor 浏览器地址栏中",
-    "tor_privacy": "使用 Tor 可提供额外的隐私保护...",
+    "tor_privacy": "Tor 会隐藏你的 IP 地址，并通过 Tor 网络路由和加密连接。",
+    "i2p_access": "I2P 访问",
+    "i2p_summary": "此应用以 I2P eepsite 的形式提供，帮助增强隐私保护。",
+    "i2p_address": "I2P 地址",
+    "i2p_how_to_connect": "连接方法",
+    "i2p_install": "安装 I2P 或 i2pd，并等待其接入网络：",
+    "i2p_download": "下载 I2P",
+    "i2pd_download": "下载 i2pd",
+    "i2p_proxy": "将浏览器配置为使用 I2P HTTP 代理（默认地址为 127.0.0.1:4444）。",
+    "i2p_paste": "复制上方的 .b32.i2p 地址并粘贴到浏览器地址栏。",
+    "i2p_privacy": "I2P 会通过 I2P 网络路由你的连接。eepsite 使用 HTTP；I2P 隧道负责传输加密，因此此服务不使用 TLS 证书。",
     "faq": "常见问题",
     "troubleshooting": "故障排除"
   },
@@ -569,7 +581,9 @@
     },
     "common": {
       "from_label": "From",
-      "time_label": "Time"
+      "time_label": "Time",
+      "host_label": "主机",
+      "version_label": "版本"
     },
     "test_prefix": "[TEST]",
     "templates": {
@@ -660,6 +674,25 @@
         "heading": "更新已暂存",
         "staged": "新版本已暂存，将在服务重启时应用。",
         "version_label": "版本"
+      },
+      "database_error": {
+        "error_label": "错误",
+        "heading": "数据库连接问题",
+        "since_label": "开始时间",
+        "subject": "数据库连接问题 - {app_name}",
+        "summary": "应用无法连接到数据库。"
+      },
+      "shutdown": {
+        "heading": "服务器已停止",
+        "reason_label": "原因",
+        "subject": "服务器已停止 - {app_name}",
+        "summary": "服务器已正常停止。"
+      },
+      "startup": {
+        "heading": "服务器已启动",
+        "mode_label": "模式",
+        "subject": "服务器已启动 - {app_name}",
+        "summary": "服务器已成功启动。"
       }
     }
   },
@@ -923,7 +956,7 @@
     "running_in_mode_label": "模式",
     "update_branch_usage": "设置更新通道：stable、beta 或 devel（别名：daily、rolling、dev、development）",
     "invalid_update_branch": "更新通道无效。有效通道：stable、beta、devel。",
-    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\n信息：\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nShell Integration:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nServer Configuration:\n  --mode {production|development} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nService Commands:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nMaintenance Commands:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  轮换项目密钥（需要操作员令牌和确认）\n\nUpdate Commands:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nScheduler Commands:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nEmail Commands:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
+    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\n信息：\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nShell Integration:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nServer Configuration:\n  --mode {production|development|debug} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nService Commands:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nMaintenance Commands:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  轮换项目密钥（需要操作员令牌和确认）\n\nUpdate Commands:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nScheduler Commands:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nEmail Commands:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
     "client": {
       "api": {
         "invalid_url": "无效 URL：{url}",
@@ -1284,6 +1317,8 @@
       "service_stopped": "stopped",
       "set_backup_directory_failed": "Failed to set backup directory: {error}",
       "set_cache_directory_failed": "Failed to set cache directory: {error}",
+      "invalid_directory_path": "Invalid {path} directory path.",
+      "set_database_directory_failed": "Failed to set database directory: {error}",
       "set_data_directory_failed": "Failed to set data directory: {error}",
       "set_log_directory_failed": "Failed to set log directory: {error}",
       "setup_complete": "Setup complete.",
@@ -1910,6 +1945,17 @@
         "analytics_suffix_not_sold": "Analytics 数据是匿名的且绝不会出售。",
         "analytics_suffix_sold": "分析数据可能会与第三方共享。"
       }
+    },
+    "flash": {
+      "action_completed": "操作已完成。",
+      "announcement_dismissed": "公告已关闭。",
+      "consent_required": "请先选择 Cookie 同意选项，然后继续。",
+      "consent_saved": "已保存你的 Cookie 同意选择。",
+      "contact_sent": "消息已发送。",
+      "preferences_saved": "偏好设置已保存。",
+      "privacy_choice_saved": "隐私选择已保存。",
+      "theme_saved": "主题偏好已保存。",
+      "token_action_completed": "令牌操作已完成。"
     }
   },
   "llms": {

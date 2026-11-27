@@ -105,6 +105,36 @@ func TestAllEmbeddedDefaultsValidate(t *testing.T) {
 	}
 }
 
+func TestRequiredLifecycleAndHealthTemplatesRender(t *testing.T) {
+	r := NewRenderer("")
+	required := map[string]map[string]string{
+		"startup":        {"app_name": "gitignore", "version": "1.2.3", "mode": "server", "hostname": "api.example.test"},
+		"shutdown":       {"app_name": "gitignore", "version": "1.2.3", "reason": "SIGTERM", "hostname": "api.example.test"},
+		"disk_low":       {"app_name": "gitignore", "path": "/srv", "used_percent": "91.0", "free": "1 GB", "threshold_percent": "90.0"},
+		"database_error": {"app_name": "gitignore", "error": "connection unavailable", "since": "2026-11-26T12:00:00Z"},
+	}
+	registered := make(map[string]bool, len(TemplateNames))
+	for _, name := range TemplateNames {
+		registered[name] = true
+	}
+	for name, vars := range required {
+		if !registered[name] {
+			t.Errorf("required template %q is not registered", name)
+			continue
+		}
+		_, body, err := r.Render(name, vars)
+		if err != nil {
+			t.Errorf("Render(%q): %v", name, err)
+			continue
+		}
+		for key, value := range vars {
+			if key != "app_name" && !strings.Contains(body, value) {
+				t.Errorf("%s body missing %q", name, value)
+			}
+		}
+	}
+}
+
 func TestRenderLocalizedTranslatesCopyBeforeSubstitution(t *testing.T) {
 	vars := map[string]string{
 		"app_name":  "gitignore",

@@ -93,7 +93,7 @@ func TestMetricsMiddlewareNoMetricsStillRecordsStats(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/list", nil)
 	rec := httptest.NewRecorder()
-	s.metricsMiddleware(next).ServeHTTP(rec, req)
+	s.stats.middleware(s.metricsMiddleware(next)).ServeHTTP(rec, req)
 
 	if !called {
 		t.Error("expected wrapped handler to be called")

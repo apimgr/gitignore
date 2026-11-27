@@ -115,4 +115,20 @@ func TestRemoteSQLiteCacheSyncAndReadThrough(t *testing.T) {
 	if err := cache.reader.QueryRow("SELECT key FROM rate_limit_events WHERE key = ?", "dirty-remote").Scan(&found); err != nil || found != "dirty-remote" {
 		t.Fatalf("dirty cache remote result=%q err=%v", found, err)
 	}
+	if _, err := cache.writer.Exec(`CREATE TRIGGER reject_cache_ip_block BEFORE INSERT ON ip_blocks BEGIN SELECT RAISE(ABORT, 'forced cache reconciliation failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := map[string][][]any{
+		"rate_limit_events": {{int64(999), "replacement", time.Now().UnixMilli()}},
+		"ip_blocks":         {{"192.0.2.1", "192.0.2.1/32", "manual", "test", time.Now().UnixMilli(), nil, 1, 0}},
+	}
+	if err := cache.applySnapshot(context.Background(), snapshot, time.Now()); err == nil {
+		t.Fatal("applySnapshot succeeded despite the forced final-table failure")
+	}
+	if err := cache.reader.QueryRow("SELECT key FROM rate_limit_events WHERE key = ?", "initial").Scan(&found); err != nil || found != "initial" {
+		t.Fatalf("failed sync did not roll back the earlier table replacement: result=%q err=%v", found, err)
+	}
+	if err := cache.reader.QueryRow("SELECT COUNT(*) FROM rate_limit_events WHERE key = ?", "replacement").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed sync retained replacement rows: count=%d err=%v", count, err)
+	}
 }

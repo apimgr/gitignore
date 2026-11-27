@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -29,6 +31,8 @@ var (
 	localCache       *remoteSQLiteCache
 	mu               sync.RWMutex
 	securityReportMu sync.Mutex
+	criticalErrorMu  sync.RWMutex
+	criticalErrorFn  func(error)
 )
 
 const (
@@ -46,11 +50,12 @@ type queryExecutor interface {
 
 // ConnectionConfig selects SQLite or a remote libSQL database.
 type ConnectionConfig struct {
-	Driver string
-	URL    string
-	Token  string
-	Pool   PoolConfig
-	Cache  CacheConfig
+	Driver        string
+	URL           string
+	Token         string
+	LegacySecrets map[string]string
+	Pool          PoolConfig
+	Cache         CacheConfig
 }
 
 // CacheConfig enables an optional local SQLite mirror for a remote libSQL store.
@@ -251,6 +256,9 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 			if err := migrateCanonicalState(ctx, tx); err != nil {
 				return fmt.Errorf("failed to migrate canonical server state: %w", err)
 			}
+			if err := importLegacySecrets(ctx, tx, connection.LegacySecrets); err != nil {
+				return fmt.Errorf("failed to import legacy application secrets: %w", err)
+			}
 			if err := initializeGeneratedAppSecrets(ctx, tx); err != nil {
 				return fmt.Errorf("failed to initialize generated application secrets: %w", err)
 			}
@@ -292,6 +300,9 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 	}
 	if !remoteOnline && localCache != nil {
 		if err := writeWithDB(ctx, localCache.writer, true, "initialize cached application secrets", func(tx *sql.Tx) error {
+			if err := importLegacySecrets(ctx, tx, connection.LegacySecrets); err != nil {
+				return err
+			}
 			return initializeGeneratedAppSecrets(ctx, tx)
 		}); err != nil {
 			conn, readConn, remoteReadConn = nil, nil, nil
@@ -315,6 +326,24 @@ func Init(dataDir string, configured ...ConnectionConfig) error {
 		return fmt.Errorf("failed to load owner-token counters: %w", err)
 	}
 	startHotCounterFlusher()
+	return nil
+}
+
+func importLegacySecrets(ctx context.Context, tx *sql.Tx, secrets map[string]string) error {
+	allowed := map[string]bool{
+		"installation_secret": true, "installation_secret_previous": true,
+		"installation_secret_previous_until": true, "encryption_key_previous": true,
+		"encryption_key_previous_until": true,
+	}
+	for name, value := range secrets {
+		if !allowed[name] || strings.TrimSpace(value) == "" {
+			return errors.New("invalid legacy application secret")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO app_secrets(name, value, updated_at)
+			VALUES(?, ?, ?) ON CONFLICT(name) DO NOTHING`, name, value, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -510,6 +539,64 @@ func Close() error {
 	return nil
 }
 
+// ProbeWrite verifies that the active database accepts a transactional write
+// without leaving persistent state behind.
+func ProbeWrite() error {
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	return ProbeWriteContext(ctx)
+}
+
+// ProbeWriteContext verifies a transactional write within the caller's deadline
+// without leaving persistent state behind.
+func ProbeWriteContext(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("database write probe requires a context")
+	}
+	mu.RLock()
+	writer := conn
+	mu.RUnlock()
+	if writer == nil {
+		return sql.ErrConnDone
+	}
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("generate database write probe: %w", err)
+	}
+	tx, err := writer.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?)`, "_maintenance_probe_"+hex.EncodeToString(nonce[:]), "probe", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return err
+	}
+	return nil
+}
+
+// Probe checks trivial read and rollback-only write operations on their
+// respective handles. Each operation receives its own deadline from the caller.
+func Probe(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("database probe requires a context")
+	}
+	readCtx, cancelRead := context.WithTimeout(ctx, 5*time.Second)
+	err := PingContext(readCtx)
+	cancelRead()
+	if err != nil {
+		return fmt.Errorf("database read probe: %w", err)
+	}
+	writeCtx, cancelWrite := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelWrite()
+	if err := ProbeWriteContext(writeCtx); err != nil {
+		return fmt.Errorf("database write probe: %w", err)
+	}
+	return nil
+}
+
 // SnapshotSQLite creates a consistent point-in-time copy through SQLite's
 // online backup mechanism. The caller owns and removes destinationPath.
 func SnapshotSQLite(ctx context.Context, destinationPath string) error {
@@ -665,6 +752,14 @@ func writeWithDB(ctx context.Context, writer *sql.DB, isSQLite bool, caller stri
 			if waited > time.Second {
 				log.Printf("WARN db.busy wait_ms=%d caller=%s", waited.Milliseconds(), caller)
 			}
+			if isCriticalWriteError(err) {
+				criticalErrorMu.RLock()
+				handler := criticalErrorFn
+				criticalErrorMu.RUnlock()
+				if handler != nil {
+					handler(err)
+				}
+			}
 			return err
 		}
 		wait := 25*time.Millisecond*time.Duration(1<<attempt) + time.Duration(mrand.Int64N(int64(25*time.Millisecond)))
@@ -677,6 +772,30 @@ func writeWithDB(ctx context.Context, writer *sql.DB, isSQLite bool, caller stri
 		}
 	}
 	return err
+}
+
+// SetCriticalErrorHandler registers the callback used when a database write
+// fails because the database is unavailable or its storage cannot be written.
+func SetCriticalErrorHandler(handler func(error)) {
+	criticalErrorMu.Lock()
+	criticalErrorFn = handler
+	criticalErrorMu.Unlock()
+}
+
+func isCriticalWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, sql.ErrConnDone) || errors.Is(err, driver.ErrBadConn) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"disk is full", "database or disk is full", "readonly database", "read-only database", "disk i/o error", "unable to open database file", "connection refused", "connection reset", "connection timed out", "no such host", "server misbehaving", "database is closed"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isSQLiteBusy(err error) bool {
@@ -705,6 +824,18 @@ func ConnectionStats() (open, inUse int) {
 		return stats.OpenConnections + readStats.OpenConnections, stats.InUse + readStats.InUse
 	}
 	return stats.OpenConnections, stats.InUse
+}
+
+// ConnectionPoolStats returns a snapshot of connection-pool health for
+// authenticated diagnostics without exposing the database handle.
+func ConnectionPoolStats() sql.DBStats {
+	mu.RLock()
+	current := conn
+	mu.RUnlock()
+	if current == nil {
+		return sql.DBStats{}
+	}
+	return current.Stats()
 }
 
 // migrateSchema drops tables whose on-disk shape predates the current schema
@@ -884,6 +1015,15 @@ CREATE TABLE IF NOT EXISTS app_secrets (
     name       TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS server_stats (
+    name  TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS server_stat_hours (
+    hour  INTEGER PRIMARY KEY,
+    count INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pgp_key_metadata (

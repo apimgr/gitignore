@@ -1,11 +1,12 @@
 // Package mode implements application mode detection and configuration.
-// It provides Production and Development modes with different settings for
+// It provides Production, Development, and Debug modes with different settings for
 // logging, debugging, error handling, caching, and profiling.
 package mode
 
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -21,6 +22,9 @@ const (
 
 	// Development mode: optimized for development with debugging and verbose output
 	Development Mode = "development"
+
+	// Debug mode is explicit and defaults the independent debug flag on.
+	Debug Mode = "debug"
 )
 
 var (
@@ -30,7 +34,9 @@ var (
 	// debug holds the independent debug-flag state (--debug / DEBUG=true).
 	// Debug is tracked independently of mode: mode and debug are two
 	// independent axes producing four operational states (see AI.md PART 6).
-	debug bool
+	debug                bool
+	blockProfileRate     int
+	mutexProfileFraction int
 
 	// mu protects concurrent access to current mode and debug
 	mu sync.RWMutex
@@ -44,8 +50,8 @@ func Get() Mode {
 }
 
 // Set sets the application mode.
-// "debug" is an alias for development mode + debug on (an explicit
-// SetDebug/--debug flag or DEBUG env var applied afterward still wins).
+// "debug" selects the distinct Debug mode and defaults the independent debug
+// flag on; an explicit SetDebug/--debug flag or DEBUG env var still wins.
 func Set(mode string) error {
 	normalized := strings.ToLower(strings.TrimSpace(mode))
 
@@ -66,8 +72,8 @@ func Set(mode string) error {
 }
 
 // ParseMode parses a mode string and returns the corresponding Mode constant.
-// Accepts: "dev", "development", "prod", "production" (case-insensitive).
-// "debug" is also accepted as an alias for Development (see Set).
+// Accepts: "dev", "development", "prod", "production", and "debug"
+// (case-insensitive). Debug is a distinct mode that also defaults its flag on.
 func ParseMode(s string) (Mode, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
 
@@ -75,7 +81,7 @@ func ParseMode(s string) (Mode, error) {
 	case "dev", "development":
 		return Development, nil
 	case "debug":
-		return Development, nil
+		return Debug, nil
 	case "prod", "production":
 		return Production, nil
 	default:
@@ -83,9 +89,10 @@ func ParseMode(s string) (Mode, error) {
 	}
 }
 
-// IsAppModeDev returns true if the current mode is Development
+// IsAppModeDev reports whether development defaults apply (Development or Debug).
 func IsAppModeDev() bool {
-	return Get() == Development
+	current := Get()
+	return current == Development || current == Debug
 }
 
 // IsAppModeProd returns true if the current mode is Production
@@ -109,7 +116,33 @@ func IsDebugEnabled() bool {
 func SetDebug(enabled bool) {
 	mu.Lock()
 	debug = enabled
+	blockRate, mutexFraction := blockProfileRate, mutexProfileFraction
 	mu.Unlock()
+	applyProfiling(enabled, blockRate, mutexFraction)
+}
+
+// SetProfilingRates configures runtime profiling rates. Rates are applied only
+// while debug is enabled; disabling debug always turns both profiles off.
+func SetProfilingRates(blockRate, mutexFraction int) {
+	if blockRate < 0 {
+		blockRate = 0
+	}
+	if mutexFraction < 0 {
+		mutexFraction = 0
+	}
+	mu.Lock()
+	blockProfileRate, mutexProfileFraction = blockRate, mutexFraction
+	enabled := debug
+	mu.Unlock()
+	applyProfiling(enabled, blockRate, mutexFraction)
+}
+
+func applyProfiling(enabled bool, blockRate, mutexFraction int) {
+	if !enabled {
+		blockRate, mutexFraction = 0, 0
+	}
+	runtime.SetBlockProfileRate(blockRate)
+	runtime.SetMutexProfileFraction(mutexFraction)
 }
 
 // Init initializes the mode based on environment variables.

@@ -6,16 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
-	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/apimgr/gitignore/src/blocklist"
@@ -95,6 +94,7 @@ func overlyBroadSecurityPrefix(prefix netip.Prefix) bool {
 type Config struct {
 	Address             string
 	Port                int
+	HTTPSPort           int
 	DevMode             bool
 	Templates           *template.Manager
 	Paths               *apppath.PathManager
@@ -107,10 +107,14 @@ type Config struct {
 	SendContact         func(to, subject, body string) error
 	SendContactReply    func(to, replyTo, subject, body string) error
 	WebhookDispatcher   *notify.Dispatcher
+	MaintenanceState    *MaintenanceState
 	I2PStatus           func() I2PInfo
 	Blocklist           *blocklist.Matcher
 	SecurityDir         string
 	BeforePrivilegeDrop func() error
+	BeforeServe         func()
+	OnReady             func()
+	AccessLog           func(AccessLogEntry)
 }
 
 // Server represents the HTTP server
@@ -119,6 +123,7 @@ type Server struct {
 	runtimeConfig        atomic.Pointer[config.Config]
 	router               *chi.Mux
 	server               *http.Server
+	sslManager           *ssl.Manager
 	baseHandler          atomic.Value
 	limiter              *rateLimiter
 	rateLimiters         map[string]*rateLimiter
@@ -156,6 +161,9 @@ type Server struct {
 	startTime            time.Time
 	updateRestart        atomic.Bool
 	stats                *statsCollector
+	statsPersistenceMu   sync.Mutex
+	statsPersistenceStop context.CancelFunc
+	statsPersistenceDone chan struct{}
 	contactMu            sync.Mutex
 	contactChallenges    map[string]contactChallenge
 	contactRequests      map[string][]time.Time
@@ -163,6 +171,10 @@ type Server struct {
 	contactReviews       map[string]time.Time
 	learnedOriginsMu     sync.Mutex
 	learnedOrigins       map[string]time.Time
+}
+
+type baseHandlerSnapshot struct {
+	handler http.Handler
 }
 
 var ErrUpdateRestart = errors.New("staged update requires supervisor restart")
@@ -203,6 +215,27 @@ func New(config *Config) *Server {
 	if config.Cfg != nil {
 		s.runtimeConfig.Store(config.Cfg)
 	}
+	db.SetDebugQueryObserver(func(query string, argCount int, rows int64, duration time.Duration, err error) {
+		if !mode.IsDebugEnabled() {
+			return
+		}
+		cfg := s.currentConfig()
+		if cfg == nil || !cfg.Server.Debug.LogQueries {
+			return
+		}
+		failed := err != nil
+		slog.Debug("database query", "sql", sanitizeDebugSQL(query), "arg_count", argCount, "rows", rows, "duration_ms", duration.Milliseconds(), "failed", failed)
+	})
+	db.SetDebugCacheObserver(func(operation, key string, hit bool, duration time.Duration) {
+		if !mode.IsDebugEnabled() {
+			return
+		}
+		cfg := s.currentConfig()
+		if cfg == nil || !cfg.Server.Debug.LogCache {
+			return
+		}
+		slog.Debug("cache operation", "operation", operation, "key", key, "hit", hit, "duration_us", duration.Microseconds())
+	})
 	if blocks, err := db.LoadIPBlocks(time.Now().UTC()); err != nil {
 		if !errors.Is(err, sql.ErrConnDone) {
 			log.Printf("security: failed to load temporary IP blocks: %v", err)
@@ -246,6 +279,21 @@ func New(config *Config) *Server {
 			mOpts.SystemFn = func() metrics.SystemSnapshot { return systemMetricsSnapshot(dataDir) }
 		}
 		s.metrics = metrics.New(mOpts)
+		db.SetCacheMetricsObserver(func(cache string, hit bool) {
+			if cache != "remote_db" && cache != "rate_limit" {
+				return
+			}
+			if hit {
+				s.metrics.CacheHitsTotal.WithLabelValues(cache).Inc()
+			} else {
+				s.metrics.CacheMissesTotal.WithLabelValues(cache).Inc()
+			}
+		})
+		db.SetCacheEvictionObserver(func(cache string, count uint64) {
+			if count > 0 && (cache == "remote_db" || cache == "rate_limit") {
+				s.metrics.CacheEvictionsTotal.WithLabelValues(cache).Add(float64(count))
+			}
+		})
 		db.SetQueryObserver(func(operation, table string, duration time.Duration, err error) {
 			s.metrics.DBQueriesTotal.WithLabelValues(operation, table).Inc()
 			s.metrics.DBQueryDuration.WithLabelValues(operation, table).Observe(duration.Seconds())
@@ -266,6 +314,8 @@ func New(config *Config) *Server {
 	} else {
 		db.SetQueryObserver(nil)
 		db.SetWriteObserver(nil)
+		db.SetCacheMetricsObserver(nil)
+		db.SetCacheEvictionObserver(nil)
 	}
 
 	if config.Cfg != nil {
@@ -289,11 +339,6 @@ func New(config *Config) *Server {
 	s.trustedProxies = buildTrustedProxies(config.Address, additional)
 	s.registerHealthChecks()
 
-	// Apply the configured language-cookie name and lifetime (AI.md PART 30).
-	if config.Cfg != nil {
-		i18n.Configure(config.Cfg.Server.I18n.CookieName, parseCookieMaxAge(config.Cfg.Server.I18n.CookieMaxAge))
-	}
-
 	s.setupMiddleware()
 	s.setupRoutes()
 
@@ -301,13 +346,7 @@ func New(config *Config) *Server {
 	// "--baseurl"). The default "/" leaves routing untouched; a non-root prefix
 	// strips the prefix before dispatch and redirects the bare prefix to its
 	// trailing-slash form.
-	var handler http.Handler = s.router
-	if config.Cfg != nil {
-		if prefix := config.Cfg.Server.BaseURL; prefix != "" && prefix != "/" {
-			handler = baseURLHandler(prefix, s.router)
-		}
-	}
-	s.baseHandler.Store(handler)
+	s.baseHandler.Store(baseHandlerSnapshot{handler: s.buildBaseHandler(config.Cfg)})
 
 	s.server = &http.Server{
 		Addr: fmt.Sprintf("%s:%d", config.Address, config.Port),
@@ -318,7 +357,10 @@ func New(config *Config) *Server {
 					s.metrics.TorRequestsTotal.Inc()
 				}
 			}
-			current := s.baseHandler.Load().(http.Handler)
+			current := s.baseHandler.Load().(baseHandlerSnapshot).handler
+			if s.sslManager != nil {
+				current = s.sslManager.GetHTTPHandler(current)
+			}
 			current.ServeHTTP(w, r)
 		}),
 		ReadTimeout:  30 * time.Second,
@@ -375,13 +417,24 @@ func (s *Server) ReplaceConfig(cfg *config.Config) {
 		s.refreshRateLimiters(cfg)
 		s.runtimeConfig.Store(cfg)
 		if s.server != nil {
-			var handler http.Handler = s.router
-			if prefix := cfg.Server.BaseURL; prefix != "" && prefix != "/" {
-				handler = baseURLHandler(prefix, s.router)
-			}
-			s.baseHandler.Store(handler)
+			s.baseHandler.Store(baseHandlerSnapshot{handler: s.buildBaseHandler(cfg)})
 		}
 	}
+}
+
+func (s *Server) buildBaseHandler(cfg *config.Config) http.Handler {
+	var handler http.Handler = s.router
+	if cfg != nil {
+		if prefix := cfg.Server.BaseURL; prefix != "" && prefix != "/" {
+			handler = baseURLHandler(prefix, s.router)
+		}
+	}
+	handler = flashRedirectMiddleware(s, handler)
+	handler = s.accessLogMiddleware(handler)
+	if s.stats != nil {
+		handler = s.stats.middleware(handler)
+	}
+	return handler
 }
 
 func (s *Server) refreshRateLimiters(cfg *config.Config) {
@@ -507,7 +560,11 @@ func (s *Server) setupMiddleware() {
 	// rewrites r.RemoteAddr from X-Forwarded-For/X-Real-IP unconditionally,
 	// which lets any direct client spoof its IP. Client IP is resolved through
 	// the trusted-proxy gate in s.clientIP (AI.md PART 12).
+	s.router.Use(urlNormalizeMiddleware)
 	s.router.Use(middleware.RequestID)
+	s.router.Use(s.debugMiddleware)
+	s.router.Use(pathSecurityMiddleware)
+	s.router.Use(s.maintenanceMiddleware)
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
 
@@ -528,13 +585,16 @@ func (s *Server) setupMiddleware() {
 	// Record HTTP request metrics (AI.md PART 20)
 	s.router.Use(s.metricsMiddleware)
 
-	// Resolve and persist the request language (AI.md PART 30). No-op for
-	// behavior when i18n is disabled — it still resolves to English.
-	if s.currentConfig() == nil || s.currentConfig().Server.I18n.Enabled {
-		s.router.Use(func(next http.Handler) http.Handler {
-			return i18n.MiddlewareWithSecure(next, func(r *http.Request) bool { return preferenceCookieSecure(s, r) })
-		})
-	}
+	// Internationalization is always enabled (AI.md PART 30).
+	s.router.Use(func(next http.Handler) http.Handler {
+		return i18n.MiddlewareWithSecureAndConsent(next,
+			func(r *http.Request) bool { return preferenceCookieSecure(s, r) },
+			func(r *http.Request) bool {
+				consent, valid := readConsent(r)
+				return valid && consent.Preferences
+			},
+		)
+	})
 
 	// Timeout
 	s.router.Use(middleware.Timeout(30 * time.Second))
@@ -584,7 +644,8 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
-	// Special files (PWA, robots, security)
+	// Special files and the operator-provisioned CLI update distribution.
+	s.router.Get("/cli/binaries/{filename}", s.handleCLIBinary)
 	s.router.Get("/robots.txt", s.handleRobotsTxt)
 	s.router.Get("/sitemap.xml", s.handleSitemap)
 	s.router.Get("/sitemap-{part}.xml", s.handleSitemapPart)
@@ -684,6 +745,8 @@ func (s *Server) setupRoutes() {
 	// Static files
 	s.router.Get("/static/*", s.handleStatic)
 	s.router.Get("/favicon.ico", s.handleFavicon)
+	s.router.Get("/assets/{name}", s.handleBrandingAsset)
+	s.router.Get("/branding/cache/{name}", s.handleCachedBrandingAsset)
 
 	// Root-level API aliases (AI.md PART 14 "Root-Level Endpoints") — thin
 	// wrappers over the canonical versioned handlers, no logic duplication.
@@ -704,6 +767,7 @@ func (s *Server) setupRoutes() {
 		// Public server information endpoints.
 		r.Get("/server/healthz", s.handleHealthz)
 		r.Get("/server/healthz.txt", s.handleHealthz)
+		r.Get("/server/maintenance", s.handleMaintenanceStatus)
 		r.Get("/server/swagger", s.handleOpenAPIJSON)
 		r.Post("/server/reports/csp", s.handleCSPReport)
 		r.Post("/server/reports/default", s.handleDefaultReport)
@@ -791,10 +855,22 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to bind %s: %w", s.server.Addr, err)
 	}
+	var httpsListener net.Listener
+	if s.config.HTTPSPort > 0 {
+		httpsAddr := net.JoinHostPort(strings.Trim(s.config.Address, "[]"), strconv.Itoa(s.config.HTTPSPort))
+		httpsListener, err = net.Listen("tcp", httpsAddr)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("failed to bind HTTPS listener %s: %w", httpsAddr, err)
+		}
+	}
 	go s.refreshTrustedProxiesLoop()
 	defer s.stopTrustedProxyRefresh()
 	if s.config.BeforePrivilegeDrop != nil {
 		if err := s.config.BeforePrivilegeDrop(); err != nil {
+			if httpsListener != nil {
+				_ = httpsListener.Close()
+			}
 			_ = listener.Close()
 			return fmt.Errorf("startup update check failed: %w", err)
 		}
@@ -803,6 +879,9 @@ func (s *Server) Start() error {
 	// Once the privileged port is bound, drop from root to the fixed project
 	// service identity. No-op when not running as root.
 	if err := dropPrivileges("gitignore", "gitignore"); err != nil {
+		if httpsListener != nil {
+			_ = httpsListener.Close()
+		}
 		_ = listener.Close()
 		return fmt.Errorf("failed to drop privileges: %w", err)
 	}
@@ -811,30 +890,37 @@ func (s *Server) Start() error {
 	// existing certbot/manual location or Let's Encrypt via autocert.
 	if s.currentConfig() != nil && s.currentConfig().Server.SSL.Enabled {
 		if err := s.configureTLS(); err != nil {
+			if httpsListener != nil {
+				_ = httpsListener.Close()
+			}
 			_ = listener.Close()
 			return fmt.Errorf("failed to configure TLS: %w", err)
 		}
 	}
-
-	// Graceful shutdown
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		<-stop
-		log.Println("Shutting down server...")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := s.server.Shutdown(ctx); err != nil {
-			log.Printf("Server shutdown error: %v", err)
-		}
-	}()
+	if httpsListener != nil && s.server.TLSConfig == nil {
+		_ = httpsListener.Close()
+		_ = listener.Close()
+		return errors.New("dual port configuration requires server.ssl.enabled")
+	}
+	if s.config.BeforeServe != nil {
+		s.config.BeforeServe()
+	}
+	s.startStatsPersistence()
+	defer func() { _ = s.stopStatsPersistence(context.Background()) }()
 
 	// Start server
-	log.Printf("Server starting on %s", s.server.Addr)
-	if s.server.TLSConfig != nil {
+	slog.Info("Server ready", "address", s.server.Addr)
+	if s.config.OnReady != nil {
+		s.config.OnReady()
+	}
+	if httpsListener != nil {
+		serveErr := make(chan error, 2)
+		go func() { serveErr <- s.server.Serve(listener) }()
+		go func() { serveErr <- s.server.ServeTLS(httpsListener, "", "") }()
+		if err := <-serveErr; err != nil && err != http.ErrServerClosed {
+			return err
+		}
+	} else if s.server.TLSConfig != nil {
 		if err := s.server.ServeTLS(listener, "", ""); err != http.ErrServerClosed {
 			return fmt.Errorf("server error: %w", err)
 		}
@@ -842,7 +928,6 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server error: %w", err)
 	}
 
-	log.Println("Server stopped")
 	s.stopTrustedProxyRefresh()
 	if s.updateRestart.Load() {
 		return ErrUpdateRestart
@@ -861,21 +946,35 @@ func (s *Server) RestartForUpdate(ctx context.Context) error {
 // configureTLS builds the server's TLS configuration from the SSL manager,
 // resolving certificates for the configured FQDN (AI.md PART 15).
 func (s *Server) configureTLS() error {
+	letsencryptConfig := s.currentConfig().Server.SSL.LetsEncrypt
+	if strings.EqualFold(letsencryptConfig.Challenge, "dns-01") {
+		if err := reconcileDNSCredentialState(letsencryptConfig.DNSProvider, s.currentConfig().Server.Security.EncryptionKey, letsencryptConfig.DNSCredentials); err != nil {
+			return err
+		}
+	}
 	certPath := "ssl"
 	if s.config.Paths != nil {
-		certPath = s.config.Paths.DataPath("ssl")
+		certPath = filepath.Join(s.config.Paths.GetConfigDir(), "ssl")
 	}
 
 	mgr := ssl.NewManager(ssl.Config{
 		Enabled:  true,
 		CertPath: certPath,
 		LetsEncrypt: ssl.LetsEncryptConfig{
-			Enabled:     s.currentConfig().Server.SSL.LetsEncrypt.Enabled,
-			Email:       s.currentConfig().Server.SSL.LetsEncrypt.Email,
-			Challenge:   s.currentConfig().Server.SSL.LetsEncrypt.Challenge,
-			DNSProvider: s.currentConfig().Server.SSL.LetsEncrypt.DNSProvider,
+			Enabled:        s.currentConfig().Server.SSL.LetsEncrypt.Enabled,
+			Email:          s.currentConfig().Server.SSL.LetsEncrypt.Email,
+			Challenge:      s.currentConfig().Server.SSL.LetsEncrypt.Challenge,
+			DNSProvider:    s.currentConfig().Server.SSL.LetsEncrypt.DNSProvider,
+			DNSCredentials: s.currentConfig().Server.SSL.LetsEncrypt.DNSCredentials,
+			OnDNSValidated: func(validatedAt time.Time) error {
+				return db.Write(context.Background(), func(tx *sql.Tx) error {
+					_, err := tx.ExecContext(context.Background(), `INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, "dns_validated_at", validatedAt.Format(time.RFC3339))
+					return err
+				})
+			},
 		},
 	})
+	s.sslManager = mgr
 
 	var domains []string
 	if s.currentConfig().Server.FQDN != "" {
@@ -890,11 +989,63 @@ func (s *Server) configureTLS() error {
 	return nil
 }
 
+// RenewTLS runs the daily certificate renewal check using the active SSL
+// manager and the server's configured public hostname.
+func (s *Server) RenewTLS(ctx context.Context) error {
+	if s == nil || s.sslManager == nil {
+		return errors.New("SSL manager is unavailable")
+	}
+	var domains []string
+	if cfg := s.currentConfig(); cfg != nil && cfg.Server.FQDN != "" {
+		domains = append(domains, cfg.Server.FQDN)
+	}
+	return s.sslManager.Renew(ctx, domains)
+}
+
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
+	db.SetDebugQueryObserver(nil)
+	db.SetDebugCacheObserver(nil)
 	s.stopTrustedProxyRefresh()
 	_ = s.SetTorBackendPort(0)
-	return s.server.Shutdown(ctx)
+	shutdownErr := s.server.Shutdown(ctx)
+	statsErr := s.stopStatsPersistence(ctx)
+	return errors.Join(shutdownErr, statsErr)
+}
+
+func (s *Server) startStatsPersistence() {
+	s.statsPersistenceMu.Lock()
+	defer s.statsPersistenceMu.Unlock()
+	if s.statsPersistenceStop != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.statsPersistenceStop = cancel
+	s.statsPersistenceDone = done
+	go func() {
+		defer close(done)
+		s.stats.runPersistence(ctx)
+	}()
+}
+
+func (s *Server) stopStatsPersistence(ctx context.Context) error {
+	s.statsPersistenceMu.Lock()
+	cancel := s.statsPersistenceStop
+	done := s.statsPersistenceDone
+	s.statsPersistenceStop = nil
+	s.statsPersistenceDone = nil
+	s.statsPersistenceMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // handleLocaleJSON serves the raw embedded translation catalog for a language

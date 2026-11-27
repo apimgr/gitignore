@@ -618,7 +618,7 @@ func (s *Server) handleForgetOwnerToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.clearOwnerCookie(w, r)
-	w.Header().Set("Clear-Site-Data", `"storage"`)
+	s.setTokenRevocationClearSiteData(w)
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.Redirect(w, r, "/server/preferences/tokens", http.StatusSeeOther)
 }
@@ -652,7 +652,7 @@ func (s *Server) handleRevokePrimaryOwnerTokenWeb(w http.ResponseWriter, r *http
 	}
 	s.logOwnerDeletionAudit(identity.OwnerID, "web", deleted, 0, s.clientIP(r))
 	s.clearOwnerCookie(w, r)
-	w.Header().Set("Clear-Site-Data", `"storage"`)
+	s.setTokenRevocationClearSiteData(w)
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.Redirect(w, r, "/server/preferences/tokens", http.StatusSeeOther)
 }
@@ -684,6 +684,7 @@ func (s *Server) handleAPIPrimaryOwnerRevoke(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.logOwnerDeletionAudit(identity.OwnerID, "api", deleted, 0, s.clientIP(r))
+	s.setTokenRevocationClearSiteData(w)
 	w.Header().Set("Cache-Control", "private, no-store")
 	sendPrivateAPIResponseOK(w, http.StatusOK, map[string]int64{"tokens": deleted, "resources": 0})
 }
@@ -781,6 +782,7 @@ func (s *Server) handleOwnerTokenWebAction(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		s.logTokenAudit("token.revoked", identity.OwnerID, target.TokenPrefix, "web", s.clientIP(r), "", true)
+		s.setTokenRevocationClearSiteData(w)
 	default:
 		sendAPIResponseErrorLocalized(w, r, "NOT_FOUND")
 		return
@@ -1042,6 +1044,7 @@ func (s *Server) handleAPITokenAction(w http.ResponseWriter, r *http.Request, id
 			return
 		}
 		s.logTokenAudit("token.revoked", identity.OwnerID, item.TokenPrefix, "api", s.clientIP(r), "", true)
+		s.setTokenRevocationClearSiteData(w)
 		w.Header().Set("Cache-Control", "private, no-store")
 		sendPrivateAPIResponseOK(w, http.StatusOK, map[string]string{"status": "revoked"})
 		return
@@ -1084,7 +1087,7 @@ func sendPrivateAPIResponseOK(w http.ResponseWriter, status int, data interface{
 	w.Header().Set("Content-Type", "application/json")
 	setCacheHeaders(w, "authenticated")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(APIResponse{OK: true, Data: data})
+	_ = encodeJSON(w, APIResponse{OK: true, Data: data})
 }
 
 func (s *Server) sendBearerError(w http.ResponseWriter, r *http.Request) {

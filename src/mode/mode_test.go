@@ -27,7 +27,7 @@ func TestParseMode(t *testing.T) {
 	}{
 		{"dev short", "dev", Development, false},
 		{"development full", "development", Development, false},
-		{"debug alias", "debug", Development, false},
+		{"debug mode", "debug", Debug, false},
 		{"prod short", "prod", Production, false},
 		{"production full", "production", Production, false},
 		{"case insensitive", "PRODUCTION", Production, false},
@@ -92,7 +92,7 @@ func TestSetInvalidModeReturnsErrorAndLeavesCurrentUnchanged(t *testing.T) {
 	}
 }
 
-func TestSetDebugAliasEnablesDebug(t *testing.T) {
+func TestSetDebugModeEnablesDebug(t *testing.T) {
 	resetState(t)
 
 	if IsDebugEnabled() {
@@ -101,8 +101,8 @@ func TestSetDebugAliasEnablesDebug(t *testing.T) {
 	if err := Set("debug"); err != nil {
 		t.Fatalf("Set(debug): %v", err)
 	}
-	if Get() != Development {
-		t.Errorf("Get() = %v, want Development for debug alias", Get())
+	if Get() != Debug {
+		t.Errorf("Get() = %v, want Debug for debug mode", Get())
 	}
 	if !IsDebugEnabled() {
 		t.Error("IsDebugEnabled() = false, want true after Set(debug)")
@@ -274,8 +274,8 @@ func TestInitDebugFromEnv(t *testing.T) {
 		if IsDebugEnabled() {
 			t.Error("InitDebug() with DEBUG=false should disable debug even after debug alias")
 		}
-		if !IsAppModeDev() {
-			t.Error("mode should remain development from the debug alias")
+		if Get() != Debug || !IsAppModeDev() {
+			t.Error("mode should remain debug with development behavior")
 		}
 	})
 

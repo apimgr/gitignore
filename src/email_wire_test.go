@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/server"
@@ -57,6 +58,9 @@ func TestNotificationHelpersAreSafeWithoutConfiguredEmail(t *testing.T) {
 	emitUpdateStaged("1.1.0")
 	emitSchedulerError("cleanup", "Cleanup", "failed", "tomorrow")
 	emitSchedulerError("backup_daily", "Backup", "failed", "tomorrow")
+	emitDatabaseError("database unavailable", time.Now().UTC())
+	emitLifecycleEmail("startup", "", 0)
+	emitLifecycleEmail("shutdown", "signal", 0)
 	if !suppressSchedulerError["backup_daily"] || suppressSchedulerError["cleanup"] {
 		t.Fatal("scheduler notification suppression does not match dedicated-event policy")
 	}

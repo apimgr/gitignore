@@ -24,6 +24,12 @@ type ServerConfig struct {
 	VerifySSL string `yaml:"verify_ssl,omitempty"`
 }
 
+// AuthConfig stores an optional API token in the owner-only CLI config.
+type AuthConfig struct {
+	Token     string `yaml:"token,omitempty"`
+	TokenFile string `yaml:"token_file,omitempty"`
+}
+
 // UpdateConfig holds the CLI self-update preferences. The settings are
 // preserved across profile reads and writes while server release feeds are
 // not yet configured for this project.
@@ -41,6 +47,7 @@ type DisplayConfig struct {
 // Config is the full cli.yml document.
 type Config struct {
 	Server  ServerConfig  `yaml:"server"`
+	Auth    AuthConfig    `yaml:"auth,omitempty"`
 	Output  string        `yaml:"output,omitempty"`
 	Color   string        `yaml:"color,omitempty"`
 	Lang    string        `yaml:"lang,omitempty"`

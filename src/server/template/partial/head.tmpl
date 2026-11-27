@@ -1,0 +1,43 @@
+{{define "head"}}<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .DocumentTitle}}{{.DocumentTitle}}{{else}}{{.Branding.Title}}{{if .Branding.Tagline}}{{.Branding.TitleSuffix}}{{.Branding.Tagline}}{{end}}{{end}}</title>
+<meta name="description" content="{{.Description}}">
+{{if .SEO.Keywords}}<meta name="keywords" content="{{.SEO.Keywords}}">{{end}}
+{{if .SEO.Author}}<meta name="author" content="{{.SEO.Author}}">{{end}}
+<meta name="robots" content="{{.SEO.Robots}}">
+<link rel="canonical" href="{{.SEO.CanonicalURL}}">
+<meta name="theme-color" content="#282a36">
+<meta name="color-scheme" content="dark light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="{{.Branding.Title}}">
+<link rel="icon" href="{{.Branding.FaviconURL}}" sizes="any">
+{{if .Branding.LogoURL}}<link rel="apple-touch-icon" href="{{.Branding.LogoURL}}">{{end}}
+<link rel="manifest" href="{{path "/manifest.json"}}">
+{{range $name, $content := .SEO.MetaTags}}<meta name="{{$name}}" content="{{$content}}">{{end}}
+{{range .SEO.Verification}}<meta name="{{.Name}}" content="{{.Content}}">{{end}}
+{{if .SEO.OGEnabled}}
+<meta property="og:title" content="{{$.Branding.Title}}">
+<meta property="og:description" content="{{$.Description}}">
+{{if .SEO.OGImage}}<meta property="og:image" content="{{.SEO.OGImage}}">{{end}}
+<meta property="og:type" content="{{.SEO.OGType}}">
+<meta property="og:url" content="{{.SEO.CanonicalURL}}">
+<meta property="og:site_name" content="{{.SEO.OGSiteName}}">
+{{end}}
+{{if .SEO.TwitterEnabled}}
+<meta name="twitter:card" content="{{.SEO.TwitterCard}}">
+<meta name="twitter:title" content="{{.Branding.Title}}">
+<meta name="twitter:description" content="{{.Description}}">
+{{if .SEO.OGImage}}<meta name="twitter:image" content="{{.SEO.OGImage}}">{{end}}
+{{if .SEO.TwitterSite}}<meta name="twitter:site" content="{{.SEO.TwitterSite}}">{{end}}
+{{if .SEO.TwitterCreator}}<meta name="twitter:creator" content="{{.SEO.TwitterCreator}}">{{end}}
+{{end}}
+<script type="application/ld+json">{{.SEO.StructuredData}}</script>
+<link rel="stylesheet" href="{{path "/static/css/common.css"}}">
+<link rel="stylesheet" href="{{path "/static/css/components.css"}}">
+<link rel="stylesheet" href="{{path "/static/css/public.css"}}">
+{{if .AccentCSS}}<link rel="stylesheet" href="{{.AccentCSS}}">{{end}}
+{{range .PageCSS}}<link rel="stylesheet" href="{{.}}">{{end}}
+{{.TrackingMarkup}}
+</head>{{end}}

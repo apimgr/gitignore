@@ -46,6 +46,12 @@ func PrepareEncryptionKeyRotation(oldEncoded, nextEncoded string, now time.Time)
 				return errors.New("encryption key rotation is already in progress or within its grace period")
 			}
 		}
+		var pendingEncoded string
+		if err := tx.QueryRowContext(ctx, "SELECT value FROM app_secrets WHERE name = ?", "encryption_key_rotation_pending").Scan(&pendingEncoded); err == nil {
+			return errors.New("encryption key rotation is still in progress")
+		} else if err != sql.ErrNoRows {
+			return err
+		}
 		wrapped, err := encryptAtRest(nextKey, oldKey)
 		if err != nil {
 			return err
@@ -171,6 +177,45 @@ func DecryptOwnerTokenDuringRotation(encoded, currentEncoded string) ([]byte, bo
 		return updateErr
 	})
 	if err != nil {
+		return nil, false, err
+	}
+	return plaintext, true, nil
+}
+
+// DecryptSecurityReportDuringRotation retries an AES-encrypted report field
+// with the wrapped previous key and opportunistically migrates it in place.
+func DecryptSecurityReportDuringRotation(trackingID, field string, ciphertext []byte, currentEncoded string) ([]byte, bool, error) {
+	if field != "body_enc" && field != "contact_enc" {
+		return nil, false, errors.New("unsupported security report encryption field")
+	}
+	current, err := decodeEncryptionKey(currentEncoded)
+	if err != nil {
+		return nil, false, err
+	}
+	if plaintext, err := decryptAtRest(current, ciphertext); err == nil {
+		return plaintext, false, nil
+	}
+	ctx, cancel := readCtx()
+	defer cancel()
+	previous, err := previousEncryptionKey(ctx, current)
+	if err != nil || previous == nil {
+		return nil, false, err
+	}
+	plaintext, err := decryptAtRest(previous, ciphertext)
+	if err != nil {
+		return nil, false, err
+	}
+	reencrypted, err := encryptAtRest(current, plaintext)
+	if err != nil {
+		return nil, false, err
+	}
+	writeContext, writeCancel := writeCtx()
+	defer writeCancel()
+	query := "UPDATE security_reports SET " + field + " = ? WHERE tracking_id = ? AND " + field + " = ?"
+	if err := Write(writeContext, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(writeContext, query, reencrypted, trackingID, ciphertext)
+		return err
+	}); err != nil {
 		return nil, false, err
 	}
 	return plaintext, true, nil
@@ -397,7 +442,7 @@ func reencryptOwnerTokenBatch(ctx context.Context, previous, current []byte, aft
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE api_tokens SET token_enc = ? WHERE id = ?", base64.StdEncoding.EncodeToString(reencrypted), value.id); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE api_tokens SET token_enc = ? WHERE id = ? AND token_enc = ?", base64.StdEncoding.EncodeToString(reencrypted), value.id, value.enc); err != nil {
 				return err
 			}
 		}
@@ -452,11 +497,11 @@ func reencryptSecurityReportBatch(ctx context.Context, previous, current []byte,
 				continue
 			}
 			if body == nil {
-				_, err = tx.ExecContext(ctx, "UPDATE security_reports SET contact_enc = ? WHERE tracking_id = ?", contact, value.id)
+				_, err = tx.ExecContext(ctx, "UPDATE security_reports SET contact_enc = ? WHERE tracking_id = ? AND contact_enc = ?", contact, value.id, value.contact)
 			} else if contact == nil {
-				_, err = tx.ExecContext(ctx, "UPDATE security_reports SET body_enc = ? WHERE tracking_id = ?", body, value.id)
+				_, err = tx.ExecContext(ctx, "UPDATE security_reports SET body_enc = ? WHERE tracking_id = ? AND body_enc = ?", body, value.id, value.body)
 			} else {
-				_, err = tx.ExecContext(ctx, "UPDATE security_reports SET body_enc = ?, contact_enc = ? WHERE tracking_id = ?", body, contact, value.id)
+				_, err = tx.ExecContext(ctx, "UPDATE security_reports SET body_enc = ?, contact_enc = ? WHERE tracking_id = ? AND body_enc = ? AND contact_enc = ?", body, contact, value.id, value.body, value.contact)
 			}
 			if err != nil {
 				return err

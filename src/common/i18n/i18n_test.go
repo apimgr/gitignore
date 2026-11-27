@@ -235,6 +235,40 @@ func TestMiddlewareWithSecureCookieAttributes(t *testing.T) {
 	}
 }
 
+func TestMiddlewarePersistsQueryLanguageOnlyWithConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		canPersist bool
+		wantCookie bool
+	}{
+		{name: "without preferences consent", canPersist: false, wantCookie: false},
+		{name: "with preferences consent", canPersist: true, wantCookie: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotLang := ""
+			handler := MiddlewareWithSecureAndConsent(
+				http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { gotLang = LangFromContext(r.Context()) }),
+				func(*http.Request) bool { return true },
+				func(*http.Request) bool { return tc.canPersist },
+			)
+			request := httptest.NewRequest(http.MethodGet, "/?lang=fr", nil)
+			writer := httptest.NewRecorder()
+			handler.ServeHTTP(writer, request)
+			if gotLang != "fr" {
+				t.Fatalf("request language = %q, want fr", gotLang)
+			}
+			cookies := writer.Result().Cookies()
+			if tc.wantCookie {
+				if len(cookies) != 1 || cookies[0].Name != "lang" || cookies[0].Value != "fr" || cookies[0].MaxAge != 365*24*60*60 {
+					t.Fatalf("language preference cookie = %#v", cookies)
+				}
+			} else if len(cookies) != 0 {
+				t.Fatalf("language cookie was set without consent: %#v", cookies)
+			}
+		})
+	}
+}
+
 // TestKeySetsIdentical enforces the build-time invariant that every language
 // carries exactly the same keys as English (AI.md PART 30).
 func TestKeySetsIdentical(t *testing.T) {
@@ -419,5 +453,45 @@ func TestLocaleJSON(t *testing.T) {
 	}
 	if _, ok := LocaleJSON("xx"); ok {
 		t.Error("expected xx locale JSON to be absent")
+	}
+}
+
+func TestAvailableLanguagesAndRequestTranslationHelpers(t *testing.T) {
+	languages := AvailableLanguages()
+	if len(languages) != len(SupportedLanguages()) {
+		t.Fatalf("available language metadata count = %d, want %d", len(languages), len(SupportedLanguages()))
+	}
+	for _, language := range languages {
+		if language.Code == "" || language.Name == "" || language.NativeName == "" || language.Direction == "" {
+			t.Errorf("incomplete language metadata: %+v", language)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/?lang=es", nil)
+	var got, formatted string
+	handler := Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = T(r, "common.save")
+		formatted = TF(r, "common.page_x_of_y", "current", 2, "total", 5)
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if got != "Guardar" || formatted != "Página 2 de 5" {
+		t.Fatalf("request translations = (%q, %q)", got, formatted)
+	}
+}
+
+func TestLanguageDirectionAndLocaleLookup(t *testing.T) {
+	if got := Direction("ar"); got != "rtl" {
+		t.Errorf("Arabic direction = %q, want rtl", got)
+	}
+	if got := Direction("en"); got != "ltr" {
+		t.Errorf("English direction = %q, want ltr", got)
+	}
+	if got := Direction("unknown"); got != "ltr" {
+		t.Errorf("unsupported language direction = %q, want ltr", got)
+	}
+	if data, ok := LocaleJSON("ar"); !ok || len(data) == 0 {
+		t.Fatalf("Arabic locale JSON = %d bytes, %t", len(data), ok)
+	}
+	if _, ok := LocaleJSON("unknown"); ok {
+		t.Fatal("unsupported locale JSON was found")
 	}
 }

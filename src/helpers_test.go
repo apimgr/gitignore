@@ -184,20 +184,20 @@ func TestGenerateServerCompletionsContainFlags(t *testing.T) {
 }
 
 func TestPrintShellCompletionsUnsupportedShell(t *testing.T) {
-	if code := printShellCompletions("cobol", "gitignore"); code != 64 {
-		t.Errorf("printShellCompletions unsupported shell = %d, want 64", code)
+	if code := printShellCompletions("cobol", "gitignore"); code != 2 {
+		t.Errorf("printShellCompletions unsupported shell = %d, want 2", code)
 	}
 }
 
 func TestPrintShellInitUnsupportedShell(t *testing.T) {
-	if code := printShellInit("cobol", "gitignore"); code != 64 {
-		t.Errorf("printShellInit unsupported shell = %d, want 64", code)
+	if code := printShellInit("cobol", "gitignore"); code != 2 {
+		t.Errorf("printShellInit unsupported shell = %d, want 2", code)
 	}
 }
 
 func TestHandleShellNoArgs(t *testing.T) {
-	if code := handleShell(nil); code != 64 {
-		t.Errorf("handleShell(nil) = %d, want 64", code)
+	if code := handleShell(nil); code != 2 {
+		t.Errorf("handleShell(nil) = %d, want 2", code)
 	}
 }
 
@@ -208,8 +208,8 @@ func TestHandleShellHelp(t *testing.T) {
 }
 
 func TestHandleShellUnknownSubcommand(t *testing.T) {
-	if code := handleShell([]string{"bogus"}); code != 64 {
-		t.Errorf("handleShell([\"bogus\"]) = %d, want 64", code)
+	if code := handleShell([]string{"bogus"}); code != 2 {
+		t.Errorf("handleShell([\"bogus\"]) = %d, want 2", code)
 	}
 }
 

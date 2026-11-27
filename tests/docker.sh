@@ -51,7 +51,7 @@ docker run --rm \
   alpine:latest sh -c '
     set -e
 
-    apk add --no-cache curl bash file jq >/dev/null
+    apk add --no-cache curl bash file jq tor i2pd tzdata ca-certificates >/dev/null
 
     chmod +x /app/'"${PROJECT_NAME}"'
 

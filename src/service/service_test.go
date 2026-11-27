@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,12 @@ import (
 
 // okMark/warnMark: NO_COLOR convention toggles emoji vs plain-text markers.
 func TestOkMarkHonorsNoColor(t *testing.T) {
+	t.Run("empty NO_COLOR keeps emoji", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "")
+		if got := okMark(); got != "✅" {
+			t.Errorf("okMark() = %q, want emoji", got)
+		}
+	})
 	t.Run("NO_COLOR set returns plain text", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
 		if got := okMark(); got != "[OK]" {
@@ -29,6 +36,12 @@ func TestOkMarkHonorsNoColor(t *testing.T) {
 }
 
 func TestWarnMarkHonorsNoColor(t *testing.T) {
+	t.Run("empty NO_COLOR keeps emoji", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "")
+		if got := warnMark(); got != "⚠️ " {
+			t.Errorf("warnMark() = %q, want emoji", got)
+		}
+	})
 	t.Run("NO_COLOR set returns plain text", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
 		if got := warnMark(); got != "[WARN]" {
@@ -217,6 +230,32 @@ func TestShellJoin(t *testing.T) {
 				t.Errorf("shellJoin(%v) = %q, want %q", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWindowsCommandLineQuotesArguments(t *testing.T) {
+	got := windowsCommandLine([]string{`C:\Program Files\gitignore.exe`, `--value=a b`, `quote"value`, `trail\\`})
+	want := `"C:\Program Files\gitignore.exe" "--value=a b" "quote\"value" "trail\\\\"`
+	if got != want {
+		t.Fatalf("windowsCommandLine() = %q, want %q", got, want)
+	}
+}
+
+func TestRunAsWindowsServiceIsNoopOutsideWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SCM detection is Windows-only")
+	}
+	isService, detectErr := IsWindowsService()
+	if detectErr != nil || isService {
+		t.Fatalf("IsWindowsService() = (%v, %v), want (false, nil)", isService, detectErr)
+	}
+	called := false
+	handled, err := RunAsWindowsService(func(context.Context, func()) error {
+		called = true
+		return nil
+	})
+	if err != nil || handled || called {
+		t.Fatalf("RunAsWindowsService() = (%v, %v), callback called=%v; want (false, nil), not called", handled, err, called)
 	}
 }
 

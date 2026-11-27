@@ -1,0 +1,23 @@
+{{define "nav"}}<nav id="navigation" class="nav-links" aria-label="{{t .Lang "nav.main_navigation"}}">
+<a href="{{path "/"}}"{{if eq .Path "/"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.home"}}</a>
+<a href="{{path "/search"}}"{{if eq .Path "/search"}} class="active" aria-current="page"{{end}}>{{t .Lang "common.search"}}</a>
+<a href="{{path "/list"}}"{{if eq .Path "/list"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.all_templates"}}</a>
+<a href="{{path "/categories"}}"{{if eq .Path "/categories"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.categories"}}</a>
+<a href="{{path "/combine"}}"{{if eq .Path "/combine"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.combine"}}</a>
+<a href="{{path "/stats"}}"{{if eq .Path "/stats"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.stats"}}</a>
+<a href="{{path "/docs"}}"{{if eq .Path "/docs"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.api_docs"}}</a>
+<a href="{{path "/cli"}}"{{if eq .Path "/cli"}} class="active" aria-current="page"{{end}}>{{t .Lang "nav.cli"}}</a>
+</nav>{{end}}
+
+{{define "mobile-nav"}}<nav class="nav-panel" id="nav-panel" aria-label="{{t .Lang "nav.main_navigation"}}">
+<label class="nav-close" for="nav-toggle" role="button" tabindex="0" aria-label="{{t .Lang "common.close"}}" title="{{t .Lang "common.close"}}">✕</label>
+<a href="{{path "/"}}"{{if eq .Path "/"}} aria-current="page"{{end}}>{{t .Lang "nav.home"}}</a>
+<a href="{{path "/search"}}"{{if eq .Path "/search"}} aria-current="page"{{end}}>{{t .Lang "common.search"}}</a>
+<a href="{{path "/list"}}"{{if eq .Path "/list"}} aria-current="page"{{end}}>{{t .Lang "nav.all_templates"}}</a>
+<a href="{{path "/categories"}}"{{if eq .Path "/categories"}} aria-current="page"{{end}}>{{t .Lang "nav.categories"}}</a>
+<a href="{{path "/combine"}}"{{if eq .Path "/combine"}} aria-current="page"{{end}}>{{t .Lang "nav.combine"}}</a>
+<a href="{{path "/stats"}}"{{if eq .Path "/stats"}} aria-current="page"{{end}}>{{t .Lang "nav.stats"}}</a>
+<a href="{{path "/docs"}}"{{if eq .Path "/docs"}} aria-current="page"{{end}}>{{t .Lang "nav.api_docs"}}</a>
+<a href="{{path "/cli"}}"{{if eq .Path "/cli"}} aria-current="page"{{end}}>{{t .Lang "nav.cli"}}</a>
+</nav>
+<label class="nav-overlay" for="nav-toggle" aria-label="{{t .Lang "common.close"}}"></label>{{end}}

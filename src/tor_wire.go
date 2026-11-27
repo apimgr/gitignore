@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -25,7 +26,7 @@ func torBinaryInstalled(cfg *config.Config) bool {
 // is unavailable.
 func startTor(ctx context.Context, cfg *config.Config, configDir, dataDir string, serverPort int, srv *server.Server) *tor.TorManager {
 	if _, found := tor.FindBinary(cfg.Server.Tor.Binary); !found {
-		fmt.Println(cliText("cli.tor.disabled"))
+		log.Printf("%s", cliText("cli.tor.disabled"))
 		return nil
 	}
 
@@ -35,7 +36,7 @@ func startTor(ctx context.Context, cfg *config.Config, configDir, dataDir string
 
 	go func() {
 		if err := mgr.Start(); err != nil {
-			fmt.Println(cliText("cli.tor.bootstrap_failed", "error", err))
+			log.Printf("%s", cliText("cli.tor.bootstrap_failed", "error", err))
 			return
 		}
 		mgr.Monitor(ctx)

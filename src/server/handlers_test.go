@@ -86,6 +86,24 @@ func TestHandleAPIAutodiscover(t *testing.T) {
 	}
 }
 
+func TestHandleAPIAutodiscoverGatesI2PAddress(t *testing.T) {
+	s := newTestCompatServer(t)
+	s.config.Cfg.Server.I2P.Enabled = true
+	s.config.I2PStatus = func() I2PInfo { return I2PInfo{Enabled: true, Running: true, Hostname: "site.b32.i2p"} }
+	request := httptest.NewRequest(http.MethodGet, "/api/autodiscover", nil)
+	response := httptest.NewRecorder()
+	s.handleAPIAutodiscover(response, request)
+	if strings.Contains(response.Body.String(), "site.b32.i2p") {
+		t.Fatal("I2P address exposed when expose is false")
+	}
+	s.config.Cfg.Server.I2P.Expose = true
+	response = httptest.NewRecorder()
+	s.handleAPIAutodiscover(response, request)
+	if !strings.Contains(response.Body.String(), "site.b32.i2p") {
+		t.Fatal("I2P address missing when expose is true")
+	}
+}
+
 func TestHandleAPITemplateFound(t *testing.T) {
 	s := newTestCompatServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates/Go", nil)
@@ -235,7 +253,7 @@ func TestHandleGraphQL(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"name":"Go"`) {
+	if !strings.Contains(rec.Body.String(), `"name": "Go"`) {
 		t.Errorf("expected the Go template in the GraphQL response: %s", rec.Body.String())
 	}
 
@@ -245,7 +263,7 @@ func TestHandleGraphQL(t *testing.T) {
 	if getResponse.Code != http.StatusOK {
 		t.Fatalf("GET alias status = %d, want 200: %s", getResponse.Code, getResponse.Body.String())
 	}
-	if !strings.Contains(getResponse.Body.String(), `"name":"Go"`) {
+	if !strings.Contains(getResponse.Body.String(), `"name": "Go"`) {
 		t.Errorf("expected the Go template in the GET GraphQL response: %s", getResponse.Body.String())
 	}
 }
@@ -337,17 +355,20 @@ func TestHandleSecurityTxtTorUsesOnlyTorContactAndOmitsLocale(t *testing.T) {
 
 func TestHandleManifest(t *testing.T) {
 	s := newTestCompatServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/manifest.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/manifest.json?v="+s.assetStamp(), nil)
 	rec := httptest.NewRecorder()
 	s.handleManifest(rec, req)
 	if !strings.Contains(rec.Body.String(), "GitIgnore API") {
 		t.Errorf("expected manifest name: %s", rec.Body.String())
 	}
+	if rec.Header().Get("Cache-Control") != "no-cache" || rec.Header().Get("ETag") != `"`+s.assetStamp()+`"` {
+		t.Errorf("manifest cache headers = %q / %q", rec.Header().Get("Cache-Control"), rec.Header().Get("ETag"))
+	}
 }
 
 func TestHandleServiceWorker(t *testing.T) {
 	s := newTestCompatServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	req := httptest.NewRequest(http.MethodGet, "/sw.js?v="+s.assetStamp(), nil)
 	rec := httptest.NewRecorder()
 	s.handleServiceWorker(rec, req)
 	for _, expected := range []string{"gitignore-cache-", "NAV_TIMEOUT_MS = 8000", "SKIP_WAITING", "request.mode === 'navigate'", "url.pathname.startsWith('/api/')", "!response.redirected", "offlineResponse()"} {
@@ -360,6 +381,9 @@ func TestHandleServiceWorker(t *testing.T) {
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
 		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	}
+	if etag := rec.Header().Get("ETag"); etag != `"`+s.assetStamp()+`"` {
+		t.Errorf("service worker ETag = %q", etag)
 	}
 }
 

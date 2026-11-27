@@ -66,6 +66,8 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 		"scheduler_history": false,
 		"backups":           false,
 		"app_secrets":       false,
+		"server_stats":      false,
+		"server_stat_hours": false,
 		"owners":            false,
 		"api_tokens":        false,
 		"security_thanks":   false,
@@ -117,6 +119,52 @@ func TestInitCreatesSchemaAndClose(t *testing.T) {
 	}
 	if len(secretColumns) != 3 || !secretColumns["name"] || !secretColumns["value"] || !secretColumns["updated_at"] {
 		t.Fatalf("app_secrets columns = %v, want name, value, updated_at", secretColumns)
+	}
+}
+
+func TestProbeWriteRollsBack(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer func() {
+		if err := Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+	var before int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM app_secrets WHERE name LIKE '_maintenance_probe_%'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProbeWrite(); err != nil {
+		t.Fatalf("ProbeWrite: %v", err)
+	}
+	var after int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM app_secrets WHERE name LIKE '_maintenance_probe_%'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("write probe left persistent state: before=%d after=%d", before, after)
+	}
+}
+
+func TestDatabaseProbeChecksReadAndWriteHandles(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer func() {
+		if err := Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+	if err := Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Probe(ctx); err == nil {
+		t.Fatal("Probe with canceled context succeeded")
 	}
 }
 
@@ -184,7 +232,7 @@ func TestWriteRollsBackSQLiteMutations(t *testing.T) {
 	t.Cleanup(func() { _ = Close() })
 	writeErr := errors.New("force rollback")
 	err := Write(context.Background(), func(tx *sql.Tx) error {
-		if _, err := tx.Exec("INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?)", "write_rollback_probe", "value", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		if _, err := tx.Exec("INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", "write_rollback_probe", "value", time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}
 		return writeErr
@@ -406,6 +454,42 @@ func TestMigrateLegacyInstallationSecretKey(t *testing.T) {
 	loaded, err := InstallationSecret()
 	if err != nil || !bytes.Equal(loaded, secret) {
 		t.Fatalf("migrated installation secret = %x, %v", loaded, err)
+	}
+}
+
+func TestImportLegacySecretsDoesNotReplaceCanonicalRows(t *testing.T) {
+	t.Setenv("DATABASE_DIR", "")
+	if err := Init(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = Close() }()
+	if _, err := conn.Exec("UPDATE app_secrets SET value = ?, updated_at = ? WHERE name = ?", "canonical-value", "now", "installation_secret"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[string]string{
+		"installation_secret":                "legacy-value",
+		"installation_secret_previous_until": "2030-01-01T00:00:00Z",
+	}
+	if err := importLegacySecrets(context.Background(), tx, legacy); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("import legacy secrets: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var current, previousUntil string
+	if err := conn.QueryRow("SELECT value FROM app_secrets WHERE name = ?", "installation_secret").Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow("SELECT value FROM app_secrets WHERE name = ?", "installation_secret_previous_until").Scan(&previousUntil); err != nil {
+		t.Fatal(err)
+	}
+	if current != "canonical-value" || previousUntil != legacy["installation_secret_previous_until"] {
+		t.Fatalf("secret values = current %q, previous_until %q", current, previousUntil)
 	}
 }
 

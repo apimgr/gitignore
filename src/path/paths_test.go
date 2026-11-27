@@ -205,6 +205,41 @@ func TestIsRunningInContainer(t *testing.T) {
 	_ = IsRunningInContainer()
 }
 
+func TestContainerDefaultDirectoriesUseProjectScope(t *testing.T) {
+	if !IsRunningInContainer() {
+		t.Skip("container path contract applies only inside a container")
+	}
+	if os.Getenv("CACHE_DIR") != "" {
+		t.Skip("CACHE_DIR override is set")
+	}
+	if os.Getenv("DATABASE_DIR") != "" {
+		t.Skip("DATABASE_DIR override is set")
+	}
+	projectName := "gitignore"
+	configDir, dataDir, logsDir, backupDir := GetDefaultDirs(projectName)
+	want := map[string]string{
+		"config": filepath.Join("/config", projectName),
+		"data":   filepath.Join("/data", projectName),
+		"logs":   filepath.Join("/data", "log", projectName),
+		"backup": filepath.Join("/data", "backups", projectName),
+		"cache":  filepath.Join("/data", projectName, "cache"),
+		"db":     filepath.Join("/data", "db", "sqlite"),
+	}
+	got := map[string]string{
+		"config": configDir,
+		"data":   dataDir,
+		"logs":   logsDir,
+		"backup": backupDir,
+		"cache":  GetCacheDir(),
+		"db":     GetDatabaseDir(dataDir),
+	}
+	for name, expected := range want {
+		if got[name] != expected {
+			t.Errorf("container %s directory = %q, want %q", name, got[name], expected)
+		}
+	}
+}
+
 // PathManager.GetBackupDir is a plain field accessor, distinct from the
 // package-level GetBackupDir() function tested above.
 func TestPathManagerGetBackupDir(t *testing.T) {

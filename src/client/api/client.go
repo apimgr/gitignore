@@ -1,7 +1,6 @@
-// Package api implements the HTTP client used by gitignore-cli to talk to
-// this project's own /api/v1/* endpoints. All endpoints are public and
-// unauthenticated (see IDEA.md: "No user accounts, registration, or login
-// of any kind") so this client carries no token/auth machinery.
+// Package api implements the HTTP client used by gitignore-cli. Public
+// endpoints work without credentials; a configured Bearer token is sent to
+// the selected server for protected operations.
 package api
 
 import (
@@ -36,6 +35,7 @@ func UserAgent() string {
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+	Token      string
 	// Lang is the resolved output language sent as Accept-Language so the
 	// server can localize error messages (AI.md PART 30).
 	Lang string
@@ -61,6 +61,18 @@ type Template struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Size        int      `json:"size"`
+}
+
+// BinaryVersion describes a published CLI release for one platform.
+type BinaryVersion struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"`
+}
+
+// Discovery contains the public server metadata used to check for CLI updates.
+type Discovery struct {
+	CLIVersions   map[string]BinaryVersion `json:"cli_versions"`
+	CLIMinVersion string                   `json:"cli_min_version"`
 }
 
 // envelope mirrors the {"ok": true, "data": ...} JSON contract implemented
@@ -104,6 +116,9 @@ func (c *Client) get(path string, pathParams, queryParams map[string]string) (*e
 		return nil, fmt.Errorf("%s", c.text("cli.client.api.create_request_failed", "error", err))
 	}
 	req.Header.Set("User-Agent", UserAgent())
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Language", lang)
 
@@ -148,6 +163,19 @@ func (c *Client) List() ([]string, error) {
 		return nil, fmt.Errorf("%s", c.text("cli.client.api.decode_list_failed", "error", err))
 	}
 	return names, nil
+}
+
+// Discover retrieves public server metadata from /api/autodiscover.
+func (c *Client) Discover() (*Discovery, error) {
+	env, err := c.get("/api/autodiscover", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var discovery Discovery
+	if err := json.Unmarshal(env.Data, &discovery); err != nil {
+		return nil, fmt.Errorf("%s", c.text("cli.client.api.decode_discovery_failed", "error", err))
+	}
+	return &discovery, nil
 }
 
 // Search returns template names matching q.

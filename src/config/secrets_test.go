@@ -352,6 +352,50 @@ func TestRotateEncryptionKeyUpdatesSecretsFileAndVersion(t *testing.T) {
 	}
 }
 
+func TestDNSCredentialsEncryptOnLoadAndRotate(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.yml")
+	secretsPath := filepath.Join(dir, "secrets.yml")
+	oldKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x16}, 32))
+	newKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x27}, 32))
+	contents := "server:\n  token: adm_test\n  security:\n    encryption_key: " + oldKey + "\n  ssl:\n    letsencrypt:\n      dns_credentials:\n        CF_DNS_API_TOKEN: plaintext-dns-token\n"
+	if err := os.WriteFile(secretsPath, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	if _, err := loadSensitiveSecrets(cfg, configPath); err != nil {
+		t.Fatalf("loadSensitiveSecrets: %v", err)
+	}
+	if got := cfg.Server.SSL.LetsEncrypt.DNSCredentials["CF_DNS_API_TOKEN"]; got != "plaintext-dns-token" {
+		t.Fatalf("runtime DNS credential = %q", got)
+	}
+	data, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "plaintext-dns-token") || !strings.Contains(string(data), "enc:v1:") {
+		t.Fatal("DNS credential was not encrypted at rest")
+	}
+	if _, err := RotateEncryptionKey(configPath, newKey); err != nil {
+		t.Fatalf("RotateEncryptionKey: %v", err)
+	}
+	stored, err := readSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := nestedSecretMap(stored, "server")
+	ssl := nestedSecretMap(server, "ssl")
+	letsencrypt := nestedSecretMap(ssl, "letsencrypt")
+	credentials := nestedSecretMap(letsencrypt, "dns_credentials")
+	rotated, ok := credentials["CF_DNS_API_TOKEN"].(string)
+	if !ok {
+		t.Fatal("rotated DNS credential is missing")
+	}
+	if got, err := decryptDNSCredential(newKey, rotated); err != nil || got != "plaintext-dns-token" {
+		t.Fatalf("rotated DNS credential decrypt = %q, %v", got, err)
+	}
+}
+
 func TestBackupEncryptionPasswordLoadsAndPersistsOnlyInSecrets(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "server.yml")

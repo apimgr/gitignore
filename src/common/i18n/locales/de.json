@@ -114,6 +114,7 @@
       "total_requests": "Anfragen insgesamt",
       "requests_24h": "Anfragen (24 Stunden)",
       "active_connections": "Aktive Verbindungen",
+      "attempts": "Wiederherstellungsversuche",
       "last_checked": "Zuletzt geprüft:"
     },
     "feature": {
@@ -304,12 +305,23 @@
     "swagger_description": "Swagger UI - Interaktiver REST-API-Explorer",
     "graphql_description": "Interaktiver GraphQL-Explorer",
     "tor_access": "Tor-Zugang",
+    "tor_summary": "Diese Anwendung ist für mehr Privatsphäre als Tor Hidden Service verfügbar.",
     "onion_address": "Onion-Adresse",
     "how_to_connect": "So stellen Sie eine Verbindung her",
     "download_tor": "Tor Browser herunterladen",
     "open_tor": "Öffnen Sie den Tor Browser und warten Sie, bis die Verbindung hergestellt ist",
     "paste_onion": "Kopieren Sie die obige Onion-Adresse und fügen Sie sie in die Adressleiste des Tor Browsers ein",
-    "tor_privacy": "Die Verwendung von Tor bietet zusätzlichen Datenschutz...",
+    "tor_privacy": "Tor verbirgt Ihre IP-Adresse und verschlüsselt Ihre Verbindung, während sie über das Tor-Netzwerk geleitet wird.",
+    "i2p_access": "I2P-Zugang",
+    "i2p_summary": "Diese Anwendung ist für mehr Privatsphäre als I2P-Eepsite verfügbar.",
+    "i2p_address": "I2P-Adresse",
+    "i2p_how_to_connect": "So stellen Sie eine Verbindung her",
+    "i2p_install": "Installieren Sie I2P oder i2pd und warten Sie, bis die Integration in das Netzwerk abgeschlossen ist:",
+    "i2p_download": "I2P herunterladen",
+    "i2pd_download": "i2pd herunterladen",
+    "i2p_proxy": "Konfigurieren Sie Ihren Browser für den I2P-HTTP-Proxy (Standard: 127.0.0.1:4444).",
+    "i2p_paste": "Kopieren Sie die obige .b32.i2p-Adresse und fügen Sie sie in die Adressleiste Ihres Browsers ein.",
+    "i2p_privacy": "I2P leitet Ihre Verbindung über das I2P-Netzwerk. Eepsites verwenden HTTP; der I2P-Tunnel verschlüsselt den Transport, daher verwendet dieser Dienst kein TLS-Zertifikat.",
     "faq": "Häufig gestellte Fragen",
     "troubleshooting": "Fehlerbehebung"
   },
@@ -584,7 +596,9 @@
     },
     "common": {
       "from_label": "Von",
-      "time_label": "Zeit"
+      "time_label": "Zeit",
+      "host_label": "Host",
+      "version_label": "Version"
     },
     "test_prefix": "[TEST]",
     "templates": {
@@ -675,6 +689,25 @@
         "heading": "UPDATE BEREITGESTELLT",
         "staged": "Eine Version wurde bereitgestellt und wird beim Neustart des Dienstes angewendet.",
         "version_label": "Version"
+      },
+      "database_error": {
+        "error_label": "Fehler",
+        "heading": "PROBLEM MIT DER DATENBANKVERBINDUNG",
+        "since_label": "Seit",
+        "subject": "Problem mit der Datenbankverbindung – {app_name}",
+        "summary": "Die Anwendung kann keine Verbindung zu ihrer Datenbank herstellen."
+      },
+      "shutdown": {
+        "heading": "SERVER GESTOPPT",
+        "reason_label": "Grund",
+        "subject": "Server gestoppt – {app_name}",
+        "summary": "Der Server wurde ordnungsgemäß gestoppt."
+      },
+      "startup": {
+        "heading": "SERVER GESTARTET",
+        "mode_label": "Modus",
+        "subject": "Server gestartet – {app_name}",
+        "summary": "Der Server wurde erfolgreich gestartet."
       }
     }
   },
@@ -1321,6 +1354,8 @@
       "service_stopped": "gestoppt",
       "set_backup_directory_failed": "Sicherungsverzeichnis konnte nicht festgelegt werden: {error}",
       "set_cache_directory_failed": "Cache-Verzeichnis konnte nicht festgelegt werden: {error}",
+      "invalid_directory_path": "Ungültiger Pfad für das Verzeichnis {path}.",
+      "set_database_directory_failed": "Datenbankverzeichnis konnte nicht festgelegt werden: {error}",
       "set_data_directory_failed": "Datenverzeichnis konnte nicht festgelegt werden: {error}",
       "set_log_directory_failed": "Protokollverzeichnis konnte nicht festgelegt werden: {error}",
       "setup_complete": "Einrichtung abgeschlossen.",
@@ -1393,7 +1428,7 @@
       "update_branch_normalize_failed": "Der Updatezweig konnte nicht normalisiert werden",
       "update_branch_save_failed": "Der normalisierte Updatezweig konnte nicht gespeichert werden"
     },
-    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nInformationen:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nShell-Integration:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nServerkonfiguration:\n  --mode {production|development} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nDienstbefehle:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nWartungsbefehle:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Projektschlüssel rotieren (Operator-Token und Bestätigung erforderlich)\n\nUpdate-Befehle:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nScheduler-Befehle:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nE-Mail-Befehle:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
+    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nInformationen:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nShell-Integration:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nServerkonfiguration:\n  --mode {production|development|debug} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nDienstbefehle:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nWartungsbefehle:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Projektschlüssel rotieren (Operator-Token und Bestätigung erforderlich)\n\nUpdate-Befehle:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nScheduler-Befehle:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nE-Mail-Befehle:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
     "service": {
       "account_created": "{mark} Dienstkonto erstellt {account} (UID {uid}, GID {gid})",
       "account_removed": "{mark} Dienstkonto entfernt {account}",
@@ -1925,6 +1960,17 @@
         "analytics_suffix_not_sold": "Analysedaten sind anonymisiert und werden niemals verkauft.",
         "analytics_suffix_sold": "Analysedaten können an Dritte weitergegeben werden."
       }
+    },
+    "flash": {
+      "action_completed": "Aktion abgeschlossen.",
+      "announcement_dismissed": "Hinweis geschlossen.",
+      "consent_required": "Bitte wählen Sie eine Cookie-Einwilligungsoption, bevor Sie fortfahren.",
+      "consent_saved": "Ihre Cookie-Einwilligung wurde gespeichert.",
+      "contact_sent": "Ihre Nachricht wurde gesendet.",
+      "preferences_saved": "Ihre Einstellungen wurden gespeichert.",
+      "privacy_choice_saved": "Ihre Datenschutzauswahl wurde gespeichert.",
+      "theme_saved": "Ihre Anzeigeeinstellung wurde gespeichert.",
+      "token_action_completed": "Ihre Tokenaktion wurde abgeschlossen."
     }
   },
   "llms": {

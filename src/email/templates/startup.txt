@@ -1,0 +1,12 @@
+Subject: {email_subject}
+---
+{email_heading}
+{email_server_started}
+
+{email_version_label}: {version}
+{email_mode_label}: {mode}
+{email_host_label}: {hostname}
+{email_time_label}: {timestamp}
+
+{email_from_label}: {app_name} ({fqdn})
+{app_url}

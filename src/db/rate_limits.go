@@ -75,7 +75,9 @@ func AllowRateLimit(key string, limit, windowSeconds int) (bool, error) {
 		warnRateLimitCache(err)
 		return fallbackRateLimit(key, limit, windowSeconds, true), nil
 	}
-	events, err := appendHotRateEvent(key, time.Now().UTC().UnixMilli(), windowSeconds)
+	started := time.Now()
+	events, err := appendHotRateEvent(key, started.UTC().UnixMilli(), windowSeconds)
+	observeCacheLabel("rate_limit", "memory", len(events) > 1 && err == nil, started)
 	return len(events) <= limit, err
 }
 
@@ -100,7 +102,9 @@ func RateLimitBlocked(key string, limit, windowSeconds int) (bool, error) {
 		warnRateLimitCache(err)
 		return fallbackRateLimit(key, limit, windowSeconds, false), nil
 	}
-	events, err := activeHotRateEvents(key, time.Now().UTC().UnixMilli(), windowSeconds)
+	started := time.Now()
+	events, err := activeHotRateEvents(key, started.UTC().UnixMilli(), windowSeconds)
+	observeCacheLabel("rate_limit", "memory", len(events) > 0 && err == nil, started)
 	return len(events) >= limit, err
 }
 
@@ -125,7 +129,9 @@ func RateLimitRetryAfter(key string, windowSeconds int) (int, error) {
 		warnRateLimitCache(err)
 		return fallbackRateLimitRetry(key, windowSeconds), nil
 	}
-	events, err := activeHotRateEvents(key, time.Now().UTC().UnixMilli(), windowSeconds)
+	started := time.Now()
+	events, err := activeHotRateEvents(key, started.UTC().UnixMilli(), windowSeconds)
+	observeCacheLabel("rate_limit", "memory", len(events) > 0 && err == nil, started)
 	if err != nil {
 		return 0, err
 	}
@@ -179,7 +185,9 @@ func externalRateLimitKey(key string) string {
 	return prefix + "ratelimit:" + key
 }
 
-func externalRateLimit(client *redis.Client, key string, limit, windowSeconds int, add bool) (bool, error) {
+func externalRateLimit(client *redis.Client, key string, limit, windowSeconds int, add bool) (allowed bool, err error) {
+	started := time.Now()
+	defer func() { observeCacheLabel("rate_limit", "external", err == nil, started) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	now := time.Now().UTC().UnixMilli()
@@ -193,8 +201,8 @@ func externalRateLimit(client *redis.Client, key string, limit, windowSeconds in
 	}
 	count := pipe.ZCard(ctx, redisKey)
 	pipe.PExpire(ctx, redisKey, time.Duration(windowSeconds)*time.Second)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return false, err
+	if _, execErr := pipe.Exec(ctx); execErr != nil {
+		return false, execErr
 	}
 	if add {
 		return count.Val() <= int64(limit), nil
@@ -202,18 +210,20 @@ func externalRateLimit(client *redis.Client, key string, limit, windowSeconds in
 	return count.Val() >= int64(limit), nil
 }
 
-func externalRateLimitRetry(client *redis.Client, key string, windowSeconds int) (int, error) {
+func externalRateLimitRetry(client *redis.Client, key string, windowSeconds int) (wait int, err error) {
+	started := time.Now()
+	defer func() { observeCacheLabel("rate_limit_retry", "external", err == nil, started) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	now := time.Now().UTC().UnixMilli()
 	redisKey := externalRateLimitKey(key)
 	cutoff := now - int64(windowSeconds)*1000
-	if err := client.ZRemRangeByScore(ctx, redisKey, "-inf", fmt.Sprint(cutoff)).Err(); err != nil {
-		return 0, err
+	if execErr := client.ZRemRangeByScore(ctx, redisKey, "-inf", fmt.Sprint(cutoff)).Err(); execErr != nil {
+		return 0, execErr
 	}
-	items, err := client.ZRangeWithScores(ctx, redisKey, 0, 0).Result()
-	if err != nil || len(items) == 0 {
-		return 0, err
+	items, queryErr := client.ZRangeWithScores(ctx, redisKey, 0, 0).Result()
+	if queryErr != nil || len(items) == 0 {
+		return 0, queryErr
 	}
 	remaining := int((int64(items[0].Score) + int64(windowSeconds)*1000 - now + 999) / 1000)
 	if remaining < 1 {
@@ -228,8 +238,13 @@ func warnRateLimitCache(err error) {
 }
 
 func fallbackRateLimit(key string, limit, windowSeconds int, add bool) bool {
+	started := time.Now()
 	rateLimitFallbackMu.Lock()
-	defer rateLimitFallbackMu.Unlock()
+	hit := false
+	defer func() {
+		rateLimitFallbackMu.Unlock()
+		observeCacheLabel("rate_limit", "memory_fallback", hit, started)
+	}()
 	now := time.Now().UTC().UnixMilli()
 	pruneRateLimitFallbackLocked(now)
 	cutoff := now - int64(windowSeconds)*1000
@@ -239,6 +254,7 @@ func fallbackRateLimit(key string, limit, windowSeconds int, add bool) bool {
 		first++
 	}
 	events = append([]int64(nil), events[first:]...)
+	hit = len(events) > 0
 	if add {
 		if len(events) == 0 && len(rateLimitFallback) >= maxRateLimitFallbackKeys {
 			return false
@@ -258,8 +274,13 @@ func fallbackRateLimit(key string, limit, windowSeconds int, add bool) bool {
 }
 
 func fallbackRateLimitRetry(key string, windowSeconds int) int {
+	started := time.Now()
 	rateLimitFallbackMu.Lock()
-	defer rateLimitFallbackMu.Unlock()
+	hit := false
+	defer func() {
+		rateLimitFallbackMu.Unlock()
+		observeCacheLabel("rate_limit", "memory_fallback", hit, started)
+	}()
 	now := time.Now().UTC().UnixMilli()
 	pruneRateLimitFallbackLocked(now)
 	cutoff := now - int64(windowSeconds)*1000
@@ -269,6 +290,7 @@ func fallbackRateLimitRetry(key string, windowSeconds int) int {
 		first++
 	}
 	events = append([]int64(nil), events[first:]...)
+	hit = len(events) > 0
 	if len(events) == 0 {
 		delete(rateLimitFallback, key)
 		return 0
@@ -287,6 +309,7 @@ func pruneRateLimitFallbackLocked(now int64) {
 	}
 	rateLimitFallbackPrunedAt = time.Now()
 	cutoff := now - int64(24*time.Hour/time.Millisecond)
+	var evicted uint64
 	for key, events := range rateLimitFallback {
 		retained := events[:0]
 		for _, occurred := range events {
@@ -296,8 +319,21 @@ func pruneRateLimitFallbackLocked(now int64) {
 		}
 		if len(retained) == 0 {
 			delete(rateLimitFallback, key)
+			evicted++
 		} else {
 			rateLimitFallback[key] = retained
 		}
 	}
+	observeCacheEvictions("rate_limit", evicted)
+}
+
+func rateLimitFallbackSnapshot() (int64, int64) {
+	rateLimitFallbackMu.Lock()
+	defer rateLimitFallbackMu.Unlock()
+	var size, bytes int64
+	for key, events := range rateLimitFallback {
+		size++
+		bytes += int64(len(key)) + int64(len(events))*8
+	}
+	return size, bytes
 }

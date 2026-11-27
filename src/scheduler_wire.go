@@ -83,10 +83,13 @@ func buildScheduler(cfg *config.Config, configDir, dataDir, logsDir string, gm *
 	}
 	if len(runtimeDeps) > 0 {
 		runtime := runtimeDeps[0]
+		deps.SSLRenewal = runtime.SSLRenewal
 		deps.BlocklistUpdate = runtime.BlocklistUpdate
 		deps.CVEUpdate = runtime.CVEUpdate
 		deps.DiskCheck = runtime.DiskCheck
 		deps.DiskCheckInterval = runtime.DiskCheckInterval
+		deps.DatabaseCheck = runtime.DatabaseCheck
+		deps.DatabaseCheckInterval = runtime.DatabaseCheckInterval
 		deps.TorHealth = runtime.TorHealth
 		deps.I2PHealth = runtime.I2PHealth
 		deps.OwnerIdlePurgeDays = runtime.OwnerIdlePurgeDays

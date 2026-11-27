@@ -23,6 +23,22 @@ func newTestScheduler() (*Scheduler, *sync.Map) {
 	return s, &store
 }
 
+func TestSchedulerLocationUsesConfiguredDefaultAndUTCFallback(t *testing.T) {
+	configured := schedulerLocation("UTC", defaultSchedulerTimezone)
+	if configured != time.UTC {
+		t.Fatalf("UTC configuration resolved to %q", configured)
+	}
+
+	fallback := schedulerLocation("Invalid/Configured", defaultSchedulerTimezone)
+	if fallback.String() != defaultSchedulerTimezone {
+		t.Fatalf("invalid timezone fallback = %q, want %q", fallback, defaultSchedulerTimezone)
+	}
+
+	if fallback := schedulerLocation("Invalid/Configured", "Invalid/Default"); fallback != time.UTC {
+		t.Fatalf("invalid configured and default timezones resolved to %q, want UTC", fallback)
+	}
+}
+
 func TestExecuteRecoversTaskPanicAndPersistsFailure(t *testing.T) {
 	s, _ := newTestScheduler()
 	var history db.SchedulerHistory

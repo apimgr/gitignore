@@ -183,7 +183,7 @@ func TestOwnerCookieMiddlewareAndTokenViewCookie(t *testing.T) {
 	revokeRequest.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrf})
 	revokeResponse := httptest.NewRecorder()
 	s.handleRevokePrimaryOwnerTokenWeb(revokeResponse, revokeRequest)
-	if revokeResponse.Code != http.StatusSeeOther || revokeResponse.Header().Get("Clear-Site-Data") != `"storage"` {
+	if revokeResponse.Code != http.StatusSeeOther || revokeResponse.Header().Get("Clear-Site-Data") != `"cache", "storage"` {
 		t.Fatalf("primary revoke status=%d headers=%v body=%s", revokeResponse.Code, revokeResponse.Header(), revokeResponse.Body.String())
 	}
 	if _, err := s.AuthenticateBearerToken(raw); err == nil {
@@ -309,7 +309,7 @@ func TestOwnerTokenAPIIssueListLinkedActionsAndRotate(t *testing.T) {
 		t.Fatalf("linked update status=%d body=%s", response.Code, response.Body.String())
 	}
 	response = linkedAction(http.MethodDelete, fmt.Sprintf("/api/v1/server/preferences/tokens/%d", linkedID), nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"revoked"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status": "revoked"`) {
 		t.Fatalf("linked revoke status=%d body=%s", response.Code, response.Body.String())
 	}
 
@@ -350,7 +350,7 @@ func TestOwnerTokenAPIIssueListLinkedActionsAndRotate(t *testing.T) {
 	revokeRequest.Header.Set("Content-Type", "application/json")
 	revokeResponse = httptest.NewRecorder()
 	s.handleAPIPrimaryOwnerRevoke(revokeResponse, revokeRequest)
-	if revokeResponse.Code != http.StatusOK || !strings.Contains(revokeResponse.Body.String(), `"resources":0`) {
+	if revokeResponse.Code != http.StatusOK || !strings.Contains(revokeResponse.Body.String(), `"resources": 0`) {
 		t.Fatalf("primary API revoke status=%d body=%s", revokeResponse.Code, revokeResponse.Body.String())
 	}
 }

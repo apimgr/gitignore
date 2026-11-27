@@ -140,6 +140,11 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 		"responses": map[string]interface{}{"200": jsonOK, "400": jsonErr},
 	}}
 	ownerTokenSecurity := []interface{}{map[string]interface{}{"BearerAuth": []interface{}{}}}
+	maintenanceStatus := get(text("health.status.maintenance"), nil)
+	maintenanceOperation := maintenanceStatus["get"].(map[string]interface{})
+	maintenanceOperation["operationId"] = "get_api_server_maintenance"
+	maintenanceOperation["security"] = ownerTokenSecurity
+	maintenanceOperation["responses"] = map[string]interface{}{"200": jsonOK, "401": jsonErr, "503": jsonErr}
 	ownerTokensGet := get(text("swagger.openapi.operation.owner_tokens_list"), nil)
 	ownerTokensGetOp := ownerTokensGet["get"].(map[string]interface{})
 	ownerTokensGetOp["operationId"] = "get_api_server_preferences_tokens"
@@ -243,35 +248,54 @@ func (s *Server) openAPISpec(r *http.Request) map[string]interface{} {
 	}
 
 	paths := map[string]interface{}{
-		"/api/autodiscover":                        get(text("swagger.openapi.operation.autodiscover"), nil),
-		"/api/graphql":                             mergeOperations(graphQLGet, graphQLPost),
-		"/api/healthz":                             get(text("swagger.openapi.operation.health"), nil),
-		"/api/healthz.txt":                         get(text("swagger.openapi.operation.health_text"), nil),
-		"/api/mcp":                                 mcpPost,
-		"/api/list":                                get(text("swagger.openapi.operation.legacy_list"), nil),
-		"/api/{list}":                              get(text("swagger.openapi.operation.legacy_compose"), []interface{}{map[string]interface{}{"name": "list", "in": "path", "required": true, "description": text("swagger.openapi.parameter.template_names"), "schema": map[string]interface{}{"type": "string"}}}),
-		"/api/swagger":                             get(text("swagger.openapi.operation.current_openapi"), nil),
-		"/mcp":                                     mcpPost,
-		api + "/":                                  get(text("swagger.openapi.operation.api_info"), nil),
-		api + "/server/healthz":                    get(text("swagger.openapi.operation.health"), nil),
-		api + "/server/healthz.txt":                get(text("swagger.openapi.operation.health_text"), nil),
-		api + "/server/swagger":                    get(text("swagger.openapi.operation.openapi_document"), nil),
-		api + "/server/graphql":                    mergeOperations(graphQLGet, graphQLPost),
-		api + "/server/mcp":                        mcpPost,
-		api + "/server/security":                   get(text("swagger.openapi.operation.security_info"), nil),
-		api + "/server/security/policy":            get(text("swagger.openapi.operation.security_policy"), nil),
-		api + "/server/security/thanks":            get(text("swagger.openapi.operation.security_acknowledgments"), nil),
-		api + "/server/dpo":                        get(text("swagger.openapi.operation.dpo_contact"), nil),
-		api + "/server/about":                      get(text("swagger.openapi.operation.about"), nil),
-		api + "/server/privacy":                    get(text("swagger.openapi.operation.privacy"), nil),
-		api + "/server/help":                       get(text("swagger.openapi.operation.help"), nil),
-		api + "/server/help/mcp":                   get(text("swagger.openapi.operation.mcp_help"), nil),
-		api + "/server/terms":                      get(text("swagger.openapi.operation.terms"), nil),
-		api + "/server/contact":                    contactPost,
-		api + "/server/scheduler":                  get(text("swagger.openapi.operation.scheduler"), nil),
-		api + "/server/preferences":                mergeOperations(preferencesGet, preferencesSavePost),
-		api + "/server/preferences/tokens":         mergeOperations(ownerTokensGet, ownerTokensPost),
-		api + "/server/preferences/tokens/primary": issuePrimaryToken,
+		"/api/autodiscover": get(text("swagger.openapi.operation.autodiscover"), nil),
+		"/cli/binaries/{filename}": map[string]interface{}{
+			"get": map[string]interface{}{
+				"summary":     "Download a published CLI binary.",
+				"operationId": "get_cli_binary",
+				"parameters": []interface{}{map[string]interface{}{
+					"name": "filename", "in": "path", "required": true,
+					"description": "Published project CLI binary filename.",
+					"schema":      map[string]interface{}{"type": "string"},
+				}},
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{"description": "CLI binary", "content": map[string]interface{}{
+						"application/octet-stream": map[string]interface{}{"schema": map[string]interface{}{"type": "string", "format": "binary"}},
+					}},
+					"401": map[string]interface{}{"description": "Bearer token required by server configuration."},
+					"404": map[string]interface{}{"description": "Binary is not published."},
+				},
+			},
+		},
+		"/api/graphql":                                    mergeOperations(graphQLGet, graphQLPost),
+		"/api/healthz":                                    get(text("swagger.openapi.operation.health"), nil),
+		"/api/healthz.txt":                                get(text("swagger.openapi.operation.health_text"), nil),
+		"/api/mcp":                                        mcpPost,
+		"/api/list":                                       get(text("swagger.openapi.operation.legacy_list"), nil),
+		"/api/{list}":                                     get(text("swagger.openapi.operation.legacy_compose"), []interface{}{map[string]interface{}{"name": "list", "in": "path", "required": true, "description": text("swagger.openapi.parameter.template_names"), "schema": map[string]interface{}{"type": "string"}}}),
+		"/api/swagger":                                    get(text("swagger.openapi.operation.current_openapi"), nil),
+		"/mcp":                                            mcpPost,
+		api + "/":                                         get(text("swagger.openapi.operation.api_info"), nil),
+		api + "/server/healthz":                           get(text("swagger.openapi.operation.health"), nil),
+		api + "/server/healthz.txt":                       get(text("swagger.openapi.operation.health_text"), nil),
+		api + "/server/swagger":                           get(text("swagger.openapi.operation.openapi_document"), nil),
+		api + "/server/graphql":                           mergeOperations(graphQLGet, graphQLPost),
+		api + "/server/mcp":                               mcpPost,
+		api + "/server/security":                          get(text("swagger.openapi.operation.security_info"), nil),
+		api + "/server/security/policy":                   get(text("swagger.openapi.operation.security_policy"), nil),
+		api + "/server/security/thanks":                   get(text("swagger.openapi.operation.security_acknowledgments"), nil),
+		api + "/server/dpo":                               get(text("swagger.openapi.operation.dpo_contact"), nil),
+		api + "/server/about":                             get(text("swagger.openapi.operation.about"), nil),
+		api + "/server/privacy":                           get(text("swagger.openapi.operation.privacy"), nil),
+		api + "/server/help":                              get(text("swagger.openapi.operation.help"), nil),
+		api + "/server/help/mcp":                          get(text("swagger.openapi.operation.mcp_help"), nil),
+		api + "/server/terms":                             get(text("swagger.openapi.operation.terms"), nil),
+		api + "/server/contact":                           contactPost,
+		api + "/server/maintenance":                       maintenanceStatus,
+		api + "/server/scheduler":                         get(text("swagger.openapi.operation.scheduler"), nil),
+		api + "/server/preferences":                       mergeOperations(preferencesGet, preferencesSavePost),
+		api + "/server/preferences/tokens":                mergeOperations(ownerTokensGet, ownerTokensPost),
+		api + "/server/preferences/tokens/primary":        issuePrimaryToken,
 		api + "/server/preferences/tokens/primary/reveal": primaryTokenAction("post_api_server_preferences_tokens_primary_reveal", text("swagger.openapi.operation.primary_token_reveal")),
 		api + "/server/preferences/tokens/primary/rotate": primaryTokenAction("post_api_server_preferences_tokens_primary_rotate", text("swagger.openapi.operation.primary_token_rotate")),
 		api + "/server/preferences/tokens/{id}/reveal":    linkedTokenPathItem(linkedTokenAction("post", "post_api_server_preferences_tokens_id_reveal", text("swagger.openapi.operation.linked_token_reveal"))),

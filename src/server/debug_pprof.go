@@ -1,12 +1,20 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/json"
 	"expvar"
+	"fmt"
+	"net/http"
 	"net/http/pprof"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/apimgr/gitignore/src/config"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -51,25 +59,77 @@ func publishExpvars() {
 // registered, so they return 404.
 func (s *Server) registerDebugRoutes(r chi.Router) {
 	publishExpvars()
+	settings := config.DefaultConfig().Server.Debug
+	if cfg := s.currentConfig(); cfg != nil {
+		settings = cfg.Server.Debug
+	}
+	r.Route("/debug", func(debug chi.Router) {
+		debug.Use(s.debugOperatorTokenMiddleware)
+		if settings.RuntimeEndpoints {
+			debug.Get("/routes", s.handleDebugRoutes)
+			debug.Get("/config", s.handleDebugConfig)
+			debug.Get("/templates", s.handleDebugTemplates)
+			debug.Get("/cache", s.handleDebugCache)
+			debug.Get("/db", s.handleDebugDB)
+			debug.Get("/scheduler", s.handleDebugScheduler)
+			debug.Get("/memory", s.handleDebugMemory)
+			debug.Get("/goroutines", s.handleDebugGoroutines)
+			debug.Get("/error500", s.handleDebugError500)
+			debug.Handle("/vars", http.HandlerFunc(s.handleDebugVars))
+		}
+		if settings.Pprof {
+			debug.HandleFunc("/pprof", pprof.Index)
+			debug.HandleFunc("/pprof/", pprof.Index)
+			debug.HandleFunc("/pprof/cmdline", s.handleDebugCmdline)
+			debug.HandleFunc("/pprof/profile", pprof.Profile)
+			debug.HandleFunc("/pprof/symbol", pprof.Symbol)
+			debug.HandleFunc("/pprof/trace", pprof.Trace)
+			debug.Handle("/pprof/heap", pprof.Handler("heap"))
+			debug.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
+			debug.Handle("/pprof/allocs", pprof.Handler("allocs"))
+			debug.Handle("/pprof/block", pprof.Handler("block"))
+			debug.Handle("/pprof/mutex", pprof.Handler("mutex"))
+			debug.Handle("/pprof/threadcreate", pprof.Handler("threadcreate"))
+		}
+	})
+}
 
-	// Custom debug endpoints.
-	r.Get("/debug/routes", s.handleDebugRoutes)
-	r.Get("/debug/config", s.handleDebugConfig)
-	r.Get("/debug/templates", s.handleDebugTemplates)
+func (s *Server) debugOperatorTokenMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, ok := parseBearerHeader(r.Header.Get("Authorization"))
+		cfg := s.currentConfig()
+		if !ok || cfg == nil || cfg.Server.Token == "" {
+			s.sendBearerError(w, r)
+			return
+		}
+		presented := sha256.Sum256([]byte(raw))
+		configured := sha256.Sum256([]byte(cfg.Server.Token))
+		if subtle.ConstantTimeCompare(presented[:], configured[:]) != 1 {
+			s.sendBearerError(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
-	// net/http/pprof profiles (AI.md PART 6 "pprof Endpoints").
-	r.HandleFunc("/debug/pprof/", pprof.Index)
-	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	r.Handle("/debug/pprof/heap", pprof.Handler("heap"))
-	r.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-	r.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
-	r.Handle("/debug/pprof/block", pprof.Handler("block"))
-	r.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
-	r.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+func (s *Server) handleDebugCmdline(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	_, _ = fmt.Fprint(w, filepath.Base(os.Args[0]))
+	_, _ = w.Write([]byte{0})
+}
 
-	// expvar runtime variables (AI.md PART 6 "/debug/vars").
-	r.Handle("/debug/vars", expvar.Handler())
+func (s *Server) handleDebugVars(w http.ResponseWriter, _ *http.Request) {
+	vars := make(map[string]json.RawMessage)
+	expvar.Do(func(kv expvar.KeyValue) {
+		if kv.Key == "cmdline" {
+			encoded, _ := json.Marshal(filepath.Base(os.Args[0]))
+			vars[kv.Key] = encoded
+			return
+		}
+		if json.Valid([]byte(kv.Value.String())) {
+			vars[kv.Key] = json.RawMessage(kv.Value.String())
+		}
+	})
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = encodeJSON(w, vars)
 }

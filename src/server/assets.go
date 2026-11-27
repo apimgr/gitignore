@@ -2,28 +2,34 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/apimgr/gitignore/src/common/i18n"
+	"github.com/apimgr/gitignore/src/common/urlutil"
+	"github.com/apimgr/gitignore/src/config"
 	"github.com/apimgr/gitignore/src/db"
 )
 
-//go:embed assets/static
+//go:embed static
 var staticFS embed.FS
 
-//go:embed assets/html
+//go:embed template
 var htmlFS embed.FS
 
 // exOSFile is the sysexits(3) exit code for a missing/unreadable data file
@@ -36,14 +42,14 @@ const exOSFile = 72
 // defines a "content" block that is rendered inside the shared "layout".
 var pageTemplates = map[string]*template.Template{}
 
-// staticHTTPFS is the http.FileSystem rooted at assets/static, used to serve
+// staticHTTPFS is the http.FileSystem rooted at static, used to serve
 // /static/* and /favicon.ico.
 var staticHTTPFS http.FileSystem
 
 func init() {
-	layout, err := htmlFS.ReadFile("assets/html/layout.html")
+	layout, err := htmlFS.ReadFile("template/layout/public.tmpl")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "embed: missing layout.html: %v\n", err)
+		fmt.Fprintf(os.Stderr, "embed: missing template/layout/public.tmpl: %v\n", err)
 		os.Exit(exOSFile)
 	}
 
@@ -52,10 +58,22 @@ func init() {
 		"server", "about", "privacy", "contact", "help", "mcp_help", "preferences", "preferences_sync", "preferences_tokens", "terms", "dpo", "security", "security_policy", "security_thanks", "security_report_status", "error",
 		"swagger_ui", "graphql_ui", "healthz",
 	}
+	partials := []string{
+		"template/partial/head.tmpl",
+		"template/partial/scripts.tmpl",
+		"template/partial/toast.tmpl",
+		"template/partial/public/header.tmpl",
+		"template/partial/public/nav.tmpl",
+		"template/partial/public/footer.tmpl",
+	}
 	for _, name := range pages {
-		body, err := htmlFS.ReadFile("assets/html/" + name + ".html")
+		pageFile := name
+		if name == "home" {
+			pageFile = "index"
+		}
+		body, err := htmlFS.ReadFile("template/page/" + pageFile + ".tmpl")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "embed: missing %s.html: %v\n", name, err)
+			fmt.Fprintf(os.Stderr, "embed: missing template/page/%s.tmpl: %v\n", pageFile, err)
 			os.Exit(exOSFile)
 		}
 		funcs := template.FuncMap{
@@ -69,11 +87,19 @@ func init() {
 			funcs[functionName] = function
 		}
 		t := template.Must(template.New(name).Funcs(funcs).Parse(string(layout)))
+		for _, partialPath := range partials {
+			partial, readErr := htmlFS.ReadFile(partialPath)
+			if readErr != nil {
+				fmt.Fprintf(os.Stderr, "embed: missing %s: %v\n", partialPath, readErr)
+				os.Exit(exOSFile)
+			}
+			template.Must(t.Parse(string(partial)))
+		}
 		template.Must(t.Parse(string(body)))
 		pageTemplates[name] = t
 	}
 
-	sub, err := fs.Sub(staticFS, "assets/static")
+	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "embed: static sub: %v\n", err)
 		os.Exit(exOSFile)
@@ -87,13 +113,23 @@ type PageData struct {
 	DocumentTitle               string
 	ResourceLabelPlural         string
 	Description                 string
+	Branding                    BrandingPageData
+	SEO                         SEOPageData
 	Version                     string
 	BuildDate                   string
+	BuildDateHuman              string
+	TorEnabled                  bool
+	TorRunning                  bool
+	OnionAddress                string
+	I2PEnabled                  bool
+	I2PRunning                  bool
+	I2PAddress                  string
 	BaseURL                     string
 	APIBase                     string
 	Lang                        string
 	Dir                         string
 	Theme                       string
+	AccentCSS                   string
 	Path                        string
 	NextTheme                   string
 	LanguageName                string
@@ -102,6 +138,12 @@ type PageData struct {
 	LanguagePreference          string
 	PageCSS                     []string
 	PageScripts                 []string
+	ToastPosition               string
+	ToastDuration               int
+	ToastWarningDuration        int
+	ToastDismissText            string
+	FlashKey                    string
+	FlashType                   string
 	Health                      *healthPageView
 	Data                        map[string]interface{}
 	TrackingMarkup              template.HTML
@@ -110,6 +152,37 @@ type PageData struct {
 	Announcements               []AnnouncementView
 	SuppressAnnouncementDismiss bool
 	PrivateCache                bool
+}
+
+type BrandingPageData struct {
+	Title       string
+	Tagline     string
+	LogoURL     string
+	FaviconURL  string
+	TitleSuffix string
+}
+
+type SEOPageData struct {
+	CanonicalURL   string
+	Keywords       string
+	Author         string
+	Robots         string
+	OGEnabled      bool
+	OGType         string
+	OGSiteName     string
+	OGImage        string
+	TwitterEnabled bool
+	TwitterCard    string
+	TwitterSite    string
+	TwitterCreator string
+	MetaTags       map[string]string
+	Verification   []PageMetaTag
+	StructuredData template.JS
+}
+
+type PageMetaTag struct {
+	Name    string
+	Content string
 }
 
 type AnnouncementView struct {
@@ -240,14 +313,63 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 	if data.APIBase == "" {
 		data.APIBase = s.requestPath(r, s.apiBasePath())
 	}
+	cfg := s.currentConfig()
 	if data.Description == "" {
-		data.Description = requestTranslation(r, "web.handler.description.default")
+		if cfg != nil && strings.TrimSpace(cfg.Server.Branding.Description) != "" {
+			data.Description = cfg.Server.Branding.Description
+		} else if cfg != nil && strings.TrimSpace(cfg.Server.Branding.Tagline) != "" {
+			data.Description = cfg.Server.Branding.Tagline
+		} else {
+			data.Description = requestTranslation(r, "web.handler.description.default")
+		}
+	}
+	if cfg != nil {
+		if validAccent(cfg.Web.UI.Accent) {
+			data.AccentCSS = s.requestPath(r, "/static/css/accent.css")
+		}
+		brandTitle := fallbackString(cfg.Server.Branding.Title, "gitignore")
+		seoConfig := cfg.Server.SEO
+		seoConfig.TitleSeparator = validTitleSeparator(seoConfig.TitleSeparator)
+		data.Branding = BrandingPageData{
+			Title: brandTitle, Tagline: cfg.Server.Branding.Tagline,
+			LogoURL:     s.brandingImageURL(r, cfg.Server.Branding.Logo, "/static/images/icon.svg"),
+			FaviconURL:  s.brandingImageURL(r, cfg.Server.Branding.Favicon, "/favicon.ico"),
+			TitleSuffix: seoConfig.TitleSeparator,
+		}
+		data.SEO = buildSEOPageData(s, r, seoConfig, data.Description)
+		if cfg.Server.SEO.NoIndex {
+			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		}
 	}
 	if data.ResourceLabelPlural == "" {
 		data.ResourceLabelPlural = requestTranslation(r, "web.handler.resource_plural")
 	}
 	if data.Lang == "" {
 		data.Lang = i18n.LangFromContext(r.Context())
+	}
+	if data.BuildDateHuman == "" {
+		data.BuildDateHuman = humanTimestampString(data.Lang, data.BuildDate)
+	}
+	features := s.healthFeatures()
+	if !data.TorEnabled {
+		data.TorEnabled = features.Tor.Enabled
+	}
+	if !data.TorRunning {
+		data.TorRunning = features.Tor.Running
+	}
+	if data.OnionAddress == "" {
+		if address, ok := s.torOnionAddress.Load().(string); ok && address != "" {
+			data.OnionAddress = strings.TrimSuffix(address, ".onion") + ".onion"
+		}
+	}
+	if !data.I2PEnabled {
+		data.I2PEnabled = features.I2P.Enabled
+	}
+	if !data.I2PRunning {
+		data.I2PRunning = features.I2P.Running
+	}
+	if data.I2PAddress == "" {
+		data.I2PAddress = features.I2P.Hostname
 	}
 	if data.Dir == "" {
 		data.Dir = i18n.Direction(data.Lang)
@@ -277,6 +399,12 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 	}
 	data.Languages = i18n.AvailableLanguages()
 	data.LanguagePreference = i18n.LanguagePreference(r)
+	toastConfig := s.currentConfig().Server.Notifications.WebUI
+	data.ToastPosition = toastConfig.Position
+	data.ToastDuration = toastConfig.Duration
+	data.ToastWarningDuration = toastConfig.WarningDuration
+	data.ToastDismissText = i18n.Translate(data.Lang, "common.close")
+	data.FlashKey, data.FlashType = consumeFlashCookie(w, r, preferenceCookieSecure(s, r))
 	data.CSRFToken = ensureCSRFTokenWithSecure(w, r, preferenceCookieSecure(s, r))
 	data.Consent = s.consentView(r, data.CSRFToken)
 	data.Announcements = s.activeAnnouncements(r)
@@ -301,6 +429,7 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 		err = requestTemplate.ExecuteTemplate(&buf, "layout", data)
 	}
 	if err != nil {
+		log.Printf("failed to render server page %s: %v", page, err)
 		sendAPIResponseError(w, "SERVER_ERROR", requestTranslation(r, "web.handler.error.render_failed"))
 		return
 	}
@@ -310,12 +439,233 @@ func (s *Server) renderPageStatus(w http.ResponseWriter, r *http.Request, page s
 	} else {
 		setCacheHeaders(w, "html")
 	}
+	if strings.HasPrefix(r.URL.Path, "/server/security/report/") {
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+	}
 	w.Header().Set("ETag", `"`+s.assetStamp()+`"`)
 	versionPurge(w, r, s.assetStamp(), status)
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}
 	_, _ = buf.WriteTo(w)
+}
+
+func (s *Server) brandingImageURL(r *http.Request, value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		if fallback == "" {
+			return ""
+		}
+		return s.requestPath(r, fallback)
+	}
+	if strings.HasPrefix(strings.ToLower(value), "data:image/") {
+		if validBrandingDataURI(value) {
+			return value
+		}
+		return fallbackBrandingURL(s, r, fallback)
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.IsAbs() {
+		if strings.EqualFold(parsed.Scheme, "https") {
+			if cached := s.cacheRemoteBrandingImage(r.Context(), value); cached != "" {
+				return s.requestPath(r, cached)
+			}
+		}
+		return fallbackBrandingURL(s, r, fallback)
+	}
+	name := filepath.Base(value)
+	if name != value || name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
+		return fallbackBrandingURL(s, r, fallback)
+	}
+	if !validBrandingImageExtension(filepath.Ext(name)) {
+		return fallbackBrandingURL(s, r, fallback)
+	}
+	return s.requestPath(r, "/assets/"+url.PathEscape(name))
+}
+
+func fallbackBrandingURL(s *Server, r *http.Request, fallback string) string {
+	if fallback == "" {
+		return ""
+	}
+	return s.requestPath(r, fallback)
+}
+
+func validBrandingDataURI(value string) bool {
+	if len(value) > 256<<10 {
+		return false
+	}
+	lower := strings.ToLower(value)
+	for _, mediaType := range []string{"data:image/png;", "data:image/jpeg;", "data:image/webp;", "data:image/x-icon;", "data:image/svg+xml;"} {
+		if strings.HasPrefix(lower, mediaType) {
+			return true
+		}
+	}
+	return false
+}
+
+func validBrandingImageExtension(extension string) bool {
+	switch strings.ToLower(extension) {
+	case ".svg", ".png", ".ico", ".webp", ".jpg", ".gif":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) cacheRemoteBrandingImage(ctx context.Context, rawURL string) string {
+	if s == nil || s.config == nil || s.config.Paths == nil {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(rawURL))
+	base := hex.EncodeToString(digest[:])
+	directory := filepath.Join(s.config.Paths.GetDataDir(), "cache", "branding")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return ""
+	}
+	for _, extension := range []string{".png", ".jpg", ".gif", ".webp", ".ico"} {
+		path := filepath.Join(directory, base+extension)
+		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Size() <= 10<<20 {
+			return "/branding/cache/" + base + extension
+		}
+	}
+	body, contentType, err := urlutil.FetchRemoteImage(ctx, rawURL, urlutil.DefaultFetchRemoteImageConfig())
+	if err != nil {
+		log.Printf("branding remote image could not be fetched: source=remote")
+		return ""
+	}
+	extension := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp", "image/x-icon": ".ico"}[contentType]
+	if extension == "" {
+		return ""
+	}
+	temporary, err := os.CreateTemp(directory, ".branding-cache-*")
+	if err != nil {
+		return ""
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0600); err != nil {
+		_ = temporary.Close()
+		return ""
+	}
+	if _, err := temporary.Write(body); err != nil {
+		_ = temporary.Close()
+		return ""
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return ""
+	}
+	if err := temporary.Close(); err != nil {
+		return ""
+	}
+	if err := os.Rename(temporaryName, filepath.Join(directory, base+extension)); err != nil {
+		return ""
+	}
+	return "/branding/cache/" + base + extension
+}
+
+func buildSEOPageData(s *Server, r *http.Request, cfg config.SEOConfig, description string) SEOPageData {
+	robots := "noindex,nofollow"
+	if !cfg.NoIndex && isPublicSEOPage(r.URL.Path) {
+		robots = "index,follow"
+	}
+	canonical := strings.TrimSpace(cfg.Canonical)
+	if parsed, err := url.Parse(canonical); err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		canonical = s.detectServerURL(r)
+	}
+	canonical = strings.TrimRight(canonical, "/") + r.URL.EscapedPath()
+	siteName := strings.TrimSpace(cfg.OpenGraph.SiteName)
+	if siteName == "" {
+		siteName = s.currentConfig().Server.Branding.Title
+	}
+	keywords := strings.Join(cfg.Keywords, ", ")
+	title := fallbackString(s.currentConfig().Server.Branding.Title, "gitignore")
+	meta := make(map[string]string)
+	for name, content := range cfg.MetaTags {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" || len(name) > 64 || len(meta) >= 20 || !validSEOName(name) || reservedSEOMetaName(name) {
+			continue
+		}
+		meta[name] = content
+	}
+	verification := []PageMetaTag{}
+	for name, content := range map[string]string{
+		"google-site-verification":     cfg.Verification.Google,
+		"msvalidate.01":                cfg.Verification.Bing,
+		"yandex-verification":          cfg.Verification.Yandex,
+		"baidu-site-verification":      cfg.Verification.Baidu,
+		"p:domain_verify":              cfg.Verification.Pinterest,
+		"facebook-domain-verification": cfg.Verification.Facebook,
+	} {
+		if strings.TrimSpace(content) != "" {
+			verification = append(verification, PageMetaTag{Name: name, Content: strings.TrimSpace(content)})
+		}
+	}
+	for _, tag := range cfg.Verification.Custom {
+		name := strings.ToLower(strings.TrimSpace(tag.Name))
+		if validSEOName(name) && !reservedSEOMetaName(name) && strings.TrimSpace(tag.Content) != "" {
+			verification = append(verification, PageMetaTag{Name: name, Content: strings.TrimSpace(tag.Content)})
+		}
+	}
+	structured, _ := json.Marshal(map[string]string{
+		"@context": "https://schema.org", "@type": "WebSite", "name": title,
+		"description": description, "url": canonical,
+	})
+	return SEOPageData{
+		CanonicalURL: canonical, Keywords: keywords, Author: cfg.Author, Robots: robots,
+		OGEnabled: cfg.OpenGraph.Enabled, OGType: fallbackString(cfg.OpenGraph.Type, "website"),
+		OGSiteName: siteName, OGImage: s.brandingImageURL(r, cfg.OGImage, ""),
+		TwitterEnabled: cfg.Twitter.Enabled, TwitterCard: fallbackString(cfg.Twitter.Card, "summary_large_image"),
+		TwitterSite: cfg.TwitterHandle, TwitterCreator: cfg.Twitter.Creator, MetaTags: meta, Verification: verification,
+		StructuredData: template.JS(structured),
+	}
+}
+
+func validTitleSeparator(value string) string {
+	if value == "" || len([]rune(value)) > 8 {
+		return " - "
+	}
+	return value
+}
+
+func isPublicSEOPage(path string) bool {
+	switch {
+	case path == "/", path == "/search", path == "/combine", path == "/categories", path == "/list", path == "/stats":
+		return true
+	case strings.HasPrefix(path, "/template/"):
+		return true
+	case path == "/server/docs" || path == "/server/docs/swagger" || path == "/server/docs/graphql":
+		return true
+	case path == "/server/about" || path == "/server/privacy" || path == "/server/contact" || path == "/server/help" || path == "/server/terms" || path == "/server/dpo" || path == "/server/security" || path == "/server/security/policy" || path == "/server/security/thanks":
+		return true
+	default:
+		return false
+	}
+}
+
+func validSEOName(name string) bool {
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || strings.ContainsRune(":_.-", r)) {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func reservedSEOMetaName(name string) bool {
+	switch name {
+	case "description", "keywords", "author", "robots", "viewport":
+		return true
+	default:
+		return false
+	}
+}
+
+func fallbackString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func ensureCSRFToken(w http.ResponseWriter, r *http.Request) string {

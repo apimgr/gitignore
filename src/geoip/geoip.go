@@ -44,7 +44,10 @@ type asnRecord struct {
 
 // countryRecord maps the ip-location-db Country MMDB field.
 type countryRecord struct {
-	CountryCode string `maxminddb:"country_code"`
+	Country struct {
+		ISOCode string `maxminddb:"iso_code"`
+	} `maxminddb:"country"`
+	LegacyCountryCode string `maxminddb:"country_code"`
 }
 
 // cityRecord maps the ip-location-db City MMDB fields.
@@ -252,10 +255,17 @@ func (m *Manager) LookupCountry(ip net.IP) (CountryInfo, bool) {
 		return CountryInfo{}, false
 	}
 	var rec countryRecord
-	if err := r.Lookup(ip, &rec); err != nil || rec.CountryCode == "" {
+	if err := r.Lookup(ip, &rec); err != nil {
 		return CountryInfo{}, false
 	}
-	return CountryInfo{CountryCode: strings.ToUpper(rec.CountryCode)}, true
+	code := rec.Country.ISOCode
+	if code == "" {
+		code = rec.LegacyCountryCode
+	}
+	if code == "" {
+		return CountryInfo{}, false
+	}
+	return CountryInfo{CountryCode: strings.ToUpper(code)}, true
 }
 
 // LookupASN resolves the autonomous system number and organization for ip.

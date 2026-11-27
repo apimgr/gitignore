@@ -26,6 +26,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/term"
@@ -43,17 +46,18 @@ import (
 // is never stored. The authenticated cleartext header carries the salt, KDF
 // parameters, nonce, and non-secret key identifier.
 const (
-	backupManifestVersion = "1.0.0"
-	backupArgonTime       = 3
-	backupArgonMemory     = 64 * 1024
-	backupArgonThreads    = 4
-	backupKeyLen          = 32
-	backupSaltLen         = 16
-	backupNonceLen        = 12
-	backupMagic           = "BKUP1"
-	backupKeyIDLen        = 8
-	backupHeaderLen       = len(backupMagic) + backupSaltLen + 4 + 4 + 1 + backupNonceLen + backupKeyIDLen
-	backupExtensionMagic  = "BKX1"
+	backupManifestVersion      = "1.0.0"
+	backupArgonTime            = 3
+	backupArgonMemory          = 64 * 1024
+	backupArgonThreads         = 4
+	backupKeyLen               = 32
+	backupSaltLen              = 16
+	backupNonceLen             = 12
+	backupMagic                = "BKUP1"
+	backupKeyIDLen             = 8
+	backupBaseNameMax          = 255
+	backupHeaderLen            = len(backupMagic) + backupSaltLen + 4 + 4 + 4 + backupNonceLen + backupKeyIDLen + 2
+	legacyBackupExtensionMagic = "BKX1"
 )
 
 // backupManifest is the manifest.json embedded at the root of every archive.
@@ -136,6 +140,58 @@ func collectBackupSources(configDir, dataDir string) ([]backupSource, error) {
 	return sources, nil
 }
 
+func collectExternalSSL(configDir string, sources *[]backupSource) error {
+	configPath := filepath.Join(configDir, "server.yml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	if len(root.Content) == 0 {
+		return errors.New("server.yml is empty")
+	}
+	server := yamlMappingValue(root.Content[0], "server")
+	ssl := yamlMappingValue(server, "ssl")
+	for _, field := range []string{"cert", "key"} {
+		node := yamlMappingValue(ssl, field)
+		if node == nil || strings.TrimSpace(node.Value) == "" {
+			continue
+		}
+		path := node.Value
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(configDir, path)
+		}
+		sslDir, _ := filepath.Abs(filepath.Join(configDir, "ssl"))
+		absPath, _ := filepath.Abs(path)
+		if rel, relErr := filepath.Rel(sslDir, absPath); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			continue
+		}
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("referenced server.ssl.%s file %s: %w", field, node.Value, err)
+		}
+		*sources = append(*sources, backupSource{archivePath: "ssl-external/" + field, diskPath: path})
+	}
+	return nil
+}
+
+func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
 // buildBackupArchive builds a gzip-compressed tar in memory containing the
 // manifest and all source files, returning the raw archive bytes.
 func buildBackupArchive(sources []backupSource, encrypted bool) ([]byte, error) {
@@ -183,12 +239,7 @@ func buildBackupArchiveAt(sources []backupSource, encrypted bool, snapshotAt tim
 		manifest.Files = append(manifest.Files, backupManifestFile{Path: src.archivePath, Size: int64(len(data)), Modified: info.ModTime().Unix(), SHA256: checksum})
 		files = append(files, payload{name: src.archivePath, data: data})
 	}
-	fileList, err := json.Marshal(manifest.Files)
-	if err != nil {
-		return nil, err
-	}
-	manifestHash := sha256.Sum256(fileList)
-	manifest.SHA256 = hex.EncodeToString(manifestHash[:])
+	manifest.SHA256 = backupFilesChecksum(manifest.Files)
 
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -256,21 +307,20 @@ func encryptBackup(plaintext []byte, password string, baseBackup ...string) ([]b
 	header := make([]byte, 0, backupHeaderLen)
 	header = append(header, backupMagic...)
 	header = append(header, salt...)
-	var encoded [8]byte
+	var encoded [12]byte
 	binary.BigEndian.PutUint32(encoded[:4], backupArgonMemory)
-	binary.BigEndian.PutUint32(encoded[4:], backupArgonTime)
+	binary.BigEndian.PutUint32(encoded[4:8], backupArgonTime)
+	binary.BigEndian.PutUint32(encoded[8:12], backupArgonThreads)
 	header = append(header, encoded[:]...)
-	header = append(header, byte(backupArgonThreads))
 	header = append(header, nonce...)
 	header = append(header, backupKeyID(key)...)
 	base := ""
 	if len(baseBackup) > 0 {
 		base = baseBackup[0]
 	}
-	if len(base) > 0xffff || (base != "" && filepath.Base(base) != base) {
+	if len(base) > backupBaseNameMax || !utf8.ValidString(base) || strings.ContainsAny(base, `/\\`) || (base != "" && filepath.Base(base) != base) {
 		return nil, errors.New("incremental base reference is invalid")
 	}
-	header = append(header, backupExtensionMagic...)
 	var baseLength [2]byte
 	binary.BigEndian.PutUint16(baseLength[:], uint16(len(base)))
 	header = append(header, baseLength[:]...)
@@ -292,7 +342,7 @@ func decryptBackup(blob []byte, password string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		key := argon2.IDKey([]byte(password), header.salt, header.time, header.memory, header.threads, backupKeyLen)
+		key := argon2.IDKey([]byte(password), header.salt, header.time, header.memory, uint8(header.threads), backupKeyLen)
 		if !hmac.Equal(header.keyID, backupKeyID(key)) {
 			return nil, errors.New(cliText("cli.backup.wrong_password"))
 		}
@@ -335,7 +385,7 @@ type parsedBackupHeader struct {
 	salt         []byte
 	memory       uint32
 	time         uint32
-	threads      uint8
+	threads      uint32
 	nonce        []byte
 	keyID        []byte
 	baseBackup   string
@@ -349,34 +399,61 @@ func parseBackupHeader(blob []byte) (parsedBackupHeader, error) {
 	pos := len(backupMagic)
 	header := parsedBackupHeader{salt: blob[pos : pos+backupSaltLen]}
 	pos += backupSaltLen
-	header.memory = binary.BigEndian.Uint32(blob[pos : pos+4])
-	pos += 4
-	header.time = binary.BigEndian.Uint32(blob[pos : pos+4])
-	pos += 4
-	header.threads = blob[pos]
-	pos++
-	header.nonce = blob[pos : pos+backupNonceLen]
-	pos += backupNonceLen
-	header.keyID = blob[pos : pos+backupKeyIDLen]
-	pos += backupKeyIDLen
-	header.headerLength = pos
-	if len(blob) >= pos+len(backupExtensionMagic)+2 && string(blob[pos:pos+len(backupExtensionMagic)]) == backupExtensionMagic {
-		pos += len(backupExtensionMagic)
+	// Read headers emitted by the earlier BKUP1 draft without changing the
+	// canonical uint32-parameter format written by current backups.
+	legacyMarker := pos + 4 + 4 + 1 + backupNonceLen + backupKeyIDLen
+	if len(blob) >= legacyMarker+len(legacyBackupExtensionMagic)+2+16 && string(blob[legacyMarker:legacyMarker+len(legacyBackupExtensionMagic)]) == legacyBackupExtensionMagic {
+		header.memory = binary.BigEndian.Uint32(blob[pos : pos+4])
+		pos += 4
+		header.time = binary.BigEndian.Uint32(blob[pos : pos+4])
+		pos += 4
+		header.threads = uint32(blob[pos])
+		pos++
+		header.nonce = blob[pos : pos+backupNonceLen]
+		pos += backupNonceLen
+		header.keyID = blob[pos : pos+backupKeyIDLen]
+		pos += backupKeyIDLen
+		pos += len(legacyBackupExtensionMagic)
 		baseLength := int(binary.BigEndian.Uint16(blob[pos : pos+2]))
 		pos += 2
-		if len(blob) < pos+baseLength+16 {
-			return parsedBackupHeader{}, errors.New("encrypted backup base reference is truncated")
-		}
-		header.baseBackup = string(blob[pos : pos+baseLength])
-		if header.baseBackup != "" && filepath.Base(header.baseBackup) != header.baseBackup {
+		if baseLength > backupBaseNameMax || len(blob) < pos+baseLength+16 {
 			return parsedBackupHeader{}, errors.New("encrypted backup base reference is invalid")
 		}
+		header.baseBackup = string(blob[pos : pos+baseLength])
 		header.headerLength = pos + baseLength
-	} else if len(blob) < pos+16 {
-		return parsedBackupHeader{}, errors.New("encrypted backup ciphertext is truncated")
+	} else {
+		header.memory = binary.BigEndian.Uint32(blob[pos : pos+4])
+		pos += 4
+		header.time = binary.BigEndian.Uint32(blob[pos : pos+4])
+		pos += 4
+		header.threads = binary.BigEndian.Uint32(blob[pos : pos+4])
+		pos += 4
+		header.nonce = blob[pos : pos+backupNonceLen]
+		pos += backupNonceLen
+		header.keyID = blob[pos : pos+backupKeyIDLen]
+		pos += backupKeyIDLen
+		if len(blob) < pos+2 {
+			return parsedBackupHeader{}, errors.New("encrypted backup header is truncated")
+		}
+		baseLength := int(binary.BigEndian.Uint16(blob[pos : pos+2]))
+		pos += 2
+		if baseLength > backupBaseNameMax {
+			return parsedBackupHeader{}, errors.New("encrypted backup base reference is too long")
+		}
+		if len(blob) < pos+baseLength+16 {
+			return parsedBackupHeader{}, errors.New("encrypted backup ciphertext is truncated")
+		}
+		header.baseBackup = string(blob[pos : pos+baseLength])
+		header.headerLength = pos + baseLength
+	}
+	if !utf8.ValidString(header.baseBackup) || strings.ContainsAny(header.baseBackup, `/\\`) || (header.baseBackup != "" && filepath.Base(header.baseBackup) != header.baseBackup) {
+		return parsedBackupHeader{}, errors.New("encrypted backup base reference is invalid")
 	}
 	if header.memory < 8*1024 || header.memory > 1024*1024 || header.time == 0 || header.time > 10 || header.threads == 0 || header.threads > 32 {
 		return parsedBackupHeader{}, errors.New("encrypted backup KDF parameters are invalid")
+	}
+	if len(blob) < header.headerLength+16 {
+		return parsedBackupHeader{}, errors.New("encrypted backup ciphertext is truncated")
 	}
 	return header, nil
 }
@@ -396,7 +473,7 @@ func backupArchiveKeyMatches(path, password string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	key := argon2.IDKey([]byte(password), header.salt, header.time, header.memory, header.threads, backupKeyLen)
+	key := argon2.IDKey([]byte(password), header.salt, header.time, header.memory, uint8(header.threads), backupKeyLen)
 	return hmac.Equal(header.keyID, backupKeyID(key)), nil
 }
 
@@ -822,6 +899,71 @@ func prepareBackupSources(cfg *config.Config, configDir, dataDir string) ([]back
 	cleanup := func() {
 		_ = os.RemoveAll(directory)
 	}
+	// App secrets are exported from the active database independently of its
+	// storage driver. Remote databases without a local cache still need these
+	// keys to restore encrypted application data.
+	var appSecrets []struct {
+		Name      string `json:"name"`
+		Value     string `json:"value"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := db.Read(context.Background(), func(ctx context.Context, conn *sql.DB) error {
+		rows, err := conn.QueryContext(ctx, "SELECT name, value, COALESCE(updated_at, '') FROM app_secrets WHERE name IN (?, ?, ?, ?, ?, ?)",
+			"installation_secret", "installation_secret_previous", "cookie_signing_key", "cookie_signing_key_previous", "csrf_token_secret", "csrf_token_secret_previous")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var secret struct {
+				Name      string `json:"name"`
+				Value     string `json:"value"`
+				UpdatedAt string `json:"updated_at"`
+			}
+			if err := rows.Scan(&secret.Name, &secret.Value, &secret.UpdatedAt); err != nil {
+				return err
+			}
+			appSecrets = append(appSecrets, secret)
+		}
+		return rows.Err()
+	}); err != nil {
+		cleanup()
+		return nil, func() {}, fmt.Errorf("export app secrets: %w", err)
+	}
+	secretPath := filepath.Join(directory, "app_secrets.json")
+	secretData, err := json.MarshalIndent(appSecrets, "", "  ")
+	if err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	if err := os.WriteFile(secretPath, append(secretData, '\n'), 0o600); err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
+	sources = append(sources, backupSource{archivePath: "app_secrets.json", diskPath: secretPath})
+	// Include configured cache connection identity files without pulling in the
+	// rest of the SSL directory.
+	if cfg != nil {
+		for _, item := range []struct{ name, path string }{{"tls_ca", cfg.Server.Cache.TLSCA}, {"tls_cert", cfg.Server.Cache.TLSCert}, {"tls_key", cfg.Server.Cache.TLSKey}} {
+			configured := item.path
+			if strings.TrimSpace(configured) == "" {
+				continue
+			}
+			path := configured
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(configDir, path)
+			}
+			if _, statErr := os.Stat(path); statErr != nil {
+				cleanup()
+				return nil, func() {}, fmt.Errorf("referenced cache TLS file %s: %w", configured, statErr)
+			}
+			sources = append(sources, backupSource{archivePath: "ssl-connection/" + item.name, diskPath: path})
+		}
+	}
+	if err := collectExternalSSL(configDir, &sources); err != nil {
+		cleanup()
+		return nil, func() {}, err
+	}
 	createSnapshot := func(snapshot func(string) error) (string, error) {
 		path := filepath.Join(directory, "server.db")
 		if err := snapshot(path); err != nil {
@@ -1122,12 +1264,7 @@ func loadAndVerifyManifest(staging string) (*backupManifest, error) {
 		}
 	}
 	if len(m.Files) > 0 {
-		listed, err := json.Marshal(m.Files)
-		if err != nil {
-			return nil, err
-		}
-		sum := sha256.Sum256(listed)
-		if m.SHA256 != hex.EncodeToString(sum[:]) {
+		if m.SHA256 != backupFilesChecksum(m.Files) {
 			return nil, errors.New(cliText("cli.backup.checksum_mismatch", "path", "manifest.json"))
 		}
 		for _, file := range m.Files {
@@ -1156,6 +1293,19 @@ func loadAndVerifyManifest(staging string) (*backupManifest, error) {
 	}
 
 	return &m, nil
+}
+
+// backupFilesChecksum computes the canonical PART 21 manifest checksum from
+// sorted "file SHA-256  path" lines, excluding manifest.json itself.
+func backupFilesChecksum(files []backupManifestFile) string {
+	ordered := append([]backupManifestFile(nil), files...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Path < ordered[j].Path })
+	var lines strings.Builder
+	for _, file := range ordered {
+		fmt.Fprintf(&lines, "%s  %s\n", file.SHA256, file.Path)
+	}
+	sum := sha256.Sum256([]byte(lines.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 func safeManifestPath(filePath string) (string, bool) {
@@ -1528,16 +1678,46 @@ func runRestore(backupFile, configDir, dataDir string) (result error) {
 	// config dir; everything else is relative to the config dir except the
 	// database, which lives under the data dir.
 	fmt.Println(cliText("cli.backup.restoring"))
+	externalSSLRestored := false
 	for _, rel := range manifest.Contents {
+		if rel == "app_secrets.json" {
+			continue
+		}
 		src := filepath.Join(staging, filepath.Clean(rel))
 		var dest string
 		if rel == "db/server.db" {
 			dest = filepath.Join(dataDir, "db", "server.db")
+		} else if strings.HasPrefix(rel, "ssl-external/") {
+			field := strings.TrimPrefix(rel, "ssl-external/")
+			if field != "cert" && field != "key" {
+				return fmt.Errorf("invalid external SSL backup path %s", rel)
+			}
+			dest = filepath.Join(configDir, "ssl", "restored-"+field)
+			externalSSLRestored = true
 		} else {
 			dest = filepath.Join(configDir, filepath.Clean(rel))
 		}
 		if err := installFile(src, dest); err != nil {
 			return fmt.Errorf("%s: %w", cliText("cli.backup.install_failed", "path", rel), err)
+		}
+		if strings.HasPrefix(rel, "ssl-external/") && strings.HasSuffix(rel, "/key") {
+			if err := os.Chmod(dest, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	if externalSSLRestored {
+		if err := rewriteRestoredSSLPaths(filepath.Join(configDir, "server.yml"), configDir, manifest.Contents); err != nil {
+			return err
+		}
+	}
+	if containsBackupContent(manifest.Contents, "app_secrets.json") {
+		restoredConfig, configErr := config.Load(filepath.Join(configDir, "server.yml"))
+		if configErr != nil {
+			return fmt.Errorf("load restored database configuration: %w", configErr)
+		}
+		if err := restoreAppSecrets(filepath.Join(staging, "app_secrets.json"), dataDir, restoredConfig); err != nil {
+			return fmt.Errorf("restore app secrets: %w", err)
 		}
 	}
 	if hasRestoredPGPKeypair(manifest.Contents) {
@@ -1549,6 +1729,79 @@ func runRestore(backupFile, configDir, dataDir string) (result error) {
 
 	fmt.Println(cliText("cli.backup.restore_completed"))
 	return nil
+}
+
+func rewriteRestoredSSLPaths(configPath, configDir string, contents []string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	if len(root.Content) == 0 {
+		return errors.New("server.yml is empty")
+	}
+	server := yamlMappingValue(root.Content[0], "server")
+	ssl := yamlMappingValue(server, "ssl")
+	for _, field := range []string{"cert", "key"} {
+		if !containsBackupContent(contents, "ssl-external/"+field) {
+			continue
+		}
+		node := yamlMappingValue(ssl, field)
+		if node == nil {
+			return fmt.Errorf("server.ssl.%s is missing from restored configuration", field)
+		}
+		node.Value = filepath.Join(configDir, "ssl", "restored-"+field)
+	}
+	updated, err := yaml.Marshal(&root)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, updated, 0o600)
+}
+
+func containsBackupContent(contents []string, want string) bool {
+	for _, content := range contents {
+		if content == want {
+			return true
+		}
+	}
+	return false
+}
+
+func restoreAppSecrets(path, dataDir string, cfg *config.Config) error {
+	var secrets []struct {
+		Name      string `json:"name"`
+		Value     string `json:"value"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		return err
+	}
+	if err := db.Init(dataDir, databaseConnectionConfig(cfg)); err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return db.Write(context.Background(), func(tx *sql.Tx) error {
+		for _, secret := range secrets {
+			if secret.Name == "" {
+				return errors.New("app secret has no name")
+			}
+			if secret.UpdatedAt == "" {
+				secret.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			}
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO app_secrets(name, value, updated_at) VALUES(?, ?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, secret.Name, secret.Value, secret.UpdatedAt); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func restoreLimits(cfg *config.Config) config.RestoreConfig {

@@ -237,7 +237,7 @@ func TestHandleAPIHelpMCPShape(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/server/help/mcp", nil)
 	rec := httptest.NewRecorder()
 	s.handleAPIHelpMCP(rec, req)
-	for _, expected := range []string{`"enabled":true`, `"url":"http://example.com/api/v1/server/mcp"`, `"aliases"`, `"scheme":"Bearer"`, `"tools"`, `"project"`} {
+	for _, expected := range []string{`"enabled": true`, `"url": "http://example.com/api/v1/server/mcp"`, `"aliases"`, `"scheme": "Bearer"`, `"tools"`, `"project"`} {
 		if !strings.Contains(rec.Body.String(), expected) {
 			t.Errorf("MCP help response missing %s: %s", expected, rec.Body.String())
 		}

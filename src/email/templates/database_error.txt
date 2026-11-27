@@ -1,0 +1,12 @@
+Subject: {email_subject}
+---
+{email_heading}
+
+{email_summary}
+
+{email_error_label}: {error}
+{email_since_label}: {since}
+{email_time_label}: {timestamp}
+
+{email_from_label}: {app_name} ({fqdn})
+{app_url}

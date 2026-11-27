@@ -31,7 +31,7 @@ func TestHandleAPISchedulerStatusEmpty(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `"count":0`) {
+	if !strings.Contains(rec.Body.String(), `"count": 0`) {
 		t.Errorf("expected zero tasks with empty scheduler state: %s", rec.Body.String())
 	}
 }

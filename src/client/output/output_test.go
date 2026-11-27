@@ -1,6 +1,8 @@
 package output
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -89,5 +91,35 @@ func TestFormatTableRowShorterThanHeaders(t *testing.T) {
 	out := FormatTable([]string{"A", "B"}, [][]string{{"only-a"}})
 	if !strings.Contains(out, "only-a") {
 		t.Errorf("expected only-a in output:\n%s", out)
+	}
+}
+
+func TestPrinterLanguageAndDiagnosticOutput(t *testing.T) {
+	printer := New(false)
+	printer.SetLanguage("es")
+	if printer.Language != "es" {
+		t.Fatalf("printer language = %q", printer.Language)
+	}
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stderr
+	os.Stderr = write
+	printer.Error("falló %s", "la solicitud")
+	printer.Warn("revise %s", "la configuración")
+	os.Stderr = previous
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = read.Close()
+	for _, want := range []string{"Error falló la solicitud", "Advertencia revise la configuración"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("diagnostic output missing %q: %s", want, data)
+		}
 	}
 }

@@ -17,14 +17,80 @@ import (
 	"golang.org/x/net/html"
 )
 
+func TestCanonicalEmbeddedTemplateAndStaticPaths(t *testing.T) {
+	for _, path := range []string{
+		"template/layout/public.tmpl",
+		"template/page/index.tmpl",
+		"template/page/error.tmpl",
+		"template/partial/head.tmpl",
+		"template/partial/scripts.tmpl",
+		"template/partial/public/header.tmpl",
+		"template/partial/public/nav.tmpl",
+		"template/partial/public/footer.tmpl",
+		"template/partial/toast.tmpl",
+	} {
+		if data, err := htmlFS.ReadFile(path); err != nil || len(data) == 0 {
+			t.Errorf("embedded template %q: bytes=%d err=%v", path, len(data), err)
+		}
+	}
+	for _, path := range []string{"static/css/common.css", "static/css/components.css", "static/css/public.css", "static/js/app.js"} {
+		if data, err := staticFS.ReadFile(path); err != nil || len(data) == 0 {
+			t.Errorf("embedded static asset %q: bytes=%d err=%v", path, len(data), err)
+		}
+	}
+}
+
 // newTestPageServer builds a minimal Server sufficient for rendering static
 // standard pages and error pages (no Templates manager needed).
 func newTestPageServer() *Server {
 	return &Server{config: &Config{Version: "test", Cfg: config.DefaultConfig()}, router: chi.NewRouter()}
 }
 
+func TestServerPagesUseConfiguredBrandingAndSEO(t *testing.T) {
+	s := newTestPageServer()
+	cfg := s.config.Cfg
+	cfg.Server.Branding.Title = "Example Catalog"
+	cfg.Server.Branding.Tagline = "Curated templates"
+	cfg.Server.Branding.Description = "A custom description"
+	cfg.Server.SEO.Author = "Example Team"
+	cfg.Server.SEO.Keywords = []string{"templates", "catalog"}
+	cfg.Server.SEO.Canonical = "https://canonical.example.test"
+	cfg.Server.SEO.TitleSeparator = "123456789"
+	cfg.Server.SEO.NoIndex = true
+	cfg.Web.UI.Accent = "#ff79c6"
+	cfg.Server.SEO.MetaTags = map[string]string{"theme-color": "#ffffff", "viewport": "ignored"}
+	cfg.Server.SEO.OpenGraph.SiteName = "Example"
+	cfg.Server.SEO.Twitter.Creator = "@author"
+	req := httptest.NewRequest(http.MethodGet, "https://origin.example.test/server/about", nil)
+	rec := httptest.NewRecorder()
+	s.renderPage(rec, req, "about", PageData{Title: "About"})
+	body := rec.Body.String()
+	for _, want := range []string{
+		"<title>Example Catalog - Curated templates</title>",
+		`href="/static/css/accent.css?v=test-unknown"`,
+		`<meta name="description" content="A custom description">`,
+		`<meta name="keywords" content="templates, catalog">`,
+		`<meta name="author" content="Example Team">`,
+		`<meta name="robots" content="noindex,nofollow">`,
+		`<link rel="canonical" href="https://canonical.example.test/server/about">`,
+		`<meta property="og:site_name" content="Example">`,
+		`<meta name="twitter:creator" content="@author">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered page missing %q", want)
+		}
+	}
+	if rec.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
+		t.Fatalf("X-Robots-Tag = %q", rec.Header().Get("X-Robots-Tag"))
+	}
+	if strings.Contains(body, `name="viewport" content="ignored"`) {
+		t.Fatal("configured metadata replaced a reserved generated tag")
+	}
+}
+
 func TestServerPageCopyIsLocalized(t *testing.T) {
 	server := newTestPageServer()
+	server.config.Version = "1.2.3"
 	pageNames := make([]string, 0, len(pageTemplates))
 	for name := range pageTemplates {
 		pageNames = append(pageNames, name)
@@ -33,8 +99,8 @@ func TestServerPageCopyIsLocalized(t *testing.T) {
 
 	allowedSharedCopy := map[string]struct{}{
 		"API": {}, "CLI": {}, "Claude Code": {}, "GitHub": {}, "GitIgnore": {}, "GraphQL": {},
-		"Swagger UI": {}, "OpenAPI JSON": {}, "Documentation": {}, "Server": {},
-		"Version": {}, "Version test ().": {}, "Version: vtest": {}, "API: /api/v1": {},
+		"Swagger UI": {}, "OpenAPI JSON": {}, "Documentation": {}, "Server": {}, "Notifications": {}, "1.2.3": {},
+		"Version": {}, "Version 1.2.3 ().": {}, "Version: v1.2.3": {}, "API: /api/v1": {},
 		"Tor:": {}, "/server/healthz": {}, "Cache": {}, "Cluster": {}, "Mode": {},
 		"Description": {}, "Cause": {}, "Auto": {}, "Actions": {},
 		"Links": {}, "Export": {}, "Status": {}, "Home": {}, "Privacy": {}, "IP Geolocation by DB-IP": {},
@@ -66,6 +132,90 @@ func TestServerPageCopyIsLocalized(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestSharedFooterShowsPublishedOverlayAddressesAndBuildStamp(t *testing.T) {
+	s := newTestPageServer()
+	s.config.BuildDate = "2026-03-15T14:05:06Z"
+	s.SetTorOnionAddress("exampleonion")
+	s.config.I2PStatus = func() I2PInfo {
+		return I2PInfo{Enabled: true, Running: true, Status: "healthy", Hostname: "site.b32.i2p"}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.renderPage(rec, req, "home", PageData{TorEnabled: true, TorRunning: true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("render status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, required := range []string{
+		"id=\"footer-onion-address\"", "exampleonion.onion", "data-copy=\"footer-onion-address\"",
+		"id=\"footer-i2p-address\"", "site.b32.i2p", "data-copy=\"footer-i2p-address\"",
+		"Made with", "2026", "href=\"/server/healthz\"",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("footer response is missing %q", required)
+		}
+	}
+	positions := []int{
+		strings.Index(body, "footer-onion-address"), strings.Index(body, "footer-i2p-address"),
+		strings.Index(body, "footer-links"), strings.Index(body, "Made with"),
+		strings.Index(body, "href=\"/server/healthz\""),
+	}
+	for index := 1; index < len(positions); index++ {
+		if positions[index-1] < 0 || positions[index] <= positions[index-1] {
+			t.Fatalf("footer rows are not in specification order: %v", positions)
+		}
+	}
+}
+
+func TestSharedFooterOmitsUnavailableOverlayAddresses(t *testing.T) {
+	s := newTestPageServer()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.renderPage(rec, req, "home", PageData{})
+	if strings.Contains(rec.Body.String(), "footer-onion-address") || strings.Contains(rec.Body.String(), "footer-i2p-address") {
+		t.Fatal("footer displayed an overlay address when the service is unavailable")
+	}
+}
+
+func TestHelpPageRendersLocalizedOverlayGuidanceOnlyWhenPublished(t *testing.T) {
+	s := newTestPageServer()
+	s.SetTorOnionAddress("exampleonion")
+	s.config.I2PStatus = func() I2PInfo {
+		return I2PInfo{Enabled: true, Running: true, Status: "healthy", Hostname: "site.b32.i2p"}
+	}
+	for _, lang := range i18n.SupportedLanguages() {
+		req := httptest.NewRequest(http.MethodGet, "/server/help", nil)
+		rec := httptest.NewRecorder()
+		s.renderPage(rec, req, "help", PageData{Lang: lang, TorEnabled: true, TorRunning: true})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("help page render for %s returned %d", lang, rec.Code)
+		}
+		body := rec.Body.String()
+		for _, expected := range []string{
+			`id="tor-access"`, `id="i2p-access"`, "exampleonion.onion", "site.b32.i2p",
+			`href="https://www.torproject.org/download/"`, `href="https://geti2p.net/en/download"`, `href="https://i2pd.website/"`,
+			i18n.Translate(lang, "help.tor_access"), i18n.Translate(lang, "help.i2p_access"),
+			i18n.Translate(lang, "help.i2p_proxy"), i18n.Translate(lang, "help.i2p_privacy"),
+		} {
+			if expected == "" || !strings.Contains(body, expected) {
+				t.Errorf("help page for %s is missing localized overlay content %q", lang, expected)
+			}
+		}
+	}
+
+	s = newTestPageServer()
+	s.SetTorOnionAddress("exampleonion")
+	s.config.I2PStatus = func() I2PInfo {
+		return I2PInfo{Enabled: true, Running: false, Status: "starting", Hostname: "site.b32.i2p"}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/server/help", nil)
+	rec := httptest.NewRecorder()
+	s.renderPage(rec, req, "help", PageData{})
+	if strings.Contains(rec.Body.String(), `id="tor-access"`) || strings.Contains(rec.Body.String(), `id="i2p-access"`) {
+		t.Fatal("help page showed overlay guidance before both services were running")
 	}
 }
 
@@ -119,8 +269,8 @@ func renderPageCopy(t *testing.T, server *Server, page, lang, scenario string) m
 	if page == "healthz" {
 		data.Health = &healthPageView{
 			HealthResponse: HealthResponse{
-				Project: ProjectInfo{Name: "GitIgnore"}, Status: "healthy", Version: "test", GoVersion: "go1.test",
-				Build: BuildInfo{Commit: "test"}, Mode: "production",
+				Project: ProjectInfo{Name: "GitIgnore"}, Status: "healthy", Version: "1.2.3", GoVersion: "go1.25.0",
+				Build: BuildInfo{Commit: "abcdef0"}, Mode: "production",
 				Features: FeaturesInfo{Tor: TorInfo{Status: "disabled"}},
 				Checks:   ChecksInfo{Database: "ok", Cache: "ok", Disk: "ok", Scheduler: "ok", Datasets: map[string]string{}},
 			},
@@ -449,7 +599,7 @@ func TestRequestPathUsesConfiguredAndTrustedProxyPrefixes(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	s.renderPage(response, trusted, "about", PageData{Title: "About"})
-	for _, want := range []string{`href="/proxy/static/css/main.css?v=test-unknown"`, `href="/proxy/server/preferences"`, `src="/proxy/static/js/app.js?v=test-unknown"`} {
+	for _, want := range []string{`href="/proxy/static/css/common.css?v=test-unknown"`, `href="/proxy/static/css/components.css?v=test-unknown"`, `href="/proxy/static/css/public.css?v=test-unknown"`, `href="/proxy/server/preferences"`, `src="/proxy/static/js/app.js?v=test-unknown"`} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Errorf("prefixed page is missing %q", want)
 		}
@@ -597,7 +747,7 @@ func TestServerPageShellConformance(t *testing.T) {
 					case "style":
 						t.Error("inline style element is not allowed")
 					case "script":
-						if strings.TrimSpace(nodeText(node)) != "" {
+						if strings.TrimSpace(nodeText(node)) != "" && attribute(node, "type") != "application/ld+json" {
 							t.Error("inline script body is not allowed")
 						}
 					}
@@ -606,7 +756,7 @@ func TestServerPageShellConformance(t *testing.T) {
 							t.Errorf("forbidden attribute %q on <%s>", attr.Key, node.Data)
 						}
 					}
-					if node.Data == "img" && attribute(node, "alt") == "" {
+					if node.Data == "img" && !hasAttribute(node, "alt") {
 						t.Error("image is missing alt text")
 					}
 					if node.Data == "input" || node.Data == "select" || node.Data == "textarea" {
@@ -706,6 +856,15 @@ func attribute(node *html.Node, name string) string {
 	return ""
 }
 
+func hasAttribute(node *html.Node, name string) bool {
+	for _, attr := range node.Attr {
+		if attr.Key == name {
+			return true
+		}
+	}
+	return false
+}
+
 func hasClass(node *html.Node, class string) bool {
 	for _, value := range strings.Fields(attribute(node, "class")) {
 		if value == class {
@@ -794,7 +953,7 @@ func TestHelpPageRegistryFeedsHubAndAPI(t *testing.T) {
 	apiRequest := httptest.NewRequest(http.MethodGet, "/api/v1/server/help", nil)
 	apiResponse := httptest.NewRecorder()
 	s.handleAPIHelp(apiResponse, apiRequest)
-	for _, expected := range []string{`"path":"/server/help/mcp"`, `"title":"MCP server"`, `"description":"Connect AI tools to the catalog with a linked owner token."`} {
+	for _, expected := range []string{`"path": "/server/help/mcp"`, `"title": "MCP server"`, `"description": "Connect AI tools to the catalog with a linked owner token."`} {
 		if !strings.Contains(apiResponse.Body.String(), expected) {
 			t.Errorf("help API omitted registry value %s: %s", expected, apiResponse.Body.String())
 		}

@@ -114,6 +114,7 @@
       "total_requests": "إجمالي الطلبات",
       "requests_24h": "الطلبات (24 ساعة)",
       "active_connections": "الاتصالات النشطة",
+      "attempts": "محاولات الاستعادة",
       "last_checked": "آخر فحص:"
     },
     "feature": {
@@ -304,12 +305,23 @@
     "swagger_description": "Swagger UI - مستكشف واجهة REST API التفاعلي",
     "graphql_description": "مستكشف GraphQL التفاعلي",
     "tor_access": "الوصول عبر Tor",
+    "tor_summary": "هذا التطبيق متاح كخدمة مخفية على Tor لتعزيز الخصوصية.",
     "onion_address": "عنوان Onion",
     "how_to_connect": "كيفية الاتصال",
     "download_tor": "تنزيل متصفح Tor",
     "open_tor": "افتح متصفح Tor وانتظر حتى يتصل",
     "paste_onion": "انسخ عنوان onion أعلاه والصقه في شريط عناوين متصفح Tor",
-    "tor_privacy": "يوفر استخدام Tor خصوصية إضافية...",
+    "tor_privacy": "يخفي Tor عنوان IP الخاص بك ويشفّر اتصالك أثناء توجيهه عبر شبكة Tor.",
+    "i2p_access": "الوصول عبر I2P",
+    "i2p_summary": "هذا التطبيق متاح كموقع eepsite على I2P لتعزيز الخصوصية.",
+    "i2p_address": "عنوان I2P",
+    "i2p_how_to_connect": "كيفية الاتصال",
+    "i2p_install": "ثبّت I2P أو i2pd وانتظر اتصاله بالشبكة:",
+    "i2p_download": "تنزيل I2P",
+    "i2pd_download": "تنزيل i2pd",
+    "i2p_proxy": "اضبط متصفحك لاستخدام وكيل HTTP الخاص بـ I2P (الافتراضي 127.0.0.1:4444).",
+    "i2p_paste": "انسخ عنوان .b32.i2p أعلاه والصقه في شريط عناوين المتصفح.",
+    "i2p_privacy": "يوجّه I2P اتصالك عبر شبكة I2P. تستخدم مواقع eepsite بروتوكول HTTP؛ ويوفر نفق I2P تشفير النقل، لذلك لا تستخدم هذه الخدمة شهادة TLS.",
     "faq": "الأسئلة الشائعة",
     "troubleshooting": "استكشاف الأخطاء وإصلاحها"
   },
@@ -641,7 +653,9 @@
     },
     "common": {
       "from_label": "من",
-      "time_label": "الوقت"
+      "time_label": "الوقت",
+      "host_label": "المضيف",
+      "version_label": "الإصدار"
     },
     "test_prefix": "[اختبار]",
     "templates": {
@@ -732,6 +746,25 @@
         "heading": "تم تجهيز التحديث",
         "staged": "تم تجهيز إصدار وسيتم تطبيقه عند إعادة تشغيل الخدمة.",
         "version_label": "الإصدار"
+      },
+      "database_error": {
+        "error_label": "الخطأ",
+        "heading": "مشكلة في اتصال قاعدة البيانات",
+        "since_label": "منذ",
+        "subject": "مشكلة في اتصال قاعدة البيانات - {app_name}",
+        "summary": "يتعذر على التطبيق الاتصال بقاعدة بياناته."
+      },
+      "shutdown": {
+        "heading": "توقف الخادم",
+        "reason_label": "السبب",
+        "subject": "توقف الخادم - {app_name}",
+        "summary": "توقف الخادم بشكل سليم."
+      },
+      "startup": {
+        "heading": "بدأ الخادم",
+        "mode_label": "الوضع",
+        "subject": "بدأ الخادم - {app_name}",
+        "summary": "بدأ الخادم بنجاح."
       }
     }
   },
@@ -1378,6 +1411,8 @@
       "service_stopped": "توقف",
       "set_backup_directory_failed": "فشل في تعيين دليل النسخ الاحتياطي: {error}",
       "set_cache_directory_failed": "فشل في تعيين دليل ذاكرة التخزين المؤقت: {error}",
+      "invalid_directory_path": "مسار دليل {path} غير صالح.",
+      "set_database_directory_failed": "فشل في تعيين دليل قاعدة البيانات: {error}",
       "set_data_directory_failed": "فشل في تعيين دليل البيانات: {error}",
       "set_log_directory_failed": "فشل في تعيين دليل السجل: {error}",
       "setup_complete": "اكتمل الإعداد.",
@@ -1450,7 +1485,7 @@
       "update_branch_normalize_failed": "فشل في تطبيع فرع التحديث",
       "update_branch_save_failed": "فشل في حفظ فرع التحديث الذي تمت تسويته"
     },
-    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nالمعلومات:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nالتكامل شل:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nتكوين الخادم:\n  --mode {production|development} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nأوامر الخدمة:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nأوامر الصيانة:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Rotate a project secret (requires operator token and confirmation)\n\nأوامر التحديث:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nأوامر المجدول:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nأوامر البريد الإلكتروني:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
+    "server_help": "{binary} {version}\n\nUsage: {binary} [options]\n\nالمعلومات:\n  -h, --help                     Show help\n  -v, --version                  Show version\n  --status                       Show server status and health (exit 0 = healthy)\n\nالتكامل شل:\n  --shell completions [SHELL]    Print shell completions\n  --shell init [SHELL]           Print shell init command\n  --shell help                   Show shell help\n\nتكوين الخادم:\n  --mode {production|development|debug} Application mode (default: production)\n  --config DIR                   Config directory\n  --data DIR                     Data directory\n  --cache DIR                    Cache directory\n  --log DIR                      Log directory\n  --backup DIR                   Backup directory\n  --pid FILE                     PID file path\n  --address ADDR                 Listen address (default: [::])\n  --port PORT                    Listen port (default: random 64xxx, 80 in container)\n  --baseurl PATH                 URL path prefix (default: /)\n  --i2p                          Enable the I2P eepsite\n  --daemon                       Run as daemon (detach from terminal)\n  --debug                        Enable debug mode\n  --color {auto|yes|no}          Color output (default: auto)\n  --lang CODE                    Language for output (default: auto)\n\nأوامر الخدمة:\n  --service start       Start the service\n  --service stop        Stop the service\n  --service restart     Restart the service\n  --service reload      Reload configuration\n  --service status      Show service status\n  --service --install   Install as system service\n  --service --uninstall Remove system service\n\nأوامر الصيانة:\n  --maintenance backup [file]   Backup configuration and data\n  --maintenance backup test [FILE] Verify the archived PGP keypair without restoring\n  --maintenance restore [file]  Restore from backup\n  --maintenance update          Check for and install updates\n  --maintenance pgp <action>    Manage the project security keypair\n  --maintenance security list|show|update  Manage disclosure report metadata (root)\n  --maintenance secret rotate installation_secret|encryption_key  Rotate a project secret (requires operator token and confirmation)\n\nأوامر التحديث:\n  --update check                Check for updates\n  --update yes                  Install latest update\n  --update branch BRANCH        {update_branch_usage}\n\nأوامر المجدول:\n  scheduler list                List all scheduled tasks and status\n  scheduler show <id>           Show task details\n  scheduler run <id>            Run a task immediately\n  scheduler enable <id>         Enable a task\n  scheduler disable <id>        Disable a task\n  scheduler history <id>        Show a task's last recorded run\n\nأوامر البريد الإلكتروني:\n  email test [recipient]        Send a test email to verify SMTP\n  email status                  Show SMTP configuration and reachability\n  email validate                Validate all email templates\n\nEnvironment Variables (runtime):\n  PORT           Server port\n  LISTEN         Listen address\n  MODE           Application mode\n  DOMAIN         FQDN override\n  SMTP_HOST      SMTP server host (overrides config)\n  SMTP_PORT      SMTP server port (default 587)\n  SMTP_USERNAME  SMTP auth username\n  SMTP_PASSWORD  SMTP auth password\n  SMTP_TLS       TLS mode: auto, starttls, tls, none\n  SMTP_FROM_NAME Envelope From display name\n  SMTP_FROM_EMAIL Envelope From address\n\nEnvironment Variables (init-only, first run):\n  CONFIG_DIR    Configuration directory\n  DATA_DIR      Data directory\n  DATABASE_DIR Database directory (default: {data}/db)\n  CACHE_DIR     Cache directory\n  LOG_DIR      Log directory\n  BACKUP_DIR   Backup directory\n\nConfiguration:\n  Root:    /etc/apimgr/gitignore/server.yml\n  User:    ~/.config/apimgr/gitignore/server.yml\n  Docker:  /config/server.yml",
     "service": {
       "account_created": "{mark} تم إنشاء حساب الخدمة {account} (المعرف الفريد {uid}، دائرة المخابرات العامة {gid})",
       "account_removed": "{mark} تمت إزالة حساب الخدمة {account}",
@@ -1982,6 +2017,17 @@
         "analytics_suffix_not_sold": "بيانات التحليلات مجهولة الهوية ولا تُباع أبدًا.",
         "analytics_suffix_sold": "قد تتم مشاركة بيانات التحليلات مع أطراف ثالثة."
       }
+    },
+    "flash": {
+      "action_completed": "اكتمل الإجراء.",
+      "announcement_dismissed": "تم إغلاق الإعلان.",
+      "consent_required": "يرجى اختيار خيار موافقة ملفات تعريف الارتباط قبل المتابعة.",
+      "consent_saved": "تم حفظ اختيارك لموافقة ملفات تعريف الارتباط.",
+      "contact_sent": "تم إرسال رسالتك.",
+      "preferences_saved": "تم حفظ تفضيلاتك.",
+      "privacy_choice_saved": "تم حفظ اختيار الخصوصية.",
+      "theme_saved": "تم حفظ تفضيل المظهر.",
+      "token_action_completed": "اكتمل الإجراء على الرمز."
     }
   },
   "llms": {

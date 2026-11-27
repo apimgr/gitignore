@@ -2,11 +2,55 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestBackupFilesChecksumUsesSortedCanonicalLines(t *testing.T) {
+	files := []backupManifestFile{
+		{Path: "z/server.db", SHA256: "bbb"},
+		{Path: "a/server.yml", SHA256: "aaa"},
+	}
+	sum := sha256.Sum256([]byte("aaa  a/server.yml\nbbb  z/server.db\n"))
+	want := hex.EncodeToString(sum[:])
+	if got := backupFilesChecksum(files); got != want {
+		t.Fatalf("backupFilesChecksum = %q, want %q", got, want)
+	}
+	if got := backupFilesChecksum([]backupManifestFile{files[1], files[0]}); got != want {
+		t.Fatalf("backupFilesChecksum changed with input order: got %q want %q", got, want)
+	}
+}
+
+func TestBackupHeaderUsesCanonicalUint32ParametersAndBaseLength(t *testing.T) {
+	base := "gitignore_backup_2026-11-25.tar.gz.enc"
+	blob, err := encryptBackup([]byte("archive"), "test password", base)
+	if err != nil {
+		t.Fatalf("encryptBackup: %v", err)
+	}
+	if got := len(blob) - len([]byte("archive")) - 16; got != backupHeaderLen+len(base) {
+		t.Fatalf("header length = %d, want %d", got, backupHeaderLen+len(base))
+	}
+	if got := binary.BigEndian.Uint32(blob[29:33]); got != backupArgonThreads {
+		t.Fatalf("parallelism field = %d, want %d", got, backupArgonThreads)
+	}
+	parsed, err := parseBackupHeader(blob)
+	if err != nil {
+		t.Fatalf("parseBackupHeader: %v", err)
+	}
+	if parsed.baseBackup != base || parsed.headerLength != backupHeaderLen+len(base) {
+		t.Fatalf("parsed header = %+v, want base %q and length %d", parsed, base, backupHeaderLen+len(base))
+	}
+	tooLong := append([]byte(nil), blob...)
+	binary.BigEndian.PutUint16(tooLong[backupHeaderLen-2:backupHeaderLen], backupBaseNameMax+1)
+	if _, err := parseBackupHeader(tooLong); err == nil {
+		t.Fatal("parseBackupHeader accepted an oversized base reference")
+	}
+}
 
 // TestEncryptDecryptRoundtrip verifies AES-256-GCM + Argon2id encrypt/decrypt
 // is lossless and that a wrong password is rejected by the GCM tag check.

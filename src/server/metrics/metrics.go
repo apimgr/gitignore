@@ -7,6 +7,7 @@ package metrics
 
 import (
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -182,6 +183,50 @@ func New(opts Options) *Metrics {
 		newOperationalCollector(m),
 	)
 	return m
+}
+
+// CacheStats returns only cache-related metric families for the authenticated
+// debug endpoint; it never exposes the registry or mutable metric handles.
+func (m *Metrics) CacheStats() map[string]any {
+	stats := map[string]any{}
+	if m == nil || m.reg == nil {
+		return stats
+	}
+	families, err := m.reg.Gather()
+	if err != nil {
+		return map[string]any{"error": "cache metrics are unavailable"}
+	}
+	for _, family := range families {
+		if !strings.Contains(family.GetName(), "cache_") {
+			continue
+		}
+		values := make([]map[string]any, 0, len(family.GetMetric()))
+		for _, metric := range family.GetMetric() {
+			labels := make(map[string]string, len(metric.GetLabel()))
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			value := 0.0
+			if metric.GetCounter() != nil {
+				value = metric.GetCounter().GetValue()
+			} else if metric.GetGauge() != nil {
+				value = metric.GetGauge().GetValue()
+			}
+			values = append(values, map[string]any{"labels": labels, "value": value})
+		}
+		stats[family.GetName()] = values
+	}
+	return stats
+}
+
+// SetCacheSnapshot refreshes the size gauges for one of the bounded cache
+// labels. Unknown labels are ignored to prevent unbounded metric cardinality.
+func (m *Metrics) SetCacheSnapshot(cache string, size, bytes int64) {
+	if m == nil || (cache != "remote_db" && cache != "rate_limit") || size < 0 || bytes < 0 {
+		return
+	}
+	m.CacheSize.WithLabelValues(cache).Set(float64(size))
+	m.CacheBytes.WithLabelValues(cache).Set(float64(bytes))
 }
 
 type operationalCollector struct {

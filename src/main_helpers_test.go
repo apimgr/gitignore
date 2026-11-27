@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/mattn/go-isatty"
 )
 
 func TestUtilityHelpers(t *testing.T) {
@@ -13,8 +16,8 @@ func TestUtilityHelpers(t *testing.T) {
 		t.Fatal("explicit color setting was ignored")
 	}
 	t.Setenv("NO_COLOR", "")
-	if resolveColor("auto") {
-		t.Fatal("NO_COLOR was ignored")
+	if got, want := resolveColor("auto"), isatty.IsTerminal(os.Stdout.Fd()); got != want {
+		t.Fatalf("empty NO_COLOR resolved color to %v, want TTY detection result %v", got, want)
 	}
 	if err := ensureRuntimeDir(""); err != nil {
 		t.Fatal(err)
@@ -57,5 +60,30 @@ func TestCheckHealthSuccessfulServer(t *testing.T) {
 	}
 	if err := checkHealth(port); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartupURLsUseOnlyResolvedDisplayHost(t *testing.T) {
+	urls := startupURLs("example.test", "80,443", "/app", "v2", false)
+	if len(urls) != 4 || urls[0] != "http://example.test/app" || urls[2] != "https://example.test/app" {
+		t.Fatalf("startupURLs() = %#v", urls)
+	}
+	for _, value := range urls {
+		if strings.Contains(value, "localhost") || strings.Contains(value, "127.0.0.1") {
+			t.Errorf("startup URL contains a loopback host: %s", value)
+		}
+	}
+	if got := startupURLs("", "64000", "/", "v1", false); len(got) != 0 {
+		t.Fatalf("unresolved startup host produced URLs: %#v", got)
+	}
+}
+
+func TestResolveStartupFQDNUsesDomainEnvironment(t *testing.T) {
+	t.Setenv("DOMAIN", " , api.example.test, www.example.test")
+	if got := resolveStartupFQDN(); got != "api.example.test" {
+		t.Fatalf("resolveStartupFQDN() = %q, want primary DOMAIN entry", got)
+	}
+	if usableConfiguredHost("localhost") || usableConfiguredHost("127.0.0.1") || usableConfiguredHost("") {
+		t.Fatal("loopback or empty display host was accepted")
 	}
 }

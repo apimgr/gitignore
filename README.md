@@ -3,7 +3,6 @@
 [![CI](https://github.com/apimgr/gitignore/actions/workflows/ci.yml/badge.svg)](https://github.com/apimgr/gitignore/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/apimgr/gitignore)](https://github.com/apimgr/gitignore/releases)
 [![License](https://img.shields.io/github/license/apimgr/gitignore)](LICENSE.md)
-[![Docs](https://readthedocs.org/projects/apimgr-gitignore/badge/?version=latest)](https://apimgr-gitignore.readthedocs.io)
 
 ## About
 

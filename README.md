@@ -101,7 +101,7 @@ Download the `gitignore-cli-{os}-{arch}` release for your platform. Template nam
 gitignore-cli Go Node > .gitignore
 ```
 
-The client also supports `list`, `search`, `categories`, `category`, `get`, `combine`, and `stats`. See the [CLI reference](docs/cli.md) for options and shell integration.
+The client also supports `list`, `search`, `categories`, `category`, `get`, `combine`, `stats`, and `status` to check server health. See the [CLI reference](docs/cli.md) for options and shell integration.
 
 ## Configuration
 

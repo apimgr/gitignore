@@ -87,5 +87,6 @@ Commands include:
 | `get NAME` or `template NAME` | Print one template |
 | `combine NAME...` | Combine templates |
 | `stats` | Show catalog statistics |
+| `status` | Check the configured server health |
 
 The client supports `--server URL`, `--config NAME`, `--output text\|json\|table`, `--debug`, `--color auto\|yes\|no`, `--lang CODE`, `--version`, `--update check|yes`, and shell integration flags. `--update check` checks for a compatible release; `--update yes` downloads, verifies, and installs the published CLI binary. The client checks for updates once per invocation and may prompt before installing. `GITIGNORE_SERVER_PRIMARY` sets the default server URL, and `NO_COLOR` disables colored output. The default server URL, credentials, and profile settings come from the client configuration file. See [configuration](configuration.md).

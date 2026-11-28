@@ -6,7 +6,8 @@ The catalog is public and read-only. Canonical API routes use `/api/{api_version
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/{api_version}/` | GET | API information and endpoint links |
+| `/api/{api_version}` | GET | API information and endpoint links |
+| `/api/{api_version}/` | GET | Permanent redirect to the canonical API base path |
 | `/api/{api_version}/templates/{name}` | GET | Get a template using content negotiation |
 | `/api/{api_version}/templates/{name}.txt` | GET | Get raw template text |
 | `/api/{api_version}/templates/{name}.json` | GET | Get one template as JSON |

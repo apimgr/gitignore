@@ -50,6 +50,15 @@ This target runs `go vet`, `staticcheck`, `govulncheck`, ShellCheck and shfmt fo
 ./tests/e2e.sh
 ```
 
+Each run removes its temporary Go caches by default. For repeat runs, set `PROJECT_E2E_CACHE_DIR` to a project-scoped temporary directory; the runner reuses its Go build and module caches there while keeping each run's database, logs, and browser artifacts separate:
+
+```sh
+cache_parent="${TMPDIR:-/tmp}/apimgr"
+mkdir -p "$cache_parent"
+cache_dir=$(mktemp -d "$cache_parent/gitignore-e2e-cache-XXXXXX")
+PROJECT_E2E_CACHE_DIR="$cache_dir" ./tests/e2e.sh
+```
+
 ## Release artifacts
 
 ```sh
